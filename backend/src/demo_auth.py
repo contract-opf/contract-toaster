@@ -69,9 +69,11 @@ from jwt import PyJWTError
 
 try:  # production runs `src.main`; tests put backend/src on sys.path
     from src.authz import require_admin
+    from src.startup_checks import demo_token_secret_problem
     from src.users import public_user_view
 except ImportError:  # pragma: no cover
     from authz import require_admin  # type: ignore[no-redef]
+    from startup_checks import demo_token_secret_problem  # type: ignore[no-redef]
     from users import public_user_view  # type: ignore[no-redef]
 
 logger = logging.getLogger(__name__)
@@ -333,29 +335,139 @@ DEMO_SESSION_COOKIE_NAME = "ct_session"
 
 
 def _demo_token_secret() -> str:
+    """The signing secret, or HTTP 503 if it is unusable.
+
+    Same rule as the boot-time `startup_checks.verify_demo_token_secret`
+    (unset, under 32 bytes, a published placeholder, or one repeated
+    character), applied again here for any code path that did not go through
+    the ASGI lifespan. Neither the log line nor the response carries the
+    value."""
     secret = os.environ.get("DEMO_TOKEN_SECRET", "")
-    if not secret:
+    problem = demo_token_secret_problem(secret)
+    if problem is not None:
+        logger.error(
+            "DEMO_TOKEN_SECRET_UNUSABLE: DEMO_TOKEN_SECRET %s; generate one with "
+            "`openssl rand -hex 32`",
+            problem,
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Auth configuration unavailable (DEMO_TOKEN_SECRET not set).",
+            detail="Auth configuration unavailable (DEMO_TOKEN_SECRET is unset or not a strong secret).",
         )
     return secret
 
 
+# ---------------------------------------------------------------------------
+# Session revocation (QA 2026-10-31). Each users row carries a
+# `token_version` number and every demo token carries it as the `tv` claim.
+# `enforce_session_version` -- called by both copies of
+# `get_active_user_row`, on the row they already read -- rejects a token
+# whose `tv` differs from the row's current value. Changing your own
+# password and signing out increment the row's value, which ends every
+# session issued before. A row created by `add_user` or `seed_demo_users`
+# starts at a random value, so deleting a user and creating one with the
+# same username does not bring the old user's tokens back.
+#
+# A row written before this existed has no `token_version`; it reads as 0,
+# so its holder's next login simply carries `tv: 0`. A demo token with no
+# `tv` claim at all is refused: every token minted from here on has one.
+#
+# The row field is deliberately not in `users.PUBLIC_USER_FIELDS`; it never
+# leaves the server.
+# ---------------------------------------------------------------------------
+TOKEN_VERSION_ATTR = "token_version"  # noqa: S105
+TOKEN_VERSION_CLAIM = "tv"  # noqa: S105
+
+
+def _token_version(user_row: dict[str, Any]) -> int:
+    return int(user_row.get(TOKEN_VERSION_ATTR) or 0)
+
+
+def _fresh_token_version() -> int:
+    """Starting version for a newly created row: random, never 0, and small
+    enough to stay exact as a JSON number."""
+    return secrets.randbelow(2**52) + 1
+
+
 def issue_demo_token(user_row: dict[str, Any], now: int | None = None) -> str:
     """Mint a short-lived HS256 session token for a logged-in password user.
-    `user_row` is the (password-hash-free) dict `login_with_password` returns."""
+    `user_row` is the users row (or any dict carrying its `cognito_sub`,
+    `username`, `role`, `is_admin` and `token_version`)."""
     issued_at = int(time.time()) if now is None else now
     claims = {
         "sub": user_row["cognito_sub"],
         "username": user_row.get("username"),
         "role": user_row.get("role"),
         "is_admin": bool(user_row.get("is_admin", False)),
+        TOKEN_VERSION_CLAIM: _token_version(user_row),
         "iss": DEMO_TOKEN_ISSUER,
         "iat": issued_at,
         "exp": issued_at + DEMO_TOKEN_TTL_SECONDS,
     }
     return jwt.encode(claims, _demo_token_secret(), algorithm="HS256")
+
+
+def _claimed_version(claims: dict[str, Any]) -> int | None:
+    claimed = claims.get(TOKEN_VERSION_CLAIM)
+    if isinstance(claimed, int) and not isinstance(claimed, bool):
+        return claimed
+    return None
+
+
+def enforce_session_version(claims: dict[str, Any], user_row: dict[str, Any]) -> None:
+    """Raise HTTP 401 if `claims` are a demo session token whose `tv` does
+    not match `user_row`'s current token version. A no-op for any other
+    token (Cognito claims carry a different issuer), so SSO callers are
+    unaffected. `user_row` is the row the request already read."""
+    if claims.get("iss") != DEMO_TOKEN_ISSUER:
+        return
+    claimed = _claimed_version(claims)
+    if claimed is not None and claimed == _token_version(user_row):
+        return
+    logger.info("DEMO_SESSION_REVOKED: sub=%s", claims.get("sub"))
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="This session has ended. Sign in again.",
+    )
+
+
+def revoke_demo_session(token: str | None, dynamodb_resource: Any) -> bool:
+    """Sign-out (POST /api/auth/logout): end every session of the user the
+    still-valid `token` belongs to, by incrementing their token version.
+
+    Only a token that verifies AND whose `tv` is still current does anything,
+    in one conditional write (no read), so a stale token cannot be used to
+    sign the account's live sessions out. Never raises: sign-out stays a
+    safe 200 with no session or a bad one. Returns whether a version was
+    incremented."""
+    if not token:
+        return False
+    try:
+        claims = verify_demo_token(token)
+    except HTTPException:
+        return False
+    claimed = _claimed_version(claims)
+    if claimed is None:
+        return False
+    if claimed == 0:
+        condition = "attribute_exists(cognito_sub) AND (attribute_not_exists(#tv) OR #tv = :tv)"
+    else:
+        condition = "#tv = :tv"
+    try:
+        _users_table(dynamodb_resource).update_item(
+            Key={"cognito_sub": claims["sub"]},
+            UpdateExpression="ADD #tv :one",
+            ConditionExpression=condition,
+            ExpressionAttributeNames={"#tv": TOKEN_VERSION_ATTR},
+            ExpressionAttributeValues={":one": 1, ":tv": claimed},
+        )
+    except Exception as exc:  # noqa: BLE001 - sign-out never fails the caller
+        code = getattr(exc, "response", {}).get("Error", {}).get("Code")
+        if code != "ConditionalCheckFailedException":
+            logger.warning("DEMO_SESSION_REVOKE_FAILED: %s", type(exc).__name__)
+        return False
+    logger.info("DEMO_SESSION_SIGNED_OUT: sub=%s", claims["sub"])
+    return True
 
 
 def looks_like_demo_token(token: str) -> bool:
@@ -673,13 +785,14 @@ def enforce_default_credentials_rotation(caller_user_row: dict[str, Any], reques
     )
 
 
-def login_with_password(
+def _authenticate_password_user(
     username: str,
     password: str,
     dynamodb_resource: Any,
     client_ip: str = "unknown",
 ) -> dict[str, Any]:
     """POST /api/auth/login (unauthenticated -- this IS the login path).
+    Returns the full users row; callers project it with `_login_summary`.
 
     Validates `username`/`password` against a `user_type == "password"` row
     in the shared `users` table, gated by the stored auth mode. Never logs
@@ -740,6 +853,12 @@ def login_with_password(
 
     logger.info("PASSWORD_LOGIN_ALLOW: username=%s", username)
 
+    return user
+
+
+def _login_summary(user: dict[str, Any]) -> dict[str, Any]:
+    """The login response body: identifiers and flags only, never the hash
+    or the token version."""
     return {
         "cognito_sub": user["cognito_sub"],
         "username": user.get("username"),
@@ -749,12 +868,38 @@ def login_with_password(
     }
 
 
-def change_own_password(
+def login_with_password(
+    username: str,
+    password: str,
+    dynamodb_resource: Any,
+    client_ip: str = "unknown",
+) -> dict[str, Any]:
+    """POST /api/auth/login's checks (see `_authenticate_password_user`),
+    returning the response body only."""
+    return _login_summary(
+        _authenticate_password_user(username, password, dynamodb_resource, client_ip)
+    )
+
+
+def password_sign_in(
+    username: str,
+    password: str,
+    dynamodb_resource: Any,
+    client_ip: str = "unknown",
+) -> tuple[dict[str, Any], str]:
+    """POST /api/auth/login: authenticate, then return (response body,
+    session token). The token carries the token version of the row that
+    authentication already loaded."""
+    user = _authenticate_password_user(username, password, dynamodb_resource, client_ip)
+    return _login_summary(user), issue_demo_token(user)
+
+
+def _change_own_password(
     current_password: str,
     new_password: str,
     caller_user_row: dict[str, Any],
     dynamodb_resource: Any,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """POST /api/me/password (authenticated): rotate the CALLER'S OWN
     password (issue #469) -- the only way to rotate a password before this
     fix was deleting and re-adding the user.
@@ -790,11 +935,15 @@ def change_own_password(
 
     cognito_sub = caller_user_row["cognito_sub"]
     table = _users_table(dynamodb_resource)
-    table.update_item(
+    # The token version moves with the hash, in the same write: every session
+    # issued under the old password ends here (see enforce_session_version).
+    updated_row = table.update_item(
         Key={"cognito_sub": cognito_sub},
-        UpdateExpression="SET password_hash = :h",
-        ExpressionAttributeValues={":h": _hash_password(new_password)},
-    )
+        UpdateExpression="SET password_hash = :h ADD #tv :one",
+        ExpressionAttributeNames={"#tv": TOKEN_VERSION_ATTR},
+        ExpressionAttributeValues={":h": _hash_password(new_password), ":one": 1},
+        ReturnValues="ALL_NEW",
+    )["Attributes"]
 
     _write_audit_entry(
         dynamodb_resource,
@@ -806,7 +955,36 @@ def change_own_password(
     )
     logger.info("PASSWORD_CHANGED: actor=%s", cognito_sub)
 
-    return {"changed": True}
+    return {"changed": True}, updated_row
+
+
+def change_own_password(
+    current_password: str,
+    new_password: str,
+    caller_user_row: dict[str, Any],
+    dynamodb_resource: Any,
+) -> dict[str, Any]:
+    """Rotate the caller's own password (see `_change_own_password`). Ends
+    every session issued before the change."""
+    result, _ = _change_own_password(
+        current_password, new_password, caller_user_row, dynamodb_resource
+    )
+    return result
+
+
+def change_own_password_and_reissue(
+    current_password: str,
+    new_password: str,
+    caller_user_row: dict[str, Any],
+    dynamodb_resource: Any,
+) -> tuple[dict[str, Any], str]:
+    """As `change_own_password`, plus a fresh session token at the new token
+    version: the caller who changed the password stays signed in, every
+    other session (another device, a copied cookie) ends."""
+    result, updated_row = _change_own_password(
+        current_password, new_password, caller_user_row, dynamodb_resource
+    )
+    return result, issue_demo_token(updated_row)
 
 
 # ---------------------------------------------------------------------------
@@ -838,8 +1016,92 @@ def seed_demo_users(dynamodb_resource: Any) -> None:
             "created_at": now,
             "last_auth_at": None,
             "admission": "seed",
+            TOKEN_VERSION_ATTR: _fresh_token_version(),
         })
         logger.info("SEED_DEMO_USER: username=%s role=%s", spec["username"], spec["role"])
+
+
+# ---------------------------------------------------------------------------
+# Seed once (QA 2026-10-31, report #4). The Docker Compose bootstrap runs on
+# every rollout. Calling `seed_demo_users` each time brought a deleted
+# `admin`/`admin` back on the next deploy, so the bootstrap now goes through
+# `seed_demo_users_once`, which records a marker row in AUTH_SETTINGS_TABLE
+# and never seeds again once it exists.
+#
+# A deployment that predates the marker is recognised by its users table: if
+# any row is already there, the box has been bootstrapped before (and an
+# admin may have deliberately removed the demo users), so it is marked
+# without seeding. Only an empty users table gets the demo credentials.
+# ---------------------------------------------------------------------------
+BOOTSTRAP_SEEDED_SETTING_ID = "bootstrap:seeded"
+
+
+def _is_conditional_check_failure(exc: BaseException) -> bool:
+    response = getattr(exc, "response", None)
+    if not isinstance(response, dict):
+        return False
+    return response.get("Error", {}).get("Code") == "ConditionalCheckFailedException"
+
+
+def seed_demo_users_once(dynamodb_resource: Any) -> str:
+    """Seed the demo users on a deployment's first bootstrap only.
+
+    Returns what happened: `"already_seeded"` (marker present, nothing
+    done), `"existing_users"` (no marker, but the users table already had a
+    row: marked, nothing seeded) or `"seeded"` (empty table: demo users
+    seeded, then marked). The marker is written after seeding, so a
+    bootstrap that dies part-way seeds again next time, which
+    `seed_demo_users` tolerates."""
+    settings = _auth_settings_table(dynamodb_resource)
+    if settings.get_item(Key={"setting_id": BOOTSTRAP_SEEDED_SETTING_ID}).get("Item"):
+        return "already_seeded"
+
+    # One item is enough to tell an empty table from a used one.
+    has_users = bool(
+        _users_table(dynamodb_resource)
+        .scan(Limit=1, ProjectionExpression="cognito_sub")
+        .get("Items")
+    )
+    outcome = "existing_users" if has_users else "seeded"
+    if not has_users:
+        seed_demo_users(dynamodb_resource)
+
+    try:
+        settings.put_item(
+            Item={
+                "setting_id": BOOTSTRAP_SEEDED_SETTING_ID,
+                "outcome": outcome,
+                "updated_at": str(int(time.time())),
+            },
+            ConditionExpression="attribute_not_exists(setting_id)",
+        )
+    except Exception as exc:
+        if not _is_conditional_check_failure(exc):
+            raise
+    logger.info("SEED_DEMO_USERS_ONCE: outcome=%s", outcome)
+    return outcome
+
+
+def ensure_auth_mode_row(dynamodb_resource: Any, mode: str) -> bool:
+    """Write the admin-toggleable auth-mode row as `mode` only if no row
+    exists yet. An admin's later choice is never overwritten by a redeploy.
+    Returns whether a row was written."""
+    if mode not in VALID_AUTH_MODES:
+        raise ValueError(f"auth mode must be one of {sorted(VALID_AUTH_MODES)}")
+    try:
+        _auth_settings_table(dynamodb_resource).put_item(
+            Item={
+                "setting_id": AUTH_MODE_SETTING_ID,
+                "auth_mode": mode,
+                "updated_at": str(int(time.time())),
+            },
+            ConditionExpression="attribute_not_exists(setting_id)",
+        )
+    except Exception as exc:
+        if _is_conditional_check_failure(exc):
+            return False
+        raise
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -867,7 +1129,14 @@ def add_user(
     require_admin(caller_user_row, "Admin privilege required to add a user.")
 
     user_type = payload.get("user_type")
-    is_admin = bool(payload.get("is_admin", False))
+    # Strictly a JSON boolean, the same rule users.update_user applies: a
+    # truthiness coercion would make the string "false" an admin.
+    is_admin = payload.get("is_admin", False)
+    if not isinstance(is_admin, bool):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="is_admin must be a boolean.",
+        )
     role = "admin" if is_admin else "user"
 
     if user_type == USER_TYPE_SSO:
@@ -888,6 +1157,9 @@ def add_user(
             "created_at": int(time.time()),
             "last_auth_at": None,
             "admission": "admin_added",
+            # Random, so a re-created username never matches the version in
+            # a token issued to the user it replaces.
+            TOKEN_VERSION_ATTR: _fresh_token_version(),
         }
     elif user_type == USER_TYPE_PASSWORD:
         username = payload.get("username")
@@ -909,6 +1181,9 @@ def add_user(
             "created_at": int(time.time()),
             "last_auth_at": None,
             "admission": "admin_added",
+            # Random, so a re-created username never matches the version in
+            # a token issued to the user it replaces.
+            TOKEN_VERSION_ATTR: _fresh_token_version(),
         }
     else:
         raise HTTPException(

@@ -264,10 +264,35 @@ Screened character classes (any occurrence fails closed):
   U+FEFF            anywhere OTHER than the leading position of the screened
                     string, where it is an ordinary byte-order mark
 
+Added by QA remediation W7-2, every one of them a character no renderer
+draws in contract prose:
+
+  U+E0000 - U+E007F the TAG block -- an invisible twin of ASCII that can
+                    spell out a whole instruction (59 of them rode through
+                    to the model in the QA repro)
+  U+034F            combining grapheme joiner
+  U+115F, U+1160,   Hangul fillers (choseong, jungseong, filler,
+  U+3164, U+FFA0    halfwidth filler) -- blank glyphs with letter category
+  U+180E            Mongolian vowel separator
+  U+FE00 - U+FE0F,  variation selectors
+  U+E0100 - U+E01EF
+
 EXPLICITLY ALLOWED, never flagged: `\t` (a tab, already handled as ordinary
 whitespace), `\n` (this module's own logical-paragraph join, not document
 content), and U+00A0 NON-BREAKING SPACE, which is common and legitimate in
 real contracts (defined terms, section references, currency amounts).
+
+U+00AD SOFT HYPHEN is neither screened nor passed through: Word writes it
+into ordinary paper as an optional break point, so refusing it would refuse
+real documents, and passing it would let it split a trigger phrase past the
+injection scan. `extraction_normalization_stage` STRIPS it from the text
+before the model sees it (W7-2) -- the one character this module's
+never-strip rule does not cover, because it is invisible by DESIGN rather
+than by abuse and carries no content. The cost: the writer's text guard
+then sees a paragraph whose live text still carries it, so an edit to that
+one paragraph fails closed as `paragraph_not_resolved` (Word itself writes
+`<w:softHyphen/>`, which the extractor has always dropped and the writer
+already understands; a literal U+00AD inside `<w:t>` is the rarer shape).
 
 Disposition: FAIL CLOSED, exactly like any other unnormalizable input --
 never strip, never repair. Silently deleting the characters would hand the
@@ -325,11 +350,27 @@ from typing import Any  # noqa: F401
 # Inclusive `(first, last)` codepoint ranges; U+FEFF is handled separately
 # below because its leading occurrence is a legitimate byte-order mark.
 SUSPICIOUS_CONTROL_RANGES: tuple[tuple[int, int], ...] = (
+    (0x034F, 0x034F),  # combining grapheme joiner (W7-2)
+    (0x115F, 0x1160),  # Hangul choseong/jungseong fillers (W7-2)
+    (0x180E, 0x180E),  # Mongolian vowel separator (W7-2)
     (0x200B, 0x200F),  # ZWSP, ZWNJ, ZWJ, LRM, RLM
     (0x202A, 0x202E),  # LRE, RLE, PDF, LRO, RLO
     (0x2060, 0x2064),  # word joiner, invisible times/separator/plus
     (0x2066, 0x2069),  # LRI, RLI, FSI, PDI
+    (0x3164, 0x3164),  # Hangul filler (W7-2)
+    (0xFE00, 0xFE0F),  # variation selectors 1-16 (W7-2)
+    (0xFFA0, 0xFFA0),  # halfwidth Hangul filler (W7-2)
+    (0xE0000, 0xE007F),  # the TAG block -- an invisible ASCII twin (W7-2)
+    (0xE0100, 0xE01EF),  # variation selectors 17-256 (W7-2)
 )
+
+#: U+00AD SOFT HYPHEN. NOT in the ranges above, on purpose (W7-2): Word
+#: writes it into ordinary paper as an optional break point, so refusing it
+#: would refuse real documents. `extraction_normalization_stage` strips it
+#: from the text before the model sees it, and the injection scan strips it
+#: before matching, so it can neither split a trigger phrase past the scan
+#: nor reach the prompt.
+SOFT_HYPHEN = "\u00ad"
 
 BOM = "﻿"
 
@@ -371,7 +412,8 @@ _PARAGRAPH_MARK_PROPOSALS = {
 def find_suspicious_control_characters(text: str) -> list[int]:
     """
     Return the OFFSETS (never the characters, never their context) of every
-    zero-width or bidirectional control character in `text`, in order.
+    zero-width, bidirectional or otherwise invisible character in
+    `SUSPICIOUS_CONTROL_RANGES` in `text`, in order.
 
     U+FEFF at offset 0 is an ordinary byte-order mark and is NOT reported;
     anywhere else it is a zero-width no-break space and IS. Tab, newline and
@@ -407,7 +449,7 @@ def _screen_control_characters(heading: str, clean_text: str) -> dict | None:
             "reason_detail": REASON_DETAIL_SUSPICIOUS_CONTROL_CHARACTERS,
             "note": (
                 f"{CONTROL_CHARACTER_NOTE_PREFIX} {scope}: {len(offsets)} "
-                f"zero-width or bidirectional control character(s) detected "
+                f"zero-width, bidirectional or invisible control character(s) detected "
                 f"(first at offset {offsets[0]}) -- invisible characters in "
                 f"the model's input are a spoofing and prompt-injection "
                 f"surface; refusing rather than stripping."

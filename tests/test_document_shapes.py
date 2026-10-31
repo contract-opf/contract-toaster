@@ -593,6 +593,87 @@ def test_mixed_run_children_survives(failures: list) -> None:
         )
 
 
+def _compile_whole_block_edit(name: str, docx_bytes: bytes, paragraphs: list, needle: str, failures: list) -> None:
+    """Prove and compile a whole-block keep+insert against the block whose
+    text carries `needle` -- the writer half of extractor/writer parity."""
+    found = _block_carrying(paragraphs, needle)
+    if found is None:
+        failures.append(f"[{name}] no addressed block carries {needle[:30]!r}")
+        return
+    block_id, block = found
+    proven = _prove(
+        paragraphs,
+        block_id,
+        [
+            {"op": "keep", "text": block["text"]},
+            {"op": "insert", "text": _PATCH_SUFFIX, "issue_key": "I1"},
+        ],
+    )
+    if proven["status"] != "proven":
+        failures.append(f"[{name}] {needle[:30]!r} did not prove: {proven['failures']}")
+        return
+    result = rba.apply_block_transcript(docx_bytes, proven, author=_APPLY_AUTHOR, timestamp_iso=_APPLY_TIMESTAMP)
+    if result["docx_bytes"] is None or len(result["applied"]) != 1 or result["failures"]:
+        failures.append(
+            f"[{name}] an edit against {needle[:30]!r} did not compile: "
+            f"applied={len(result['applied'])} failures={result['failures']}"
+        )
+
+
+def test_bidi_and_custom_xml_wrappers_survives(failures: list) -> None:
+    """W7-1: `w:dir`, `w:bdo` and `w:customXml` are transparent wrappers,
+    inline, at block level and at a table's row level -- not silent content
+    loss (the Confidentiality clause used to read "shall  disclose"), and
+    not a degraded extraction either: every element here is RECOGNISED."""
+    name = "bidi_and_custom_xml_wrappers"
+    docx_bytes = _shape_fixture(name)
+    norm = _assert_survives_full_spine(name, docx_bytes, failures)
+    if norm is None:
+        return
+    if "extraction_status" in norm:
+        failures.append(f"[{name}] recognised wrappers must not degrade extraction: {norm['extraction_status']!r}")
+    paragraphs = norm["paragraphs"]
+    texts = [p["text"] for p in paragraphs]
+    if not any(t == cd.CONFIDENTIALITY_BODY for t in texts):
+        failures.append(f"[{name}] the Confidentiality clause lost words inside a wrapper: {texts!r}")
+    if not any(t == cd.INDEMNIFICATION_BODY for t in texts):
+        failures.append(f"[{name}] the block-level customXml clause is missing: {texts!r}")
+    # The wrapped row's cells: "Provider" stays body text, while its street
+    # address -- a short numbered line -- is promoted to a heading by the
+    # fallback tier exactly as it is in the untransformed table.
+    seen = [p.get("heading", "") + "\n" + p["text"] for p in paragraphs]
+    if not any("Synthetic Ave, Suite 100" in s for s in seen):
+        failures.append(f"[{name}] the row-level customXml table row is missing: {seen!r}")
+    _compile_whole_block_edit(name, docx_bytes, paragraphs, cd.CONFIDENTIALITY_BODY, failures)
+    _compile_whole_block_edit(name, docx_bytes, paragraphs, cd.INDEMNIFICATION_BODY, failures)
+
+
+def test_tab_led_sub_clause_run_splits_survives(failures: list) -> None:
+    """W7-4: three run splits of the same visible `(x)<tab>sentence` all stay
+    BODY text of the Indemnification block, so the boundary decision no
+    longer depends on where a run boundary falls -- including one the writer
+    itself introduces -- and an edit to each sub-clause compiles."""
+    name = "tab_led_sub_clause_run_splits"
+    docx_bytes = _shape_fixture(name)
+    norm = _assert_survives_full_spine(name, docx_bytes, failures)
+    if norm is None:
+        return
+    found = _block_carrying(norm["paragraphs"], "Provider shall indemnify")
+    if found is None:
+        failures.append(f"[{name}] could not find the Indemnification block")
+        return
+    _, block = found
+    expected = "\n".join(
+        [cd.INDEMNIFICATION_BODY, *(f"({letter})\t{sentence}" for letter, sentence, _ in cd.TAB_LED_SUB_CLAUSES)]
+    )
+    if block["text"] != expected:
+        failures.append(f"[{name}] expected {expected!r}, got {block['text']!r}")
+    headings = [p.get("heading") for p in norm["paragraphs"]]
+    stray = [h for h in headings if any(h == sentence for _, sentence, _ in cd.TAB_LED_SUB_CLAUSES)]
+    if stray:
+        failures.append(f"[{name}] a run split promoted a sub-clause to a heading: {stray!r}")
+
+
 def test_table_of_contents_survives(failures: list) -> None:
     """Issue #114: a real Word `TOC` complex field's cached result is one
     body-shaped paragraph per heading, each of which reads as a numbered
@@ -697,6 +778,8 @@ def test_every_transform_has_a_shape_test(failures: list) -> None:
         "content_control_wrapped_text",
         "mixed_run_children",
         "table_of_contents",
+        "bidi_and_custom_xml_wrappers",
+        "tab_led_sub_clause_run_splits",
     }
     missing = set(cd.TRANSFORMS) - exercised
     if missing:
@@ -788,6 +871,8 @@ TESTS = [
     test_content_control_wrapped_text_survives,
     test_mixed_run_children_survives,
     test_table_of_contents_survives,
+    test_bidi_and_custom_xml_wrappers_survives,
+    test_tab_led_sub_clause_run_splits_survives,
     test_baseline_flavors_also_normalize,
     test_every_transform_has_a_shape_test,
     test_the_smoke_tool_never_echoes_a_sentinel_party_name,
