@@ -1335,6 +1335,12 @@ class TestWriteRealTerminalOpfLineage(unittest.TestCase):
         bundle = _opf_bundle(doc)
         opf_lineage = pipeline_runner._opf_lineage_for_bundle(bundle)
 
+        # QA W8 item 5: the terminal write lands only on a row its run holds
+
+        # RUNNING; seed the row the way `run_real_pipeline` leaves it.
+
+        self.table.put_item(Item={"review_id": "opf-479-review-opf", "status": "RUNNING"})
+
         pipeline_runner._write_real_terminal(
             "opf-479-review-opf", self._terminal_result(), None, self.ddb,
             opf_lineage=opf_lineage,
@@ -1345,6 +1351,9 @@ class TestWriteRealTerminalOpfLineage(unittest.TestCase):
         self.assertTrue(item["opf_section_digests_hash"].startswith("sha256:"))
 
     def test_v1_review_persists_neither_attribute(self):
+        # QA W8 item 5: the terminal write lands only on a row its run holds
+        # RUNNING; seed the row the way `run_real_pipeline` leaves it.
+        self.table.put_item(Item={"review_id": "opf-479-review-v1", "status": "RUNNING"})
         pipeline_runner._write_real_terminal(
             "opf-479-review-v1", self._terminal_result(), None, self.ddb,
             opf_lineage=pipeline_runner._opf_lineage_for_bundle({"playbook": {"metadata": {}}}),
@@ -1459,6 +1468,12 @@ class TestWriteRealTerminalFloorCoverage(unittest.TestCase):
         }
         floor_coverage = pipeline_runner._floor_coverage_for_result(result)
 
+        # QA W8 item 5: the terminal write lands only on a row its run holds
+
+        # RUNNING; seed the row the way `run_real_pipeline` leaves it.
+
+        self.table.put_item(Item={"review_id": "opf-479-review-floor-ok", "status": "RUNNING"})
+
         pipeline_runner._write_real_terminal(
             "opf-479-review-floor-ok", result, None, self.ddb, floor_coverage=floor_coverage,
         )
@@ -1480,6 +1495,12 @@ class TestWriteRealTerminalFloorCoverage(unittest.TestCase):
         }
         floor_coverage = pipeline_runner._floor_coverage_for_result(result)
 
+        # QA W8 item 5: the terminal write lands only on a row its run holds
+
+        # RUNNING; seed the row the way `run_real_pipeline` leaves it.
+
+        self.table.put_item(Item={"review_id": "opf-479-review-floor-unjudged", "status": "RUNNING"})
+
         pipeline_runner._write_real_terminal(
             "opf-479-review-floor-unjudged", result, None, self.ddb,
             floor_coverage=floor_coverage,
@@ -1494,6 +1515,9 @@ class TestWriteRealTerminalFloorCoverage(unittest.TestCase):
 
     def test_v1_review_persists_no_floor_coverage_attribute(self):
         result = self._v1_result()
+        # QA W8 item 5: the terminal write lands only on a row its run holds
+        # RUNNING; seed the row the way `run_real_pipeline` leaves it.
+        self.table.put_item(Item={"review_id": "opf-479-review-floor-v1", "status": "RUNNING"})
         pipeline_runner._write_real_terminal(
             "opf-479-review-floor-v1", result, None, self.ddb,
             floor_coverage=pipeline_runner._floor_coverage_for_result(result),

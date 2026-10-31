@@ -507,8 +507,9 @@ def reconcile(
 
     `detector_fires` are deterministic hard-rejection issues (an OPF Floor
     judge's `floor_judge.floor_fires`) -- monotonic, appended when the final
-    list does not already carry one with the same (topic, section_ref), and
-    forcing `decision="REQUEST_CHANGE"`.
+    list does not already carry one with the same (topic, section_ref) -- or,
+    for a Floor fire, any issue on the same topic (its invariant id; QA W8
+    item 7) -- and forcing `decision="REQUEST_CHANGE"`.
 
     When guard 1 retains an issue or appends a fire, `verdict_summary` names
     it (`guard_one_summary_note`): the critic's summary is replaced when the
@@ -726,8 +727,24 @@ def reconcile(
         kept.pop("proposed_replacement_text", None)
         final_issues.append(_with_response_issue_key(kept, final_issues, reserved_keys))
         seen_keys.add(_issue_key(kept))
+    # QA W8 item 7: a Floor fire (`floor_judge.floor_fires`) names its
+    # invariant as BOTH its topic and its `section_ref`, because the judge
+    # reads the whole document and cites no section. A critic issue raised on
+    # the same invariant carries that invariant id as its topic and the REAL
+    # section, so the (topic, section_ref) identity never matched and the
+    # review carried the same violation twice. A Floor fire therefore dedupes
+    # on the topic alone. Monotonicity is untouched: the issue already in the
+    # list forces REQUEST_CHANGE exactly as the fire would have.
+    seen_topics = {
+        issue.get("playbook_topic_id")
+        for issue in final_issues
+        if isinstance(issue.get("playbook_topic_id"), str)
+    }
     for fire in detector_fires:
         fire_identity = _issue_key(fire)
+        is_floor_fire = str(fire.get("provenance") or "").startswith("floor:")
+        if is_floor_fire and fire.get("playbook_topic_id") in seen_topics:
+            continue
         if fire_identity not in seen_keys:
             final_issues.append(
                 _with_response_issue_key(dict(fire), final_issues, reserved_keys)

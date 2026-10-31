@@ -381,7 +381,10 @@ what code does with it.
   delivered "1 required protection not found — flagged only, no standard language inserted.").
 - **The Floor judge.** A ledger entry whose condition is a deterministic predicate is no longer judged; a
   `"judged"` entry still is, and the verdict is recorded as `judge_recommendation` without ever clearing
-  it. A `violated` verdict is still a monotonic Floor fire.
+  it. A `violated` verdict is still a monotonic Floor fire. The judge runs only after a critic pass that
+  succeeded (QA W8): a failed critic fails the review with the critic's own reason, never
+  `floor_invariant_unjudged`. A Floor fire on an invariant the critic already raised an issue on (same
+  `playbook_topic_id`) is not appended a second time; that issue already forces `REQUEST_CHANGE`.
 
 ## Length budgets (issue #674)
 

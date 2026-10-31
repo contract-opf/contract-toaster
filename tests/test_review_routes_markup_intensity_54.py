@@ -182,12 +182,19 @@ CRITIC_MODEL_ID = "anthropic.claude-sonnet-4-6"
 # The knowledge blocks: sha256 of "\n\n".join(compose_opf_system_blocks(...))
 # for the acme-university 0.6 gold fixture. The markup-intensity block is NOT
 # composed there, so no markup level may ever move it.
-GOLDEN_KNOWLEDGE_BARE_SHA256 = "1465c5ce733fa2e8cefacae904c34ad22d0385dcff38de634030a12855e2fc01"
+#
+# QA W8 item 7 (2026-10-31) moved BOTH OPF pins, deliberately: it removed the
+# closing sentence "Every entry here is re-read against your finished redline
+# by the closing self-check." from `opf_prompt.BINDING_INTRO`, a promise no
+# live review keeps. Re-appending exactly that sentence reproduces the previous
+# values (1465c5ce... and 73fa2c13...), so nothing else in the knowledge moved.
+# The V1 pin did NOT move (no Binding block).
+GOLDEN_KNOWLEDGE_BARE_SHA256 = "f8cfcdd342e08a713ad810194313eada75b40147f83765a1467ef3032152b08a"
 # The ASSEMBLED OPF system prompt (`review_spine._assemble_opf_system_blocks`
 # over `resolve_knowledge` of the same fixture): sha256 of the blocks' texts
 # joined with "\n\n".
 GOLDEN_OPF_ASSEMBLED_BARE_SHA256 = (
-    "73fa2c13ad96881144875ecd8eeec7b0466cf1d3824585b7ef65b4079f175ac4"
+    "b667f61bad3f107a082f3b5701796cdf3228c0f08888daca3424dacf2d826f6a"
 )
 # The ASSEMBLED v1 system prompt (`primary_review_pass.assemble_system_blocks`
 # over V1_PLAYBOOK).

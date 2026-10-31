@@ -829,6 +829,7 @@ def run_review(
     policy: Optional[dict[str, Any]] = None,  # noqa: UP045
     cancel_checkpoint: Optional[Callable[[], None]] = None,  # noqa: UP045
     attempt_diagnostic_write: Optional[Callable[[dict[str, Any]], None]] = None,  # noqa: UP045
+    reserve_floor_spend: Optional[Callable[[dict[str, int]], None]] = None,  # noqa: UP045
 ) -> dict[str, Any]:
     """Compose the full review pipeline: extract -> normalize -> primary ->
     critic -> reconcile -> leakage scan -> redline, with `model_client`
@@ -987,6 +988,16 @@ def run_review(
     prepend to `toaster_guidance` for the dial (hard cutover, owner decision
     Q3 on the 2026-09-05 audit); a review whose row records `light` or
     `heavy` tells the model so on whichever path it runs.
+
+    `reserve_floor_spend` (QA W8 item 3, default `None` -> no reservation):
+    called ONCE, before the primary pass and so before any model spend, with
+    `floor_judge.worst_case_judge_usage` for the Floor invariants this run
+    will judge -- `{"calls", "input_tokens", "output_tokens"}` -- and only
+    when there is at least one. The submission-time reservation cannot price
+    the Floor judge (it has no document and no playbook yet), and every judge
+    call re-sends the whole document; the caller reserves this on top. An
+    exception from it propagates: a review whose judge spend cannot be
+    reserved does not start spending.
 
     `on_progress` (issue #447, default `None`): a live progress seam. When
     given, it is called with one of `PROGRESS_STAGES`' tokens immediately
@@ -1281,6 +1292,21 @@ def run_review(
         if opf_bundle_v2 is not None
         else []
     )
+    # QA W8 item 3: reserve the Floor judge's worst case NOW, before the
+    # first model call, from the same judged set and the same document stage
+    # 3.5 will use. Nothing has been spent yet, so a refusal here costs
+    # nothing.
+    judged_invariants = hard_ledger.judged_floor_invariants(floor_invariants, ledger)
+    if judged_invariants and reserve_floor_spend is not None:
+        reserve_floor_spend(
+            floor_judge.worst_case_judge_usage(
+                invariants=judged_invariants,
+                review_context=doc_text,
+                model_id=critic_model_id,
+                perspective_note=floor_perspective_note,
+            )
+        )
+
     report_progress(PROGRESS_PRIMARY_PASS)
     primary_result = primary_review_pass.run_primary_pass(
         cancel_checkpoint=cancel_checkpoint,
@@ -1417,8 +1443,14 @@ def run_review(
     # .evaluate_ledger`, after reconciliation). A `"judged"` ledger entry
     # stays in front of the judge, but its verdict is only recorded on the
     # ledger as a recommendation; it never clears the entry.
-    judged_invariants = hard_ledger.judged_floor_invariants(floor_invariants, ledger)
-    if judged_invariants:
+    #
+    # QA W8 item 6: and only after a critic pass that SUCCEEDED. A failed
+    # critic fails the review at stage 4 whatever the Floor says, so judging
+    # it anyway paid for one or two full-document calls per invariant -- and
+    # a judge that then failed closed returned first, recording its own
+    # reason (`floor_invariant_unjudged`) in place of the critic's.
+    # `judged_invariants` was computed above, before the primary pass.
+    if judged_invariants and critic_result.get("status") == STATUS_OK:
         judgment = floor_judge.judge_floor_invariants(
             invariants=judged_invariants,
             review_context=doc_text,
