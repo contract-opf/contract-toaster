@@ -156,6 +156,9 @@ services:
       # cadence there). Set PURGE_SWEEP_ENABLED=0 to turn it off without
       # editing code.
       PURGE_SWEEP_INTERVAL_SECONDS: "${PURGE_SWEEP_INTERVAL_SECONDS:-3600}"
+      # Optional GC alarm on a retroactive retention reduction (QA W6.8): an
+      # Uptime Kuma push URL; empty sends nothing. See deploy/dts/README.md.
+      RETENTION_ALERT_URL: "${RETENTION_ALERT_URL:-}"
       MODEL_PROVIDER: openrouter
       AUTH_MODE: password
       # Issue #469: TRUST_PROXY_HEADERS is deliberately left UNSET here

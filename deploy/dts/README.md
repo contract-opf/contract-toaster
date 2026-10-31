@@ -187,6 +187,7 @@ exactly as they are everywhere else.
 |---|---|---|
 | `PURGE_SWEEP_INTERVAL_SECONDS` | `3600` | How often to sweep. Retention windows are measured in days, so an hour is fine enough that "purged on schedule" is true to within a rounding error; sweeping more often just re-scans the table. |
 | `PURGE_SWEEP_ENABLED` | `1` | Set to `0` to stop the cadence without editing code. |
+| `RETENTION_ALERT_URL` | *(empty)* | Optional. The General Counsel alarm for a retroactive retention reduction (data-handling.md purge invariant 5). Set it to an Uptime Kuma *Push* monitor URL, as for `AUTOPULL_HEARTBEAT_URL`; each time an admin parks a reduction the backend sends one `status=down&msg=Retention reduction requested: ...` push, so the monitor goes red and notifies whoever it notifies (point it at Legal). Ids, window values and the apply-at time only -- never the reason. Empty sends nothing; the backend still writes the `RETENTION_REDUCTION_REQUESTED` log line. A failed push never fails the request. Use a separate push monitor from the autopull heartbeat: the autopull's next healthy run would turn a shared monitor green again. |
 
 It does **not** run on the AWS target, where
 `infra/lambda/purge_worker/handler.py` owns the cadence — starting both would

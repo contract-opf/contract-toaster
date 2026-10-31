@@ -1049,12 +1049,27 @@ def handler(event, context):
         UPLOADS_BUCKET: uploadsBucket.bucketName,
         OUTPUTS_BUCKET: outputsBucket.bucketName,
         RETROACTIVE_REDUCTION_DELAY_SECONDS: String(72 * 3600),
+        // W6.4: every sweep writes one append-only audit row (counts, purged
+        // review ids, skipped-held count, sweep id) and refuses to start
+        // without this. Same name the App Runner service is given.
+        AUDIT_TABLE: `contract-toaster-audit-${envName}`,
       },
       logRetention: logs.RetentionDays.ONE_MONTH,
     });
 
     reviewsTable.grantReadWriteData(this.purgeWorkerFunction);
     retentionSettingsTable.grantReadWriteData(this.purgeWorkerFunction);
+    // Audit: PutItem ONLY, exactly the App Runner role's AuditWrite grant
+    // (app-stack.ts). UpdateItem/DeleteItem stay denied by the table's resource
+    // policy, and the write itself is conditional (append-only).
+    this.purgeWorkerFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        sid: 'PurgeSweepAuditWrite',
+        effect: iam.Effect.ALLOW,
+        actions: ['dynamodb:PutItem'],
+        resources: [`arn:aws:dynamodb:*:*:table/contract-toaster-audit-${envName}`],
+      }),
+    );
 
     // s3:ListBucket + s3:DeleteObject only -- deliberately NOT grantRead()
     // (which would add s3:GetObject and, on an SSE-KMS bucket, a

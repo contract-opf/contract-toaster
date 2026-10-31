@@ -91,6 +91,7 @@ try:  # production runs `src.main`; tests put backend/src on sys.path
         model_settings,
         playbook_upload,
         playbook_versions,
+        retention,
         reviews,
     )
 except ImportError:  # pragma: no cover
@@ -102,6 +103,7 @@ except ImportError:  # pragma: no cover
     import model_settings  # type: ignore[no-redef]
     import playbook_upload  # type: ignore[no-redef]
     import playbook_versions  # type: ignore[no-redef]
+    import retention  # type: ignore[no-redef]
     import reviews  # type: ignore[no-redef]
 
 # scripts/review_spine.py (issue #239) composes the pipeline-stage modules
@@ -401,17 +403,30 @@ def _mock_decision(review_id: str, playbook_id: str) -> dict[str, Any]:
     }
 
 
-def _copy_output_object(result: dict[str, Any], s3_client: Any) -> bool:
+def _copy_output_object(
+    result: dict[str, Any],
+    s3_client: Any,
+    *,
+    review_id: str = "",
+    dynamodb_resource: Any | None = None,
+) -> bool:
     """Materialize the output .docx by copying the seeded fixture into the
     review's outputs/ prefix (redline-stage equivalent). Returns True when an
-    object was written."""
+    object was written. Tagged legal-hold at write time when the review is
+    held (W6.6) -- `REPLACE`, so the fixture's own tags never carry over."""
     output_key = result.get("output_s3_key")
     source_key = result.get("pre_baked_source_key")
     if not output_key or not source_key:
         return False
     bucket = os.environ["OUTPUTS_BUCKET"]
+    tagging = _hold_tagging(review_id, dynamodb_resource) if review_id else {}
+    if tagging:
+        tagging = {**tagging, "TaggingDirective": "REPLACE"}
     s3_client.copy_object(
-        Bucket=bucket, Key=output_key, CopySource={"Bucket": bucket, "Key": source_key}
+        Bucket=bucket,
+        Key=output_key,
+        CopySource={"Bucket": bucket, "Key": source_key},
+        **tagging,
     )
     return True
 
@@ -662,7 +677,9 @@ def run_mock_pipeline(review_id: str, payload: dict[str, Any], *,
     try:
         _mark_running(review_id, dynamodb_resource)
         result = _mock_decision(review_id, playbook_id)
-        object_written = _copy_output_object(result, s3_client)
+        object_written = _copy_output_object(
+            result, s3_client, review_id=review_id, dynamodb_resource=dynamodb_resource
+        )
         _write_terminal(review_id, result, object_written, dynamodb_resource)
         _settle_reservation_safely(review_id, dynamodb_resource)
     except Exception:  # fail closed to ERROR, never wedge PENDING
@@ -1117,18 +1134,40 @@ def _build_openrouter_client(
     return model_client.OpenRouterModelClient(api_key=api_key, cancel_checkpoint=cancel_checkpoint)
 
 
-def _write_real_output(review_id: str, result: dict[str, Any], s3_client: Any) -> str | None:
+def _hold_tagging(review_id: str, dynamodb_resource: Any | None) -> dict[str, str]:
+    """W6.6: the `Tagging` kwarg for an object written while the review is
+    under legal hold (`retention.tag_if_held`), so it is inside the
+    bucket-policy backstop from the moment it exists. `{}` when no table
+    handle was passed (a unit test of the writer alone)."""
+    if dynamodb_resource is None:
+        return {}
+    return retention.tag_if_held(review_id, dynamodb_resource)
+
+
+def _write_real_output(
+    review_id: str,
+    result: dict[str, Any],
+    s3_client: Any,
+    *,
+    dynamodb_resource: Any | None = None,
+) -> str | None:
     """PUT the spine's computed redline bytes to the same outputs/{review_id}/
     out.docx key convention the mock path uses. Returns the key when an
     object was written (REQUEST_CHANGE, including a partial delivery per
     redline_generate's #203 "partial delivery, never instead of" contract),
-    or None on ACCEPT / a fail-closed `ERROR` result (no redline_bytes)."""
+    or None on ACCEPT / a fail-closed `ERROR` result (no redline_bytes).
+    Tagged legal-hold at write time when the review is held (W6.6)."""
     redline_bytes = result.get("redline_bytes")
     if not redline_bytes:
         return None
     output_key = f"outputs/{review_id}/out.docx"
     bucket = os.environ["OUTPUTS_BUCKET"]
-    s3_client.put_object(Bucket=bucket, Key=output_key, Body=redline_bytes)
+    s3_client.put_object(
+        Bucket=bucket,
+        Key=output_key,
+        Body=redline_bytes,
+        **_hold_tagging(review_id, dynamodb_resource),
+    )
     return output_key
 
 
@@ -1210,7 +1249,13 @@ _ANALYSIS_FIELDS = (
 )
 
 
-def _write_real_analysis(review_id: str, result: dict[str, Any], s3_client: Any) -> str:
+def _write_real_analysis(
+    review_id: str,
+    result: dict[str, Any],
+    s3_client: Any,
+    *,
+    dynamodb_resource: Any | None = None,
+) -> str:
     """PUT the full review result to `outputs/{review_id}/analysis.json`.
 
     `run_review` computes findings, the analysis report, the decision, the
@@ -1241,7 +1286,8 @@ def _write_real_analysis(review_id: str, result: dict[str, Any], s3_client: Any)
     Retention needs no new machinery -- this shares the `outputs/{review_id}/`
     prefix the redline uses, and BOTH purge implementations resolve their
     targets by listing that prefix (asserted in
-    tests/test_analysis_artifact_persisted.py, not assumed).
+    tests/test_analysis_artifact_persisted.py, not assumed). Tagged legal-hold
+    at write time when the review is held (W6.6).
     """
     document = {field: result.get(field) for field in _ANALYSIS_FIELDS}
     body = json.dumps(document, sort_keys=True, indent=2, default=str).encode("utf-8")
@@ -1251,6 +1297,7 @@ def _write_real_analysis(review_id: str, result: dict[str, Any], s3_client: Any)
         Key=key,
         Body=body,
         ContentType="application/json",
+        **_hold_tagging(review_id, dynamodb_resource),
     )
     return key
 
@@ -1843,7 +1890,9 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
                 # object-store access while the operator-facing token stays
                 # #665's classified `reason`.
                 attempt_diagnostic_write=attempt_diagnostics.make_attempt_diagnostic_write(
-                    review_id, s3_client
+                    review_id,
+                    s3_client,
+                    extra_put_kwargs=lambda: _hold_tagging(review_id, dynamodb_resource),
                 ),
                 # QA W8 item 3: the spine reports the Floor judge's worst
                 # case before its first model call; it is added to this
@@ -1878,13 +1927,17 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
                     close()
 
         stage = "persist_result"
-        output_s3_key = _write_real_output(review_id, result, s3_client)
+        output_s3_key = _write_real_output(
+            review_id, result, s3_client, dynamodb_resource=dynamodb_resource
+        )
         # Issue #416: the evidence needed to investigate a wrong review, which
         # `run_review` computes and this runner used to discard. Written
         # BEFORE the terminal row, so a row carrying `analysis_s3_key` always
         # names an object that exists -- the same ordering `_write_real_output`
         # already establishes for the redline.
-        analysis_s3_key = _write_real_analysis(review_id, result, s3_client)
+        analysis_s3_key = _write_real_analysis(
+            review_id, result, s3_client, dynamodb_resource=dynamodb_resource
+        )
         # Issue #479 finding (round-1 fix): the ids-only Floor-coverage
         # projection of THIS result -- present for an OPF review that had
         # invariants to judge, empty otherwise -- computed from `result`
