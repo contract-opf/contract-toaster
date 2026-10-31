@@ -75,6 +75,7 @@ produces. No live Bedrock, no network.
 from __future__ import annotations
 
 import io
+import posixpath
 import sys
 import xml.etree.ElementTree as ET
 import zipfile
@@ -515,23 +516,91 @@ def _find_patched_paragraph(body: ET.Element, source_text: str) -> Optional[ET.E
     return None
 
 
-def _find_sect_pr(body: ET.Element) -> ET.Element:
-    """The `<w:sectPr>` a new header/footer reference should be wired into:
-    a direct child of `<w:body>` (the common, single-section case) or, for a
-    multi-section document, nested inside the LAST paragraph's `<w:pPr>`. If
-    neither exists (unusual), one is created so the marker still has
-    somewhere to attach."""
-    direct = body.find(_w("sectPr"))
-    if direct is not None:
-        return direct
-    paragraphs = [c for c in body if c.tag == _w("p")]
-    if paragraphs:
-        ppr = paragraphs[-1].find(_w("pPr"))
-        if ppr is not None:
-            nested = ppr.find(_w("sectPr"))
-            if nested is not None:
-                return nested
-    return ET.SubElement(body, _w("sectPr"))
+def _section_properties(body: ET.Element) -> list[ET.Element]:
+    """Every section's `<w:sectPr>`, in document order (W7-6): one inside
+    each section-ending paragraph's `<w:pPr>`, then the body's own final
+    one. Only when the document carries no section properties anywhere is
+    one created, so the marker always has somewhere to attach without ever
+    adding a section to a document that has its own."""
+    sections = [
+        ppr_sect
+        for p in body.iter(_w("p"))
+        for ppr_sect in [p.find(f"{_w('pPr')}/{_w('sectPr')}")]
+        if ppr_sect is not None
+    ]
+    final = body.find(_w("sectPr"))
+    if final is not None:
+        sections.append(final)
+    elif not sections:
+        sections.append(ET.SubElement(body, _w("sectPr")))
+    return sections
+
+
+def _related_part_name(target: str) -> str:
+    """A `word/_rels/document.xml.rels` Target, as a package part name."""
+    if target.startswith("/"):
+        return target.lstrip("/")
+    return posixpath.normpath(posixpath.join("word", target))
+
+
+def _free_part_name(names: set[str], stem: str) -> str:
+    """`word/<stem>1.xml`, or the first free `word/<stem>N.xml` after it --
+    never a part the package already holds, whatever that part is wired as."""
+    folded = {name.casefold() for name in names}
+    index = 1
+    while f"word/{stem}{index}.xml".casefold() in folded:
+        index += 1
+    return f"word/{stem}{index}.xml"
+
+
+def _plan_marker_wiring(
+    sections: list[ET.Element],
+    rels_root: ET.Element,
+    names: set[str],
+    *,
+    ref_tag: str,
+    rel_type: str,
+) -> tuple[list[str], list[ET.Element]]:
+    """`(existing_parts, unwired_sections)` for one of header/footer (W7-6).
+
+    `existing_parts` is every header (or footer) part any section actually
+    references, of any type (`default`, `first`, `even`), resolved through
+    the document's relationships -- so the marker reaches every page that
+    shows one, whatever the part is called. Before W7-6 only a part NAMED
+    `header1.xml` was ever looked at: a package whose real header was
+    `header2.xml` gained a second `default` reference on its final section
+    (two in one `w:sectPr`, which Word resolves arbitrarily), and every
+    earlier section got no marker at all.
+
+    `unwired_sections` are the sections that show NO default header at all:
+    a section without its own `default` reference inherits the previous
+    section's, so only the leading run of sections before the first one that
+    has its own reference shows nothing. Those -- and only those -- get a
+    reference to a new marker part; wiring a later section would REPLACE the
+    header it inherits."""
+    targets = {
+        rel.get("Id"): _related_part_name(rel.get("Target") or "")
+        for rel in rels_root.findall(_pkg("Relationship"))
+        if rel.get("Type") == rel_type and (rel.get("TargetMode") or "").lower() != "external"
+    }
+    existing_parts: list[str] = []
+    unwired_sections: list[ET.Element] = []
+    inherited = False
+    for sect_pr in sections:
+        has_default = False
+        for ref in sect_pr.findall(ref_tag):
+            part = targets.get(ref.get(_r("id")))
+            if part is None or part not in names:
+                continue
+            if part not in existing_parts:
+                existing_parts.append(part)
+            if (ref.get(_w("type")) or "default") == "default":
+                has_default = True
+        if has_default:
+            inherited = True
+        elif not inherited:
+            unwired_sections.append(sect_pr)
+    return existing_parts, unwired_sections
 
 
 def _append_marker_paragraph(part_bytes: bytes, marker_text: str) -> bytes:
@@ -686,28 +755,57 @@ def inject_export_marker_and_footnotes(
         rels_root = ET.Element(_pkg("Relationships"))
     next_rid = _max_rel_id(rels_root) + 1
 
-    have_header = "word/header1.xml" in names
-    have_footer = "word/footer1.xml" in names
-
-    new_header_rid = None
-    new_footer_rid = None
-    new_footnotes_rid = None
-
+    # ---- The export marker (issue #291 scope item 2; W7-6). Every header/
+    # footer part a section actually references gets the marker appended,
+    # and only the sections that show NO default header/footer at all get a
+    # reference to one new marker part -- see `_plan_marker_wiring`.
+    marker_parts: dict[str, bytes] = {}
+    new_marker_parts: list[tuple[str, str]] = []  # (part name, content type)
+    new_marker_rids: list[str] = []
     if include_marker:
-        if not have_header:
-            new_header_rid = f"rId{next_rid}"
+        sections = _section_properties(body)
+        for ref_name, rel_type, stem, content_type, build in (
+            (
+                "headerReference",
+                docx_parts.HEADER_REL_TYPE,
+                "header",
+                docx_parts.HEADER_CONTENT_TYPE,
+                docx_parts.build_header_xml,
+            ),
+            (
+                "footerReference",
+                docx_parts.FOOTER_REL_TYPE,
+                "footer",
+                docx_parts.FOOTER_CONTENT_TYPE,
+                docx_parts.build_footer_xml,
+            ),
+        ):
+            existing_parts, unwired = _plan_marker_wiring(
+                sections, rels_root, names, ref_tag=_w(ref_name), rel_type=rel_type
+            )
+            for part in existing_parts:
+                marker_parts[part] = _append_marker_paragraph(originals[part], marker_text)
+            if not unwired:
+                continue
+            part = _free_part_name(names | set(marker_parts), stem)
+            rid = f"rId{next_rid}"
             next_rid += 1
             rel = ET.SubElement(rels_root, _pkg("Relationship"))
-            rel.set("Id", new_header_rid)
-            rel.set("Type", docx_parts.HEADER_REL_TYPE)
-            rel.set("Target", "header1.xml")
-        if not have_footer:
-            new_footer_rid = f"rId{next_rid}"
-            next_rid += 1
-            rel = ET.SubElement(rels_root, _pkg("Relationship"))
-            rel.set("Id", new_footer_rid)
-            rel.set("Type", docx_parts.FOOTER_REL_TYPE)
-            rel.set("Target", "footer1.xml")
+            rel.set("Id", rid)
+            rel.set("Type", rel_type)
+            rel.set("Target", part[len("word/") :])
+            marker_parts[part] = build(marker_text)
+            new_marker_parts.append((part, content_type))
+            new_marker_rids.append(rid)
+            for sect_pr in unwired:
+                # headerReference/footerReference must precede sectPr's other
+                # children (pgSz, pgMar, ...) per the CT_SectPr schema order.
+                ref = ET.Element(_w(ref_name))
+                ref.set(_w("type"), "default")
+                ref.set(_r("id"), rid)
+                sect_pr.insert(0, ref)
+
+    new_footnotes_rid = None
     if footnote_entries and not have_footnotes:
         new_footnotes_rid = f"rId{next_rid}"
         next_rid += 1
@@ -716,24 +814,6 @@ def inject_export_marker_and_footnotes(
         rel.set("Type", docx_parts.FOOTNOTES_REL_TYPE)
         rel.set("Target", "footnotes.xml")
 
-    # ---- <w:sectPr>: wire header/footer references only for NEWLY created
-    # parts -- a package that already carried a marker keeps whatever
-    # wiring it already has.
-    if new_header_rid or new_footer_rid:
-        sect_pr = _find_sect_pr(body)
-        # headerReference/footerReference must precede sectPr's other
-        # children (pgSz, pgMar, ...) per the CT_SectPr schema order.
-        if new_footer_rid:
-            fref = ET.Element(_w("footerReference"))
-            fref.set(_w("type"), "default")
-            fref.set(_r("id"), new_footer_rid)
-            sect_pr.insert(0, fref)
-        if new_header_rid:
-            href = ET.Element(_w("headerReference"))
-            href.set(_w("type"), "default")
-            href.set(_r("id"), new_header_rid)
-            sect_pr.insert(0, href)
-
     # A <w:headerReference>/<w:footerReference> we just added carries an
     # `r:id` attribute -- if the ORIGINAL root open tag (spliced back in
     # verbatim below, see ooxml_util.py's "Preserve") never declared
@@ -741,7 +821,7 @@ def inject_export_marker_and_footnotes(
     # r:-prefixed attribute never needed to), splicing it back unmodified
     # would leave `r:id` an unbound-prefix parse error. Add the declaration
     # only in that case -- never touch a root tag that already has it.
-    if new_header_rid or new_footer_rid:
+    if new_marker_rids:
         already_declared = any(
             uri == REL_NS
             for _prefix, uri in ooxml_util.declared_namespaces(original_root_open_tag)
@@ -764,23 +844,11 @@ def inject_export_marker_and_footnotes(
 
     new_parts: dict[str, bytes] = {ooxml_util.DOCUMENT_PART: new_document_xml}
 
-    # ---- word/header1.xml / word/footer1.xml (issue #513: only ever
-    # touched when include_marker -- an uploaded document's own pre-existing
-    # header/footer is left completely untouched otherwise, never gaining
-    # an appended marker paragraph it wasn't asked for).
-    if include_marker:
-        if new_header_rid:
-            new_parts["word/header1.xml"] = docx_parts.build_header_xml(marker_text)
-        elif have_header:
-            new_parts["word/header1.xml"] = _append_marker_paragraph(
-                originals["word/header1.xml"], marker_text
-            )
-        if new_footer_rid:
-            new_parts["word/footer1.xml"] = docx_parts.build_footer_xml(marker_text)
-        elif have_footer:
-            new_parts["word/footer1.xml"] = _append_marker_paragraph(
-                originals["word/footer1.xml"], marker_text
-            )
+    # ---- Header/footer parts (issue #513: only ever touched when
+    # include_marker -- an uploaded document's own pre-existing header/footer
+    # is left completely untouched otherwise, never gaining an appended
+    # marker paragraph it wasn't asked for).
+    new_parts.update(marker_parts)
 
     # ---- word/footnotes.xml
     if footnote_entries:
@@ -805,7 +873,7 @@ def inject_export_marker_and_footnotes(
             )
 
     # ---- word/_rels/document.xml.rels (only rewritten if it actually changed)
-    if new_header_rid or new_footer_rid or new_footnotes_rid:
+    if new_marker_rids or new_footnotes_rid:
         new_parts["word/_rels/document.xml.rels"] = (
             b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
             + ET.tostring(rels_root, encoding="unicode").encode("utf-8")
@@ -814,11 +882,7 @@ def inject_export_marker_and_footnotes(
     # ---- [Content_Types].xml: append Overrides for whatever parts are new
     # this pass -- never replace the original wholesale (a real upload's
     # content-types already declares styles.xml, settings.xml, etc.).
-    new_ct_parts = []
-    if new_header_rid:
-        new_ct_parts.append(("/word/header1.xml", docx_parts.HEADER_CONTENT_TYPE))
-    if new_footer_rid:
-        new_ct_parts.append(("/word/footer1.xml", docx_parts.FOOTER_CONTENT_TYPE))
+    new_ct_parts = [(f"/{part}", content_type) for part, content_type in new_marker_parts]
     if new_footnotes_rid:
         new_ct_parts.append(("/word/footnotes.xml", docx_parts.FOOTNOTES_CONTENT_TYPE))
     if new_ct_parts:
