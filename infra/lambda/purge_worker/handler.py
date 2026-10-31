@@ -85,7 +85,9 @@ TERMINAL_REVIEW_STATUSES = {
     "MANUAL_REVIEW_REQUIRED",  # legacy read only (pre-#133 rows)
     "QUARANTINED",
     "SUPERSEDED",
-    # Mirrors backend/src/reviews.py's REVIEW_STATUSES_TERMINAL. A cancelled
+    # Mirrors backend/src/reviews.py's REVIEW_STATUSES_TERMINAL, which
+    # backend/src/retention.py now uses directly; tests/test_retention_sweep_w6.py
+    # fails if this copy and that set ever differ. A cancelled
     # review is terminal, so it must be PURGEABLE: leaving it out would mean a
     # review the user stopped keeps its uploaded contract past the retention
     # window forever, precisely because they stopped it.
