@@ -159,11 +159,95 @@ class TestCancelledIsPurgedOnDts(SweepTestBase):
         self.assertTrue(self.object_exists(key))
 
 
+class TestEveryPurgeRunIsAudited(SweepTestBase):
+    """W6.4: data-handling.md promised "every purge run writes an audit
+    entry"; neither target wrote one."""
+
+    def _seed_mix(self) -> None:
+        self.seed("r-purge", "DONE")
+        self.seed("r-held", "DONE", legal_hold=True)
+        self.seed("r-running", "RUNNING")
+        self.seed("r-young", "DONE", age_days=0)
+
+    def _assert_row(self, row: dict, sweep_id: str) -> None:
+        self.assertEqual(row["target"], sweep_id)
+        self.assertEqual(row["sweep_id"], sweep_id)
+        self.assertEqual(row["target_type"], "retention_sweep")
+        self.assertEqual(row["purged_review_ids"], ["r-purge"])
+        self.assertEqual(int(row["deleted_count"]), 1)
+        self.assertEqual(int(row["skipped_hold_count"]), 1)
+        self.assertEqual(int(row["skipped_active_count"]), 1)
+        self.assertEqual(int(row["skipped_not_yet_eligible_count"]), 1)
+        self.assertEqual(int(row["failed_count"]), 0)
+        self.assertFalse(row["dry_run"])
+        # Identifiers and counts only: no object key, no substance.
+        self.assertNotIn("uploads/", repr(row))
+        self.assertNotIn("substance", repr(row))
+
+    def test_a_dts_sweep_writes_one_audit_row(self) -> None:
+        self._seed_mix()
+        result = retention.run_purge_sweep_now(self.s3, self.ddb)
+        rows = self.audit_rows("retention_purge_sweep")
+        self.assertEqual(len(rows), 1)
+        self._assert_row(rows[0], result["sweep_id"])
+        self.assertTrue(rows[0]["actor"].startswith("system:"))
+
+    def test_a_dts_sweep_that_purges_nothing_is_still_audited(self) -> None:
+        result = retention.run_purge_sweep_now(self.s3, self.ddb)
+        rows = self.audit_rows("retention_purge_sweep")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["sweep_id"], result["sweep_id"])
+        self.assertEqual(int(rows[0]["deleted_count"]), 0)
+
+    def test_a_lambda_sweep_writes_one_audit_row(self) -> None:
+        self._seed_mix()
+        worker = _load_purge_worker()
+        result = worker.run_purge_sweep()
+        rows = self.audit_rows("retention_purge_sweep")
+        self.assertEqual(len(rows), 1)
+        self._assert_row(rows[0], result["sweep_id"])
+
+    def test_both_targets_build_the_same_sweep_detail(self) -> None:
+        worker = _load_purge_worker()
+        sample = {
+            "sweep_id": "s1", "dry_run": False,
+            "deleted_reviews": [f"r{i}" for i in range(1203)],
+            "failed_reviews": ["f1"], "eligible_reviews": ["x"] * 1204,
+            "object_count": 2407, "skipped_active": ["a"], "skipped_hold": ["h", "i"],
+            "skipped_not_yet_eligible": [],
+        }
+        backend = retention.sweep_audit_detail(sample)
+        self.assertEqual(backend, worker._sweep_audit_detail(sample))
+        self.assertEqual(len(backend["purged_review_ids"]), retention.SWEEP_AUDIT_MAX_IDS)
+        self.assertTrue(backend["review_ids_truncated"])
+        self.assertEqual(backend["deleted_count"], 1203)
+
+    def test_a_dts_sweep_without_an_audit_table_deletes_nothing(self) -> None:
+        key = self.seed("r-purge", "DONE")
+        saved = os.environ.pop("AUDIT_TABLE")
+        try:
+            with self.assertRaises(RuntimeError):
+                retention.run_purge_sweep_now(self.s3, self.ddb)
+        finally:
+            os.environ["AUDIT_TABLE"] = saved
+        self.assertTrue(self.object_exists(key))
+
+    def test_a_lambda_sweep_without_an_audit_table_fails_loudly(self) -> None:
+        worker = _load_purge_worker()
+        saved = os.environ.pop("AUDIT_TABLE")
+        try:
+            with self.assertRaises(RuntimeError):
+                worker.run_purge_sweep()
+        finally:
+            os.environ["AUDIT_TABLE"] = saved
+
+
 def main() -> int:
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
     suite.addTests(loader.loadTestsFromTestCase(TestOneTerminalStatusSet))
     suite.addTests(loader.loadTestsFromTestCase(TestCancelledIsPurgedOnDts))
+    suite.addTests(loader.loadTestsFromTestCase(TestEveryPurgeRunIsAudited))
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     return 0 if result.wasSuccessful() else 1
 

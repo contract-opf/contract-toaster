@@ -96,6 +96,8 @@ os.environ.setdefault("REVIEWS_TABLE", "contract-toaster-reviews-test")
 os.environ.setdefault("RETENTION_SETTINGS_TABLE", "contract-toaster-retention-settings-test")
 os.environ.setdefault("UPLOADS_BUCKET", "contract-toaster-uploads-test")
 os.environ.setdefault("OUTPUTS_BUCKET", "contract-toaster-outputs-test")
+# W6.4: every sweep writes one audit row and refuses to start without a table.
+os.environ.setdefault("AUDIT_TABLE", "contract-toaster-audit-test")
 
 import handler as _handler_module  # noqa: E402
 
@@ -125,7 +127,7 @@ class FakeTable:
         item = self.items.get(key)
         return {"Item": item} if item else {}
 
-    def put_item(self, Item, ConditionExpression=None):
+    def put_item(self, Item, ConditionExpression=None, ExpressionAttributeNames=None):
         key = Item[self.key_name]
         self.items[key] = dict(Item)
 
@@ -214,6 +216,7 @@ class FakeDynamoDBResource:
             key_name = {
                 os.environ["REVIEWS_TABLE"]: "review_id",
                 os.environ["RETENTION_SETTINGS_TABLE"]: "setting_id",
+                os.environ["AUDIT_TABLE"]: "timestamp",
             }.get(name, "id")
             self._tables[name] = FakeTable(key_name)
         return self._tables[name]
