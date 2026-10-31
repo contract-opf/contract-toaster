@@ -494,15 +494,15 @@ export default function AdminRetention({
           { method: 'POST', body: JSON.stringify({}) },
         );
         if (!response.ok) {
-          const detail = await readErrorDetail(response);
-          throw new Error(
-            detail ??
-              friendlyErrorMessage(`Pending ${action} returned HTTP ${response.status}`, fallback),
+          throw await responseError(
+            response,
+            `Pending ${action} returned HTTP ${response.status}`,
+            fallback,
           );
         }
         await loadSettings();
       } catch (err) {
-        setActionError(err instanceof Error ? err.message : friendlyErrorMessage(err, fallback));
+        setActionError(toUserMessage(err, fallback));
       } finally {
         setPendingActionPending(false);
       }
