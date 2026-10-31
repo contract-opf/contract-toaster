@@ -386,6 +386,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+import confusables  # noqa: E402
 import deal_aliases  # noqa: E402
 import model_output_schema  # noqa: E402
 import opf_prompt  # noqa: E402
@@ -451,10 +452,16 @@ def _normalize(text: str) -> str:
       information for this comparison and only exist to defeat it.
     - Typographic hyphen/dash and curly-quote variants are folded onto
       their plain-ASCII equivalents (see ``_PUNCTUATION_VARIANTS``).
+    - Common Cyrillic/Greek lookalike letters are folded onto the Latin
+      letters they render as (``confusables.skeleton``, QA remediation
+      W7-3), so a model restating a gram with one homoglyph swapped in
+      ("C\\u043enfidential") still matches it. Both sides fold the same way,
+      so a genuinely Cyrillic or Greek gram still matches itself.
     """
     text = unicodedata.normalize("NFKC", text)
     text = "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
     text = text.translate(_PUNCTUATION_VARIANTS)
+    text = confusables.skeleton(text)
     return _NORMALIZE_WS.sub(" ", text.lower()).strip()
 
 

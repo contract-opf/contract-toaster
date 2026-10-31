@@ -74,6 +74,17 @@ skipped as empty before, now reaches this tier with an empty
 the heading LABEL, `clean_heading_text()` over the corrected accept-all
 text, changed (`"1.\\tTerm"` still normalizes to `"Term"`).
 
+QA remediation W7-4 amended "read run by run exactly as before #97" in one
+respect: `boundary_text` now carries each tab WHERE IT OCCURS, not at the
+end of its run, because the old reading made the decision depend on run
+splits -- including the ones the redline writer introduces, so one edit to
+a short `(a)<tab>...` paragraph could turn it into a heading in the
+projected document and void the redline. The extractor then drops a tab
+that directly follows a LETTERED marker (`extraction_normalization_stage.
+_boundary_decision_text`), so `(a)<tab>Buyer shall pay ...` stays body
+text whatever the split, while a numbered `1.<tab>Definitions` is a lead-in
+whatever the split. This module's rules are unchanged.
+
 ## No python-docx dependency
 
 `ooxml_paragraph_signals()` reads a raw `<w:p>` `xml.etree.ElementTree`

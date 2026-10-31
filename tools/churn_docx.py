@@ -133,6 +133,14 @@ not to introduce randomness.
     the generated result reaches neither the block map nor the model, the
     real clauses keep their ids, and the omission is disclosed in
     `normalization_notes`.
+  - `bidi_and_custom_xml_wrappers` (QA remediation W7-1) -- text wrapped in
+    `<w:dir>`, `<w:bdo>` and an inline `<w:customXml>`, a whole clause in a
+    block-level `<w:customXml>` and a table row in a row-level one. All three
+    wrappers used to be skipped without recursion -- "shall not disclose"
+    reached the model as "shall  disclose".
+  - `tab_led_sub_clause_run_splits` (QA remediation W7-4) -- one visible
+    `(x)<w:tab/>sentence` sub-clause shape written with three different run
+    splits; all three must stay body text of one block, whatever the split.
 
 ## What this is NOT
 
@@ -976,6 +984,122 @@ def table_of_contents(docx_bytes: bytes, *, seed: int = 0) -> bytes:
     return _rewrite_document_xml(docx_bytes, mutate)
 
 
+def bidi_and_custom_xml_wrappers(docx_bytes: bytes, *, seed: int = 0) -> bytes:
+    """W7-1: three more transparent wrappers the extractor used to skip
+    WITHOUT recursion -- dropping the words inside them in silence.
+
+    - INLINE: in the Confidentiality clause, "shall not disclose" has its
+      "not" wrapped in a `w:dir` (a bidirectional embedding, ECMA-376
+      17.3.2.8), "reasonable efforts" wrapped in a `w:bdo` (a bidirectional
+      override, 17.3.2.3) and "prior written consent" in an inline
+      `w:customXml` (17.5.1.3, with its `w:customXmlPr` properties child).
+      Before W7-1 the clause reached the model as "... shall  disclose it
+      ..." -- its meaning inverted.
+    - BLOCK-LEVEL: the whole Indemnification paragraph wrapped in a
+      `w:customXml`, which before W7-1 vanished from the review entirely.
+    - TABLE ROW: the table's second row wrapped in a row-level
+      `w:customXml`.
+    """
+
+    def wrap_inline(p_el: ET.Element, before: str, inner: str, after: str, tag: str) -> None:
+        _append_run(p_el, before)
+        wrapper = ET.SubElement(p_el, _w(tag))
+        if tag in ("dir", "bdo"):
+            wrapper.set(_w("val"), "ltr")
+        else:
+            wrapper.set(_w("element"), "clauseTerm")
+            ET.SubElement(wrapper, _w("customXmlPr"))
+        _append_run(wrapper, inner)
+        if after:
+            _append_run(p_el, after)
+
+    def mutate(root: ET.Element) -> None:
+        p_el = _find_paragraph_by_text(root, CONFIDENTIALITY_BODY)
+        _clear_runs(p_el)
+        head, _, rest = CONFIDENTIALITY_BODY.partition("reasonable efforts")
+        middle, _, tail = rest.partition("not")
+        middle2, _, end = tail.partition("prior written consent")
+        wrap_inline(p_el, head, "reasonable efforts", "", "bdo")
+        wrap_inline(p_el, middle, "not", "", "dir")
+        wrap_inline(p_el, middle2, "prior written consent", end, "customXml")
+
+        indemnification_p = _find_paragraph_by_text(root, INDEMNIFICATION_BODY)
+        parent = _parent_of(root, indemnification_p)
+        index = list(parent).index(indemnification_p)
+        parent.remove(indemnification_p)
+        block = ET.Element(_w("customXml"))
+        block.set(_w("element"), "indemnityClause")
+        ET.SubElement(block, _w("customXmlPr"))
+        block.append(indemnification_p)
+        parent.insert(index, block)
+
+        tbl = root.find(f"{_w('body')}/{_w('tbl')}")
+        if tbl is not None:
+            rows = [child for child in tbl if child.tag == _w("tr")]
+            if len(rows) > 1:
+                row = rows[1]
+                row_index = list(tbl).index(row)
+                tbl.remove(row)
+                row_wrapper = ET.Element(_w("customXml"))
+                row_wrapper.set(_w("element"), "tableRow")
+                row_wrapper.append(row)
+                tbl.insert(row_index, row_wrapper)
+
+    return _rewrite_document_xml(docx_bytes, mutate)
+
+
+#: The three sub-clauses `tab_led_sub_clause_run_splits` writes, each the
+#: SAME visible shape `(x)<tab>sentence` split into runs a different way.
+TAB_LED_SUB_CLAUSES: list[tuple[str, str, str]] = [
+    ("a", "Provider shall pay all defence costs within 30 days.", "one-run"),
+    ("b", "Recipient shall notify Provider of any claim promptly.", "marker-and-tab|text"),
+    ("c", "Neither party settles a claim without written consent.", "marker|tab-and-text"),
+]
+
+
+def tab_led_sub_clause_run_splits(docx_bytes: bytes, *, seed: int = 0) -> bytes:
+    """W7-4: the same visible `(x)<w:tab/>sentence` sub-clause written with
+    three different run splits under the Indemnification clause -- all in
+    one run; marker and tab in one run, the sentence in the next (the shape
+    the WRITER produces when it splits a run for a tracked change); marker
+    alone, tab and sentence in the next. Before W7-4 the boundary decision
+    appended every tab at the END of its run, so the second split was lifted
+    into a heading (its sentence no longer in any block's text) while the
+    other two stayed body text -- and an edit that made the writer split a
+    one-run sub-clause voided the whole redline. All three must now read as
+    body text of one block."""
+
+    def mutate(root: ET.Element) -> None:
+        p_el = _find_paragraph_by_text(root, INDEMNIFICATION_BODY)
+        parent = _parent_of(root, p_el)
+        index = list(parent).index(p_el)
+
+        def run_with(sub_p: ET.Element, *parts: str) -> None:
+            r = ET.SubElement(sub_p, _w("r"))
+            for part in parts:
+                if part == "\t":
+                    ET.SubElement(r, _w("tab"))
+                else:
+                    t = ET.SubElement(r, _w("t"))
+                    t.set(f"{{{_XML_NS}}}space", "preserve")
+                    t.text = part
+
+        for offset, (letter, sentence, split) in enumerate(TAB_LED_SUB_CLAUSES):
+            sub_p = ET.Element(_w("p"))
+            marker = f"({letter})"
+            if split == "one-run":
+                run_with(sub_p, marker, "\t", sentence)
+            elif split == "marker-and-tab|text":
+                run_with(sub_p, marker, "\t")
+                run_with(sub_p, sentence)
+            else:
+                run_with(sub_p, marker)
+                run_with(sub_p, "\t", sentence)
+            parent.insert(index + 1 + offset, sub_p)
+
+    return _rewrite_document_xml(docx_bytes, mutate)
+
+
 TRANSFORMS: dict[str, Callable[..., bytes]] = {
     "tracked_changes_multi_author": tracked_changes_multi_author,
     "curly_punctuation": curly_punctuation,
@@ -988,6 +1112,8 @@ TRANSFORMS: dict[str, Callable[..., bytes]] = {
     "content_control_wrapped_text": content_control_wrapped_text,
     "mixed_run_children": mixed_run_children,
     "table_of_contents": table_of_contents,
+    "bidi_and_custom_xml_wrappers": bidi_and_custom_xml_wrappers,
+    "tab_led_sub_clause_run_splits": tab_led_sub_clause_run_splits,
 }
 
 
