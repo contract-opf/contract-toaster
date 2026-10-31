@@ -29,7 +29,6 @@
 #                             or org references live in git). If the packages
 #                             are private, the host also needs a GHCR pull
 #                             credential.
-#   DEMO_TOKEN_SECRET       - session-signing secret for demo password auth.
 #   OPENROUTER_API_KEY      - OPTIONAL fallback. MODEL_PROVIDER=openrouter runs
 #                             the REAL review chain and there is NO mock
 #                             fallback: with no key reachable, every review
@@ -188,7 +187,13 @@ services:
       # Downloads are presigned for a browser-reachable host, not the internal
       # `minio` DNS name. Set this to the minio service's public domain.
       S3_PUBLIC_ENDPOINT_URL: ${S3_PUBLIC_ENDPOINT_URL}
-      DEMO_TOKEN_SECRET: ${DEMO_TOKEN_SECRET:?set DEMO_TOKEN_SECRET}
+      # Signs every sign-in session. A Coolify magic variable, like the MinIO
+      # pair above: Coolify generates a random 64-character value on first
+      # save, so no operator types one and no usable value lives in this
+      # public file. The backend refuses to boot on an unset, short or
+      # placeholder value (backend/src/startup_checks.py). A host other than
+      # Coolify must set it (`openssl rand -hex 32`).
+      DEMO_TOKEN_SECRET: ${SERVICE_PASSWORD_64_DEMOTOKEN}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       # Issue #418 built this, issue #673 turned it on: the OpenRouter
       # request carries the review object as a forced tool call instead of
