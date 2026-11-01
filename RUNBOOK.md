@@ -186,7 +186,9 @@ cdk deploy --context imageDigest=sha256:<digest> --context env=dev
 cdk deploy --context imageDigest=sha256:<digest> --context env=prod
 ```
 
-Promotion verifies the image signature before App Runner is repointed; an unsigned or tampered digest is refused. Confirm the authenticated `/version` endpoint (or App Runner deployment metadata) reports the digest you promoted. Production is only ever mutated by an explicit promotion of a named digest — nothing auto-mutates it.
+Promotion verifies the image signature before App Runner is repointed; an unsigned or tampered digest is refused.
+
+**Promoting to prod.** The GitHub Actions `ci-pipeline.yml` promote job refuses `promote=prod` (its STEP G, before it takes AWS credentials). CI builds and signs into `contract-toaster-api-dev` only, while prod's App Runner service pulls from `contract-toaster-api-prod` in the prod account, and the workflow has no role that can copy an image and its cosign signature across accounts — promoting anyway would audit and pin a digest prod cannot pull. Until a cross-account copy role exists, an operator holding credentials for both accounts copies the image *and* its signature with `cosign copy <dev-registry>/contract-toaster-api-dev@sha256:<digest> <prod-registry>/contract-toaster-api-prod@sha256:<digest>` (the digest is unchanged by the copy), then runs the prod account's CodeBuild promote project with `IMAGE_DIGEST=sha256:<digest>` — it verifies the signature *in the prod repository*, writes the audit row and updates the SSM parameter — and finally `cdk deploy --context env=prod --context imageDigest=sha256:<digest>`. Promoting to dev through the workflow is unaffected. Confirm the authenticated `/version` endpoint (or App Runner deployment metadata) reports the digest you promoted. Production is only ever mutated by an explicit promotion of a named digest — nothing auto-mutates it.
 
 For infrastructure changes (`infra/`):
 
