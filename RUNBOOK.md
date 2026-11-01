@@ -473,6 +473,41 @@ investigations and their parameters; with one it runs that investigation
 CSV export** in the admin UI yet (**PLANNED**); call the route directly, or
 query the DynamoDB table with the catalogue's queries.
 
+### Audit table key change
+
+The audit table's partition key is `partition` (the `YYYY-MM` month bucket)
+and its sort key `timestamp` (`"{epoch}#{event_id}"`) — the shape every
+writer puts and the DTS table has always had. AWS stacks synthesized before
+this change declared the partition key as `pk`, so on those deployments
+**every backend audit write failed** (DynamoDB rejects an item missing the
+table's key attribute) and the table holds only the CI promotion rows, which
+were written in the old `pk` shape.
+
+A key change is a table replacement, and CloudFormation will not replace a
+custom-named table in place, so the CDK gives the table a new logical ID
+(`AuditLogTable`). The old resource leaves the stack under its `RETAIN`
+policy — it is not deleted — and the new one is created under the same name,
+which only succeeds once the old table is gone. On an environment deployed
+before the change:
+
+1. **Back it up.** `aws dynamodb create-backup --table-name contract-toaster-audit-<env> --backup-name audit-pk-shape-<date>`.
+   Record the backup ARN on the change ticket; this backup is the only
+   copy of the old promotion rows. (PITR does not survive table deletion
+   beyond its own 35-day window; the on-demand backup does.)
+2. **Delete the old table** with an operator role. The immutability
+   policy denies `UpdateItem`/`DeleteItem` to every principal, not
+   `DeleteTable`; treat this as a break-glass-grade action and record it on
+   the ticket.
+3. **Deploy** (`cdk deploy`). The new table, its GSIs and its stream are
+   created; the stream ARN changes, so anything consuming
+   `AuditTableStreamArn` picks up the new output on the same deploy.
+4. **Verify** with an audited admin action, then `GET /api/audit` — the row
+   must come back.
+
+The old rows are not migrated: they are promotion records in a shape the
+audit query API does not read. Restore the backup to a side table if one is
+ever needed. A fresh environment needs none of this.
+
 ### Changing document retention
 
 Admin UI → Settings → **Document retention** slider (0 days–3 years, default 90). On save:

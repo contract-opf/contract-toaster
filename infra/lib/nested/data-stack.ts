@@ -1288,7 +1288,7 @@ export class DataStack extends cdk.NestedStack {
     //     roles) are explicitly DENIED dynamodb:UpdateItem and
     //     dynamodb:DeleteItem on this table (see _addAuditImmutabilityPolicy).
     //   - The ONLY allowed write path is PutItem with an attribute_not_exists
-    //     condition on (pk, sk) so that a replay of an existing audit event is
+    //     condition on (partition, timestamp) so that a replay of an existing audit event is
     //     rejected by DynamoDB, not silently overwritten.
     //   - Denied/failed mutation attempts (UpdateItem, DeleteItem) trigger a
     //     CloudWatch alarm (#57 ObservabilityStack).
@@ -1299,12 +1299,24 @@ export class DataStack extends cdk.NestedStack {
     //     Lambda consumer (wired in Phase 4 / #57, but the stream is enabled
     //     here so the event source is available without a table replacement).
     // -----------------------------------------------------------------------
-    this.auditTable = new dynamodb.Table(this, 'AuditTable', {
+    // Logical ID 'AuditLogTable', not the original 'AuditTable': the key
+    // moved from `pk` to `partition`, and CloudFormation refuses to replace a
+    // custom-named table in place. A new logical ID lets the old resource drop
+    // out of the stack (RETAIN keeps it) and the new one be created under the
+    // same name once an operator has backed up and deleted the old table —
+    // RUNBOOK.md "Audit table key change".
+    this.auditTable = new dynamodb.Table(this, 'AuditLogTable', {
       tableName: `${appName}-audit-${envName}`,
-      // PK: YYYY-MM time bucket (or target_type#target_id for target-scoped queries)
-      partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
-      // SK: ISO-8601 UTC timestamp — enables range queries within a month bucket.
-      // NOT event_id (per AC: event_id as PK makes timestamp SK useless for range queries).
+      // PK `partition`: the YYYY-MM (UTC) month bucket. This is the attribute
+      // every writer puts (backend/src/audit_log.py, the promotion step in
+      // ci-pipeline.yml and its CodeBuild twin below) and the DTS table
+      // declares (deploy/dts/bootstrap.py); tests/test_infra_audit_table_key.py
+      // pins all of them together. Changing it replaces the table — see
+      // RUNBOOK.md "Audit table key change".
+      partitionKey: { name: 'partition', type: dynamodb.AttributeType.STRING },
+      // SK `timestamp`: "{epoch_seconds}#{event_id}" — range queries within a
+      // month bucket, and the event_id suffix keeps two events in one second
+      // distinct. NOT event_id alone (that would make range queries useless).
       sortKey: { name: 'timestamp', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       pointInTimeRecovery: true,

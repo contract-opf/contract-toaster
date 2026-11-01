@@ -362,10 +362,14 @@ export class CicdStack extends cdk.NestedStack {
             // A failed audit write fails the promotion step, enforcing the
             // "promotion writes an audit row" AC.
             'echo "[STEP I] Writing promotion audit row (actor, digest, timestamp, environment) …"',
-            'AUDIT_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)',
+            // Same key shape as every other audit row (backend/src/audit_log.py):
+            // partition=YYYY-MM, timestamp="{epoch}#{event_id}".
+            'AUDIT_PARTITION=$(date -u +%Y-%m)',
+            'AUDIT_EPOCH=$(date -u +%s)',
             'BUILD_ARN=$CODEBUILD_BUILD_ARN',
+            'AUDIT_EVENT_ID="promote-$CODEBUILD_BUILD_NUMBER"',
             'AUDIT_TABLE="contract-toaster-audit-$APP_ENV"',
-            'aws dynamodb put-item --table-name "$AUDIT_TABLE" --condition-expression "attribute_not_exists(pk)" --item "{\\"pk\\":{\\"S\\":\\"AUDIT#$AUDIT_TIMESTAMP\\"},\\"sk\\":{\\"S\\":\\"image-promoted#$BUILD_ARN\\"},\\"event_type\\":{\\"S\\":\\"image-promoted\\"},\\"actor\\":{\\"S\\":\\"$BUILD_ARN\\"},\\"digest\\":{\\"S\\":\\"$IMAGE_DIGEST\\"},\\"environment\\":{\\"S\\":\\"$APP_ENV\\"},\\"timestamp\\":{\\"S\\":\\"$AUDIT_TIMESTAMP\\"}}"',
+            'aws dynamodb put-item --table-name "$AUDIT_TABLE" --condition-expression "attribute_not_exists(partition)" --item "{\\"partition\\":{\\"S\\":\\"$AUDIT_PARTITION\\"},\\"timestamp\\":{\\"S\\":\\"$AUDIT_EPOCH#$AUDIT_EVENT_ID\\"},\\"event_id\\":{\\"S\\":\\"$AUDIT_EVENT_ID\\"},\\"action\\":{\\"S\\":\\"image-promoted\\"},\\"outcome\\":{\\"S\\":\\"success\\"},\\"actor\\":{\\"S\\":\\"$BUILD_ARN\\"},\\"digest\\":{\\"S\\":\\"$IMAGE_DIGEST\\"},\\"environment\\":{\\"S\\":\\"$APP_ENV\\"}}"',
 
             // --- STEP J: Update SSM digest parameter (deliberate promotion) ---
             'echo "[STEP J] Updating SSM image digest parameter (deliberate promotion) …"',
