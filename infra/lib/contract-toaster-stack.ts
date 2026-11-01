@@ -113,6 +113,13 @@ export class ContractToasterStack extends cdk.Stack {
     //   --context appDomain=…             (REQUIRED — no default)
     //   --context adminEmail=…            (REQUIRED — no default)
     //   --context hostedDomain=…          (REQUIRED — no default)
+    //   --context allowedEmailDomains=a.com,b.com  (REQUIRED — no default;
+    //                                     injected into App Runner as
+    //                                     ALLOWED_EMAIL_DOMAINS. backend/src/
+    //                                     auth.py refuses every Cognito request
+    //                                     with 503 while it is unset, so a stack
+    //                                     without it deploys and then serves
+    //                                     nothing to signed-in users.)
     //   --context authMode=sso|password|both  (default: 'sso' — issue #245;
     //                                     gates the Cognito username/password
     //                                     app client in AuthStack. Same three
@@ -126,6 +133,7 @@ export class ContractToasterStack extends cdk.Stack {
     const appDomain = this.node.tryGetContext('appDomain') as string | undefined;
     const adminEmail = this.node.tryGetContext('adminEmail') as string | undefined;
     const hostedDomain = this.node.tryGetContext('hostedDomain') as string | undefined;
+    const allowedEmailDomains = this.node.tryGetContext('allowedEmailDomains') as string | undefined;
     // Issue #245: optional, with a fail-closed default of 'sso' (no password
     // surface). AuthStack validates the value and throws on anything else.
     const authMode = ((this.node.tryGetContext('authMode') as string | undefined) ??
@@ -138,6 +146,7 @@ export class ContractToasterStack extends cdk.Stack {
         ['appDomain', appDomain],
         ['adminEmail', adminEmail],
         ['hostedDomain', hostedDomain],
+        ['allowedEmailDomains', allowedEmailDomains],
       ] as const
     )
       .filter(([, value]) => !value)
@@ -148,7 +157,23 @@ export class ContractToasterStack extends cdk.Stack {
           "Supply them explicitly, e.g. --context githubOwner=<owner> " +
           '--context alarmsEmail=<email> --context appDomain=<domain> ' +
           '--context adminEmail=<email> --context hostedDomain=<domain> ' +
+          '--context allowedEmailDomains=<domain>[,<domain>…] ' +
           '(see infra/lib/contract-toaster-stack.ts, issues #316, #349).',
+      );
+    }
+    // The backend splits ALLOWED_EMAIL_DOMAINS on commas and compares each
+    // entry to the email domain / Google `hd` claim. A blank entry, `*` or
+    // anything that is not a bare domain would either match nothing or read
+    // as something it is not, so refuse it here rather than at first sign-in.
+    const allowedEmailDomainList = allowedEmailDomains!.split(',').map((d) => d.trim().toLowerCase());
+    const badAllowedDomains = allowedEmailDomainList.filter(
+      (d) => !/^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(d),
+    );
+    if (badAllowedDomains.length > 0) {
+      throw new Error(
+        `Invalid CDK context allowedEmailDomains: ${JSON.stringify(badAllowedDomains)} ` +
+          'is not a bare domain. Supply a comma-separated list of domains with no blank ' +
+          'entries and no wildcard, e.g. --context allowedEmailDomains=company.com,subsidiary.com.',
       );
     }
 
@@ -320,6 +345,7 @@ export class ContractToasterStack extends cdk.Stack {
       vpc: this.networkStack.vpc,
       cognitoUserPoolId: this.authStack.userPool.userPoolId,
       cognitoAppClientId: this.authStack.userPoolClient.userPoolClientId,
+      allowedEmailDomains: allowedEmailDomainList.join(','),
       stateMachineKey: this.kmsKeysStack.stateMachineKey,
       ecrImageDigest: imageDigestContext,
       ecrRepositoryUri: this.cicdStack.ecrRepository.repositoryUri,

@@ -51,7 +51,7 @@ The first deploy of an environment requires steps that won't be needed again.
     cdk bootstrap aws://<account-id>/us-east-1
     ```
 
-5. **Set stack parameters.** Copy `infra/cdk.context.example.json` to `infra/cdk.context.json` and fill in `githubOwner`, `alarmsEmail`, `appDomain`, `adminEmail` (the GC's `@company.com` address), and `hostedDomain` — see `infra/README.md` "Deploy identity context" for what each controls. `infra/cdk.context.json` is **git-ignored**; it holds this deployment's real tenant values and is never committed (issue #409).
+5. **Set stack parameters.** Copy `infra/cdk.context.example.json` to `infra/cdk.context.json` and fill in `githubOwner`, `alarmsEmail`, `appDomain`, `adminEmail` (the GC's `@company.com` address), `hostedDomain`, and `allowedEmailDomains` (the email domains Cognito sign-ins may come from) — see `infra/README.md` "Deploy identity context" for what each controls. `infra/cdk.context.json` is **git-ignored**; it holds this deployment's real tenant values and is never committed (issue #409).
 
 6. **First deploy.** Provision infrastructure first, then promote an image (the two are separate concerns now — infra is CDK, the running image is a pinned digest):
     ```bash
