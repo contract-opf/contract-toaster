@@ -97,6 +97,7 @@ import opf_canonicalize  # noqa: E402
 import opf_html  # noqa: E402
 import opf_injection_scan  # noqa: E402
 import playbook_registry  # noqa: E402
+import regex_safety  # noqa: E402
 
 # Same try/except + helpful-error convention as scripts/primary_review_pass.py:82-90.
 try:
@@ -190,6 +191,17 @@ class OpfDigestVersionError(OpfValidationError):
 class OpfExtractError(OpfValidationError):
     """Raised when a `.opf.html` bundle carries no single, parseable embedded
     canonical OPF JSON block (wraps opf_html.OpfHtmlExtractError)."""
+
+
+class OpfUnsafePatternError(OpfValidationError):
+    """A `numeric_bound` hard-rule `pattern` that would not run safely: it
+    does not compile, does not have exactly one capture group, or contains a
+    catastrophic-backtracking construct (`regex_safety.structural_hazard`,
+    the same check the v1 CI ReDoS gate runs -- QA 2026-10-31 report item 12).
+
+    Refused at load/upload time because the pattern is compiled from an
+    untrusted playbook and run over every bound clause's text. The message
+    names the JSON Pointer and the reason, never the pattern itself."""
 
 
 class OpfDuplicateIdError(OpfValidationError):
@@ -380,6 +392,43 @@ def _check_duplicate_sibling_ids(doc: dict) -> None:
             seen.add(item_id)
 
 
+def _numeric_bound_conditions(node: Any, path: list) -> list[tuple[list, dict]]:
+    """Every `{"type": "numeric_bound", ...}` object anywhere in the document,
+    with its path -- wherever the schema lets a hard-rule condition sit."""
+    found: list[tuple[list, dict]] = []
+    if isinstance(node, dict):
+        if node.get("type") == "numeric_bound":
+            found.append((path, node))
+        for key, value in node.items():
+            found.extend(_numeric_bound_conditions(value, [*path, key]))
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            found.extend(_numeric_bound_conditions(value, [*path, index]))
+    return found
+
+
+def _check_numeric_bound_patterns(doc: dict) -> None:
+    """Raise OpfUnsafePatternError for the first `numeric_bound` pattern
+    that `hard_ledger.evaluate_predicate` could not run safely."""
+    for path, condition in _numeric_bound_conditions(doc, []):
+        pattern = condition.get("pattern")
+        if not isinstance(pattern, str):
+            continue  # the schema already requires a string
+        pointer = _json_pointer([*path, "pattern"])
+        try:
+            compiled = re.compile(pattern)
+        except re.error:
+            reason = "the pattern does not compile"
+        else:
+            if compiled.groups != 1:
+                reason = "the pattern must have exactly one capture group"
+            else:
+                hazard = regex_safety.structural_hazard(pattern)
+                reason = f"the pattern can backtrack catastrophically ({hazard})" if hazard else ""
+        if reason:
+            raise OpfUnsafePatternError(f"OPF validation failed at {pointer}: {reason}")
+
+
 def _validate_doc(doc: dict, *, require_identity: bool) -> dict:
     """Schema-validate, hash-verify, and injection-scan an in-memory OPF doc.
 
@@ -410,6 +459,9 @@ def _validate_doc(doc: dict, *, require_identity: bool) -> dict:
         raise OpfValidationError(_describe(exc)) from None
 
     _check_duplicate_sibling_ids(doc)
+    # A playbook-supplied regex is vetted before anything runs it -- with the
+    # structural checks, ahead of the content hash (QA 2026-10-31 item 12).
+    _check_numeric_bound_patterns(doc)
 
     identity = doc.get("identity")
     has_identity = isinstance(identity, dict) and isinstance(identity.get("content_hash"), str)
