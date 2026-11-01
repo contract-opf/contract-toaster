@@ -216,8 +216,7 @@ with real infra failures hidden in the FLAKY bucket.
    (`deploy/dts/README.md`, "Retention purge cadence").
 
 **To make AWS production-deployable:**
-3. Set `ALLOWED_EMAIL_DOMAINS` on the App Runner service (the CDK stack does
-   not yet; without it every Cognito request is refused with `503`), then close #225 (deployability), #96 (prod account bootstrap), and pass the
+3. Close #225 (deployability), #96 (prod account bootstrap), and pass the
    blocking gates #98 (production readiness) and #99 (pilot + go-live decision).
 
 **Product completeness:**

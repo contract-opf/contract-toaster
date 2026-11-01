@@ -230,7 +230,7 @@ variables there) when the default does not fit.
 |---|---|---|
 | `DAILY_SPEND_CAP_USD_CENTS` | `2000` ($20/day) | The daily spend ceiling every review reserves against before it starts. An admin can override it without a restart on the **Settings** tab (`POST /api/admin/spend-cap`); clearing that override falls back to this value. Each review reserves its worst case, so at the default only about one review is in flight at a time (RUNBOOK.md, "Adjusting the daily spend ceiling"). |
 | `PIPELINE_MAX_CONCURRENCY` | `5` | How many reviews the in-process runner works on at once; more wait in its queue. `GET /api/admin/health` reports occupancy against it. The spend reservation usually binds first. |
-| `ALLOWED_EMAIL_DOMAINS` | unset | Comma-separated email domains a **Cognito** sign-in may come from (the email and Google `hd` claims are both checked). Not used for password sign-in, so this target does not need it unless `AUTH_MODE` is `sso` or `both`; unset there, every Cognito request is refused with `503`. On AWS it is required, and the CDK stack does not set it yet. |
+| `ALLOWED_EMAIL_DOMAINS` | unset | Comma-separated email domains a **Cognito** sign-in may come from (the email and Google `hd` claims are both checked). Not used for password sign-in, so this target does not need it unless `AUTH_MODE` is `sso` or `both`; unset there, every Cognito request is refused with `503`. On AWS it is required; the CDK stack sets it from the `allowedEmailDomains` context and refuses to synthesize without it. |
 
 ## Our own legal entities (`ENTITY_ROSTER_TABLE`, issue #678)
 

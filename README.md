@@ -227,14 +227,13 @@ fresh clone, and its review stage is still a mock — see
 [docs/REVIEW-GUIDE.md](docs/REVIEW-GUIDE.md) for the current status and
 blocking issues.
 
-The CDK app refuses to synthesize without five deploy-identity values:
-`githubOwner`, `alarmsEmail`, `appDomain`, `adminEmail` and `hostedDomain`.
+The CDK app refuses to synthesize without six deploy-identity values:
+`githubOwner`, `alarmsEmail`, `appDomain`, `adminEmail`, `hostedDomain` and
+`allowedEmailDomains` (the email domains Cognito sign-ins may come from,
+which the stack hands the backend as `ALLOWED_EMAIL_DOMAINS`).
 Put them in `infra/cdk.context.json` (copy `infra/cdk.context.example.json`;
 the real file is git-ignored) or pass each as `--context key=value`. Also
-replace the dummy account IDs under `dev` / `prod` in `infra/cdk.json`. The
-backend additionally needs `ALLOWED_EMAIL_DOMAINS` (the email domains
-Cognito sign-ins may come from), which the stack does not set for you yet:
-without it every signed-in request is refused with `503`. See
+replace the dummy account IDs under `dev` / `prod` in `infra/cdk.json`. See
 [infra/README.md](infra/README.md#deploy-identity-context-issues-316-349-409).
 
 ```bash
@@ -245,7 +244,7 @@ npm install -g aws-cdk
 # Infrastructure (CDK)
 cd infra
 npm install
-cp cdk.context.example.json cdk.context.json   # then fill in the five values
+cp cdk.context.example.json cdk.context.json   # then fill in the six values
 cdk synth --context env=dev                    # validate (offline)
 cdk diff --context env=dev                     # preview changes
 cdk deploy --context env=dev                   # deploy (add --context profile=minimal for a demo footprint)
