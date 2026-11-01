@@ -552,8 +552,11 @@ jobs:
           echo "Signature verified — promotion approved."
 
       - name: Write promotion audit row (STEP I)
-        # Audit row: event_type=image-promoted, actor=GitHub Actions run URL,
-        # digest, environment, timestamp.  Append-only PutItem with condition.
+        # Audit row: action=image-promoted, actor=GitHub Actions run URL,
+        # digest, environment. Same key shape as every other audit row
+        # (backend/src/audit_log.py): partition=YYYY-MM, timestamp=
+        # "{epoch}#{event_id}" (tests/test_infra_audit_table_key.py).
+        # Append-only PutItem with condition.
         # Fail-closed, like the CodeBuild twin in cicd-stack.ts: the only
         # error tolerated is ConditionalCheckFailedException (the row already
         # exists, an idempotent re-run). Any other failure stops the job
@@ -562,23 +565,26 @@ jobs:
           TARGET_ENV: ${{ github.event.inputs.promote }}
           IMAGE_DIGEST: ${{ needs.build-sign-push.outputs.image-digest }}
         run: |
-          AUDIT_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          AUDIT_PARTITION=$(date -u +%Y-%m)
+          AUDIT_EPOCH=$(date -u +%s)
+          AUDIT_EVENT_ID="promote-${{ github.run_id }}-${{ github.run_attempt }}"
           ACTOR="${{ github.actor }}"
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           AUDIT_TABLE="contract-toaster-audit-${TARGET_ENV}"
           echo "Writing promotion audit row to ${AUDIT_TABLE} …"
           if ! out=$(aws dynamodb put-item \
             --table-name "${AUDIT_TABLE}" \
-            --condition-expression "attribute_not_exists(pk)" \
+            --condition-expression "attribute_not_exists(partition)" \
             --item "{
-              \"pk\":{\"S\":\"AUDIT#${AUDIT_TIMESTAMP}\"},
-              \"sk\":{\"S\":\"image-promoted#${RUN_URL}\"},
-              \"event_type\":{\"S\":\"image-promoted\"},
+              \"partition\":{\"S\":\"${AUDIT_PARTITION}\"},
+              \"timestamp\":{\"S\":\"${AUDIT_EPOCH}#${AUDIT_EVENT_ID}\"},
+              \"event_id\":{\"S\":\"${AUDIT_EVENT_ID}\"},
+              \"action\":{\"S\":\"image-promoted\"},
+              \"outcome\":{\"S\":\"success\"},
               \"actor\":{\"S\":\"${ACTOR}\"},
               \"run_url\":{\"S\":\"${RUN_URL}\"},
               \"digest\":{\"S\":\"${IMAGE_DIGEST}\"},
-              \"environment\":{\"S\":\"${TARGET_ENV}\"},
-              \"timestamp\":{\"S\":\"${AUDIT_TIMESTAMP}\"}
+              \"environment\":{\"S\":\"${TARGET_ENV}\"}
             }" 2>&1); then
             if ! grep -q ConditionalCheckFailedException <<<"${out}"; then
               echo "${out}" >&2
