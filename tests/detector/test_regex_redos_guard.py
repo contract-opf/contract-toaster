@@ -41,6 +41,11 @@ import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+
+import regex_safety  # noqa: E402
+
 PLAYBOOK_PATH = REPO_ROOT / "tests" / "fixtures" / "playbooks" / "synthetic-generic-v1.0.0.json"
 SCHEMA_PATH = REPO_ROOT / "playbooks" / "schema.json"
 GOVERNANCE_PATH = REPO_ROOT / "docs" / "playbook-governance.md"
@@ -98,7 +103,16 @@ def is_structurally_dangerous(pattern: str) -> tuple[bool, str]:
     """
     Returns (dangerous: bool, reason: str).
     True if the pattern contains a known catastrophic-backtracking construct.
+
+    Delegates to `scripts/regex_safety.structural_hazard` -- the one check
+    shared with OPF `numeric_bound` patterns, which `scripts/opf_load.py`
+    runs at load/upload time (QA 2026-10-31 report item 12). The source-regex
+    heuristics above are kept as a second, independent net: a pattern either
+    one flags fails the gate.
     """
+    reason = regex_safety.structural_hazard(pattern)
+    if reason:
+        return True, reason
     if _NESTED_QUANT.search(pattern):
         return True, "nested quantifiers: (X+)+ or similar"
     if _AMBIGUOUS_ALT_IN_REPEAT.search(pattern):

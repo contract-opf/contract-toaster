@@ -64,6 +64,7 @@ admin identity, or sign-in enforcement domain.
 | `appDomain`     | **Yes** — no default | —                       | Cognito hosted-UI callback/logout URL domain (SPA hosting domain) |
 | `adminEmail`    | **Yes** — no default | —                       | Initial admin (GC) email seeded into `admin_bootstrap` |
 | `hostedDomain`  | **Yes** — no default | —                       | Google Workspace hosted domain enforced for sign-in (two independent layers — see `auth-stack.ts`) |
+| `allowedEmailDomains` | **Yes** — no default | —                 | Comma-separated email domains a Cognito sign-in may come from; injected into App Runner as `ALLOWED_EMAIL_DOMAINS`. Synth refuses a blank entry, `*` or anything that is not a bare domain |
 | `appName`       | No        | `contract-toaster`                 | Resource-name prefix |
 | `githubRepo`    | No        | `contract-toaster`                 | GitHub repo name CodeBuild watches |
 | `profile`       | No        | `hardened`                         | Deploy profile — see "Deploy profiles" below |
@@ -99,13 +100,12 @@ signing workflow other than the default GitHub Actions OIDC one).
 
 ## Runtime variables the stack does not set
 
-`AppStack` injects the table and bucket names the API needs. Three runtime
-settings are not injected; set them on the App Runner service when the default
-does not fit (their meaning is documented once, in
+`AppStack` injects the table and bucket names the API needs, and
+`ALLOWED_EMAIL_DOMAINS` from the required `allowedEmailDomains` context above.
+Two runtime settings are not injected; set them on the App Runner service when
+the default does not fit (their meaning is documented once, in
 [deploy/dts/README.md](../deploy/dts/README.md#spend-concurrency-and-sign-in-variables)):
 
-- `ALLOWED_EMAIL_DOMAINS` — **required on this target.** Unset, every
-  Cognito-authenticated request is refused with `503`.
 - `DAILY_SPEND_CAP_USD_CENTS` — default `2000` ($20/day). This target has no
   admin settings store (`MODEL_SETTINGS_TABLE` is not provisioned), so the
   Settings tab cannot override it here; change the variable and redeploy.
@@ -119,7 +119,7 @@ does not fit (their meaning is documented once, in
 npm install
 
 # Synthesize the dev stack (dry run) — see "Deploy identity context" above;
-# githubOwner/alarmsEmail/appDomain/adminEmail/hostedDomain must be supplied
+# githubOwner/alarmsEmail/appDomain/adminEmail/hostedDomain/allowedEmailDomains must be supplied
 # via --context or infra/cdk.context.json, omitted here for brevity.
 npx cdk synth --context env=dev
 

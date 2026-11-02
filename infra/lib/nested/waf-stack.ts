@@ -22,13 +22,19 @@ export interface WafStackProps extends cdk.NestedStackProps {
  *
  *   1. AWS Managed Rule Groups:
  *      - AWSManagedRulesCommonRuleSet     — OWASP top-10 / common attacks.
+ *        Its SizeRestrictions_BODY rule (bodies over 8 KB) is set to COUNT and
+ *        re-applied by rule 1b everywhere except the upload routes: left as
+ *        is it blocked every .docx upload (QA 2026-10-31 item 14).
  *      - AWSManagedRulesKnownBadInputsRuleSet — known bad inputs / exploits.
  *
  *   2. Request-size cap:
- *      - SizeConstraintStatement on the request body:
- *        hard limit UPLOAD_MAX_BODY_BYTES (50 MiB) so oversized uploads are
- *        dropped at the WAF before reaching the App Runner container.
- *        (Complements the decompressed-size cap in the application layer.)
+ *      - A regex on the Content-Length header blocks any request declaring a
+ *        body over UPLOAD_MAX_BODY_BYTES (50 MiB) before it reaches the App
+ *        Runner container. Not a body SizeConstraintStatement: a regional
+ *        WAF inspects at most the first 8 KB of a body, so a body-size rule
+ *        could never see 50 MiB. A body sent without Content-Length (chunked)
+ *        is not capped here; the application's 25 MiB upload cap
+ *        (upload_validation.MAX_UPLOAD_SIZE_BYTES) is the authoritative check.
  *
  *   3. Rate limits (per-IP, per-user fallback):
  *      - RateBasedStatement on POST /api/reviews (upload + start) — 10 req/5 min.
@@ -85,10 +91,96 @@ export class WafStack extends cdk.NestedStack {
 
     const { envName, appRunnerServiceArn } = props;
 
-    // Upload body size cap: 50 MiB.
-    // This matches the application-layer limit; WAF drops the request before
-    // the container has to read the body.
-    const UPLOAD_MAX_BODY_BYTES = 50 * 1024 * 1024; // 50 MiB
+    // Upload body size cap: 50 MiB — an outer net above the application's
+    // 25 MiB upload cap, which stays authoritative. WAF drops a request that
+    // declares a larger body before the container has to read it.
+    const UPLOAD_MAX_BODY_BYTES = 50 * 1024 * 1024; // 50 MiB = 52428800
+    // A decimal Content-Length strictly greater than 52428800, leading zeros
+    // allowed. WAF has no numeric comparison on a header's value (a
+    // SizeConstraintStatement on a header measures the string's length), so
+    // the comparison is spelled digit by digit. Pinned exhaustively by
+    // tests/test_infra_waf_upload_body.py; change both together.
+    const CONTENT_LENGTH_OVER_CAP_REGEX =
+      '^0*(?:[1-9][0-9]{8,}|[6-9][0-9]{7}|5[3-9][0-9]{6}|52[5-9][0-9]{5}|524[3-9][0-9]{4}' +
+      '|52429[0-9]{3}|524289[0-9]{2}|524288[1-9][0-9]|5242880[1-9])$';
+    if (UPLOAD_MAX_BODY_BYTES !== 52428800) {
+      throw new Error('CONTENT_LENGTH_OVER_CAP_REGEX encodes 52428800; update it with UPLOAD_MAX_BODY_BYTES');
+    }
+
+    // The POST routes that carry a file (backend/src/review_routes.py,
+    // backend/src/main.py): the only requests allowed a body over the
+    // managed rule's 8 KB.
+    const lower = [{ priority: 0, type: 'LOWERCASE' }];
+    const uploadRoute: wafv2.CfnWebACL.StatementProperty = {
+      andStatement: {
+        statements: [
+          {
+            byteMatchStatement: {
+              fieldToMatch: { method: {} },
+              positionalConstraint: 'EXACTLY',
+              searchString: 'POST',
+              textTransformations: [{ priority: 0, type: 'NONE' }],
+            },
+          },
+          {
+            orStatement: {
+              statements: [
+                // POST /api/reviews — start a review (the .docx).
+                {
+                  byteMatchStatement: {
+                    fieldToMatch: { uriPath: {} },
+                    positionalConstraint: 'EXACTLY',
+                    searchString: '/api/reviews',
+                    textTransformations: lower,
+                  },
+                },
+                // POST /api/reviews/preflight — classify before submitting.
+                {
+                  byteMatchStatement: {
+                    fieldToMatch: { uriPath: {} },
+                    positionalConstraint: 'EXACTLY',
+                    searchString: '/api/reviews/preflight',
+                    textTransformations: lower,
+                  },
+                },
+                // POST /api/admin/playbooks — create a playbook from a file.
+                {
+                  byteMatchStatement: {
+                    fieldToMatch: { uriPath: {} },
+                    positionalConstraint: 'EXACTLY',
+                    searchString: '/api/admin/playbooks',
+                    textTransformations: lower,
+                  },
+                },
+                // POST /api/admin/playbooks/{id}/versions — upload a version.
+                {
+                  andStatement: {
+                    statements: [
+                      {
+                        byteMatchStatement: {
+                          fieldToMatch: { uriPath: {} },
+                          positionalConstraint: 'STARTS_WITH',
+                          searchString: '/api/admin/playbooks/',
+                          textTransformations: lower,
+                        },
+                      },
+                      {
+                        byteMatchStatement: {
+                          fieldToMatch: { uriPath: {} },
+                          positionalConstraint: 'ENDS_WITH',
+                          searchString: '/versions',
+                          textTransformations: lower,
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    };
 
     // -----------------------------------------------------------------------
     // WebACL — REGIONAL scope (App Runner lives in a region, not at the edge).
@@ -118,11 +210,42 @@ export class WafStack extends cdk.NestedStack {
             managedRuleGroupStatement: {
               vendorName: 'AWS',
               name: 'AWSManagedRulesCommonRuleSet',
+              // COUNT, not BLOCK: the rule still labels the request, and
+              // rule 1b blocks on that label outside the upload routes.
+              ruleActionOverrides: [{ name: 'SizeRestrictions_BODY', actionToUse: { count: {} } }],
             },
           },
           visibilityConfig: {
             cloudWatchMetricsEnabled: true,
             metricName: `contract-toaster-waf-common-${envName}`,
+            sampledRequestsEnabled: true,
+          },
+        },
+        // ----------------------------------------------------------------
+        // Rule 1b: the CommonRuleSet's 8 KB body limit, everywhere except a
+        // POST to an upload route. Must run after rule 1 (which adds the
+        // label) — hence priority 15.
+        // ----------------------------------------------------------------
+        {
+          name: 'BlockLargeBodyOutsideUploadRoutes',
+          priority: 15,
+          action: { block: {} },
+          statement: {
+            andStatement: {
+              statements: [
+                {
+                  labelMatchStatement: {
+                    scope: 'LABEL',
+                    key: 'awswaf:managed:aws:core-rule-set:SizeRestrictions_Body',
+                  },
+                },
+                { notStatement: { statement: uploadRoute } },
+              ],
+            },
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: `contract-toaster-waf-body-8kb-${envName}`,
             sampledRequestsEnabled: true,
           },
         },
@@ -146,21 +269,19 @@ export class WafStack extends cdk.NestedStack {
           },
         },
         // ----------------------------------------------------------------
-        // Rule 3: Request-size cap — block uploads larger than 50 MiB.
+        // Rule 3: Request-size cap — block a declared body over 50 MiB.
         //
-        // SizeConstraintStatement on the request body (BODY component).
-        // Prevents oversized payloads from reaching the container, complementing
-        // the decompressed-size cap in the application layer.
+        // Reads Content-Length (the whole body's size) rather than the body,
+        // which a regional WAF inspects only up to 8 KB — see the class doc.
         // ----------------------------------------------------------------
         {
           name: 'BlockOversizedRequestBody',
           priority: 30,
           action: { block: {} },
           statement: {
-            sizeConstraintStatement: {
-              fieldToMatch: { body: {} },
-              comparisonOperator: 'GT',
-              size: UPLOAD_MAX_BODY_BYTES,
+            regexMatchStatement: {
+              fieldToMatch: { singleHeader: { Name: 'content-length' } },
+              regexString: CONTENT_LENGTH_OVER_CAP_REGEX,
               textTransformations: [{ priority: 0, type: 'NONE' }],
             },
           },

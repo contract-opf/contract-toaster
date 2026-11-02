@@ -66,10 +66,10 @@ env:
   # and signs here, and the promote job's STEP H verifies the signature here,
   # so verification always reads the repository that holds the digest. It is
   # deliberately not derived from the promote input: the build never pushes
-  # to any other repository. Known gap, not closed here: each environment's
-  # App Runner service pulls from its own contract-toaster-api-<env>
-  # repository (cicd-stack.ts), so a prod promotion also needs the digest
-  # present in the prod repository, which this workflow does not copy.
+  # to any other repository. Each environment's App Runner service pulls
+  # from its own contract-toaster-api-<env> repository (cicd-stack.ts), so the
+  # promote job's STEP G refuses any target whose repository is not this one
+  # (today: prod) rather than repoint it at a digest it cannot pull.
   ECR_REPOSITORY: contract-toaster-api-dev
 
 jobs:
@@ -511,6 +511,29 @@ jobs:
     environment: ${{ github.event.inputs.promote }}  # Requires environment approval in GitHub
 
     steps:
+      - name: Refuse a target whose ECR repository does not hold the digest (STEP G)
+        # build-sign-push pushed and signed the digest into ECR_REPOSITORY
+        # only. The target's App Runner service pulls from
+        # contract-toaster-api-<target>, and prod is a separate account: copying
+        # the image and its cosign signature there needs a role that can read
+        # this repository and write that one, which this workflow is not
+        # given. Without the copy, STEP H would verify the dev copy, STEP I
+        # would audit a promotion and STEP J would repoint the target at a
+        # digest its repository does not contain. So refuse, before taking AWS
+        # credentials. Pinned by tests/test_ci_promote_target_repo.py.
+        env:
+          TARGET_ENV: ${{ github.event.inputs.promote }}
+        run: |
+          TARGET_REPOSITORY="contract-toaster-api-${TARGET_ENV}"
+          if [ "${TARGET_REPOSITORY}" != "${ECR_REPOSITORY}" ]; then
+            echo "[ERROR] promote=${TARGET_ENV} refused: the signed digest exists only in ${ECR_REPOSITORY}," >&2
+            echo "        but ${TARGET_ENV}'s App Runner service pulls from ${TARGET_REPOSITORY}, and this" >&2
+            echo "        workflow cannot copy it there. Follow RUNBOOK.md 'Deploying a code change'" >&2
+            echo "        (promoting to prod) instead." >&2
+            exit 1
+          fi
+          echo "Target repository ${TARGET_REPOSITORY} is the one the build pushed to."
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -552,8 +575,11 @@ jobs:
           echo "Signature verified — promotion approved."
 
       - name: Write promotion audit row (STEP I)
-        # Audit row: event_type=image-promoted, actor=GitHub Actions run URL,
-        # digest, environment, timestamp.  Append-only PutItem with condition.
+        # Audit row: action=image-promoted, actor=GitHub Actions run URL,
+        # digest, environment. Same key shape as every other audit row
+        # (backend/src/audit_log.py): partition=YYYY-MM, timestamp=
+        # "{epoch}#{event_id}" (tests/test_infra_audit_table_key.py).
+        # Append-only PutItem with condition.
         # Fail-closed, like the CodeBuild twin in cicd-stack.ts: the only
         # error tolerated is ConditionalCheckFailedException (the row already
         # exists, an idempotent re-run). Any other failure stops the job
@@ -562,23 +588,26 @@ jobs:
           TARGET_ENV: ${{ github.event.inputs.promote }}
           IMAGE_DIGEST: ${{ needs.build-sign-push.outputs.image-digest }}
         run: |
-          AUDIT_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          AUDIT_PARTITION=$(date -u +%Y-%m)
+          AUDIT_EPOCH=$(date -u +%s)
+          AUDIT_EVENT_ID="promote-${{ github.run_id }}-${{ github.run_attempt }}"
           ACTOR="${{ github.actor }}"
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           AUDIT_TABLE="contract-toaster-audit-${TARGET_ENV}"
           echo "Writing promotion audit row to ${AUDIT_TABLE} …"
           if ! out=$(aws dynamodb put-item \
             --table-name "${AUDIT_TABLE}" \
-            --condition-expression "attribute_not_exists(pk)" \
+            --condition-expression "attribute_not_exists(partition)" \
             --item "{
-              \"pk\":{\"S\":\"AUDIT#${AUDIT_TIMESTAMP}\"},
-              \"sk\":{\"S\":\"image-promoted#${RUN_URL}\"},
-              \"event_type\":{\"S\":\"image-promoted\"},
+              \"partition\":{\"S\":\"${AUDIT_PARTITION}\"},
+              \"timestamp\":{\"S\":\"${AUDIT_EPOCH}#${AUDIT_EVENT_ID}\"},
+              \"event_id\":{\"S\":\"${AUDIT_EVENT_ID}\"},
+              \"action\":{\"S\":\"image-promoted\"},
+              \"outcome\":{\"S\":\"success\"},
               \"actor\":{\"S\":\"${ACTOR}\"},
               \"run_url\":{\"S\":\"${RUN_URL}\"},
               \"digest\":{\"S\":\"${IMAGE_DIGEST}\"},
-              \"environment\":{\"S\":\"${TARGET_ENV}\"},
-              \"timestamp\":{\"S\":\"${AUDIT_TIMESTAMP}\"}
+              \"environment\":{\"S\":\"${TARGET_ENV}\"}
             }" 2>&1); then
             if ! grep -q ConditionalCheckFailedException <<<"${out}"; then
               echo "${out}" >&2
