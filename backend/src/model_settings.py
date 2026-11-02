@@ -108,15 +108,15 @@ import hashlib
 import logging
 import os
 import time
-import uuid
 from typing import Any
 
 from fastapi import HTTPException, status
 
 try:  # production runs `src.main`; tests put backend/src on sys.path
-    from src import config, model_client
+    from src import audit_log, config, model_client
     from src.authz import require_admin
 except ImportError:  # pragma: no cover
+    import audit_log  # type: ignore[no-redef]
     import config  # type: ignore[no-redef]
     import model_client  # type: ignore[no-redef]
     from authz import require_admin  # type: ignore[no-redef]
@@ -211,42 +211,6 @@ def _model_settings_table(dynamodb_resource: Any):
             ),
         )
     return dynamodb_resource.Table(name)
-
-
-def _audit_table(dynamodb_resource: Any):
-    return dynamodb_resource.Table(os.environ["AUDIT_TABLE"])
-
-
-def _write_audit_entry(
-    dynamodb_resource: Any,
-    actor: str,
-    action: str,
-    target: str,
-    target_type: str,
-    detail: dict[str, Any],
-) -> None:
-    """Append an immutable audit row -- identifiers and key FINGERPRINTS only,
-    never the key itself, and never any part of it (same posture as
-    src/demo_auth.py's own _write_audit_entry, which never records a plaintext
-    password)."""
-    table = _audit_table(dynamodb_resource)
-    now = time.time()
-    event_id = uuid.uuid4().hex
-    partition = time.strftime("%Y-%m", time.gmtime(now))
-    timestamp = f"{int(now)}#{event_id}"
-
-    item: dict[str, Any] = {
-        "partition": partition,
-        "timestamp": timestamp,
-        "event_id": event_id,
-        "actor": actor,
-        "action": action,
-        "target": target,
-        "target_type": target_type,
-        "outcome": "success",
-    }
-    item.update(detail)
-    table.put_item(Item=item)
 
 
 def _stored_row(dynamodb_resource: Any) -> dict[str, Any] | None:
@@ -422,7 +386,7 @@ def set_model_key(
         },
     )
 
-    _write_audit_entry(
+    audit_log.write_audit_entry(
         dynamodb_resource,
         actor=actor,
         action="model_key_change",
@@ -465,7 +429,7 @@ def clear_model_key(
     actor = caller_user_row.get("cognito_sub", "")
     after = get_model_key_settings(caller_user_row, dynamodb_resource)
 
-    _write_audit_entry(
+    audit_log.write_audit_entry(
         dynamodb_resource,
         actor=actor,
         action="model_key_clear",
@@ -789,7 +753,7 @@ def set_model_selection(
 
     after = get_model_selection_settings(caller_user_row, dynamodb_resource)
 
-    _write_audit_entry(
+    audit_log.write_audit_entry(
         dynamodb_resource,
         actor=actor,
         action="model_selection_change",
@@ -1146,7 +1110,7 @@ def set_daily_spend_cap_cents(
 
     after = get_spend_cap_settings(caller_user_row, dynamodb_resource)
 
-    _write_audit_entry(
+    audit_log.write_audit_entry(
         dynamodb_resource,
         actor=actor,
         action="spend_cap_change",

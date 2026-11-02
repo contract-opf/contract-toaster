@@ -48,6 +48,10 @@
  * set is what keeps the UI from offering a control that would only bounce.
  */
 import { authorizedFetch, friendlyErrorMessage, readErrorDetail } from './api';
+import { UserFacingError, withUserFacingErrors } from './userMessage';
+
+/** The one fixed sentence for a disposition that did not record. */
+export const DISPOSITION_ERROR_COPY = "We couldn't record that. Please try again.";
 
 export type AttorneyDisposition = 'ACCEPTED' | 'EDITED' | 'REJECTED';
 
@@ -136,20 +140,24 @@ export async function recordDisposition(
   if (trimmed) {
     body.note = trimmed;
   }
-  const response = await authorizedFetch(`/api/reviews/${reviewId}/disposition`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+  // A rejected fetch or an unparseable body reaches the caller as fixed copy
+  // too, never the browser's own text (QA 2026-10-31 W9).
+  return withUserFacingErrors(DISPOSITION_ERROR_COPY, async () => {
+    const response = await authorizedFetch(`/api/reviews/${reviewId}/disposition`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      const errorDetail = await readErrorDetail(response);
+      throw new UserFacingError(
+        friendlyErrorMessage(
+          errorDetail ??
+            `POST /api/reviews/${reviewId}/disposition returned HTTP ${response.status}`,
+          DISPOSITION_ERROR_COPY,
+        ),
+      );
+    }
+    return (await response.json()) as RecordDispositionResult;
   });
-  if (!response.ok) {
-    const errorDetail = await readErrorDetail(response);
-    throw new Error(
-      friendlyErrorMessage(
-        errorDetail ??
-          `POST /api/reviews/${reviewId}/disposition returned HTTP ${response.status}`,
-        "We couldn't record that. Please try again.",
-      ),
-    );
-  }
-  return (await response.json()) as RecordDispositionResult;
 }

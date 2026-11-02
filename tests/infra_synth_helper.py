@@ -9,6 +9,9 @@ absent. Issue #349 does the same for `adminEmail` (AuthStack's GC
 admin-bootstrap email) and `hostedDomain` (the Google Workspace domain the
 Cognito pre-token Lambda and Google IdP `hd` parameter enforce — previously
 a nested-stack prop default, independent of `appDomain`; see auth-stack.ts).
+`allowedEmailDomains` (QA 2026-10-31) is required the same way: AppStack
+injects it as ALLOWED_EMAIL_DOMAINS, without which the backend refuses every
+Cognito request with 503 (tests/test_infra_allowed_email_domains.py).
 
 Roughly two dozen existing infra structural-gate test files each run a
 baseline `cdk synth --context env=dev` as their own setup step to exercise
@@ -32,4 +35,5 @@ NEUTRAL_CDK_CONTEXT: list[str] = [
     "--context", "appDomain=example.com",
     "--context", f"adminEmail={NEUTRAL_ADMIN_EMAIL}",
     "--context", f"hostedDomain={NEUTRAL_HOSTED_DOMAIN}",
+    "--context", f"allowedEmailDomains={NEUTRAL_HOSTED_DOMAIN}",
 ]

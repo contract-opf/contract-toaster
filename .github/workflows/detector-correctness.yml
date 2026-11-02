@@ -42,7 +42,7 @@ on:
 jobs:
   detector-correctness:
     name: Detector-correctness gate
-    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.CI_RUNS_ON || 'ubuntu-latest' }}
 
     steps:
       - name: Checkout

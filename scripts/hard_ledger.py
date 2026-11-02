@@ -154,6 +154,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+import regex_safety  # noqa: E402
 import text_fold  # noqa: E402
 
 #: The status every entry opens with, before any pass has run.
@@ -214,6 +215,12 @@ MAX_SPAN_CHARS = 8000
 #: run over. A longer clause is not evaluable (fails closed) -- never
 #: truncated, which would hide every number past the cut.
 MAX_CLAUSE_CHARS = 20000
+
+#: Wall-clock budget, interpreter start included, for one `numeric_bound`
+#: pattern over one clause (QA 2026-10-31 report item 12). The pattern is run
+#: in a child process killed at the deadline (`regex_safety`), because Python's
+#: `re` cannot be interrupted; a timeout is not evaluable and fails closed.
+NUMERIC_BOUND_TIMEOUT_S = 2.0
 
 # Fixed issue wording. External text says what happened without naming a rule
 # or quoting a clause; the internal footnote names the rule and the reason.
@@ -623,7 +630,15 @@ def evaluate_predicate(entry: dict[str, Any], text: str) -> bool | None:
             return None
         if compiled.groups != 1 or len(text) > MAX_CLAUSE_CHARS:
             return None
-        values = [_number(match.group(1) or "") for match in compiled.finditer(text)]
+        # opf_load refuses a structurally dangerous pattern at load time; a
+        # playbook stored before that check is refused here too, and anything
+        # the heuristic misses runs under a deadline.
+        if regex_safety.structural_hazard(pattern) is not None:
+            return None
+        groups = regex_safety.bounded_group1_matches(pattern, text, NUMERIC_BOUND_TIMEOUT_S)
+        if groups is None:
+            return None
+        values = [_number(group) for group in groups]
         if not values or any(value is None for value in values):
             return False if not values else None
         return all(

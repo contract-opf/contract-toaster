@@ -5,6 +5,15 @@
 # its own when "CI pipeline" finishes successfully on main, and it triggers the
 # Coolify pull itself. No human clicks anything on the happy path.
 #
+# TWO WAYS TO ROLL FORWARD. The `deploy` job below PUSHES: it calls Coolify's
+# API from the runner. That cannot work when the Coolify host is behind
+# Cloudflare with Bot Fight Mode on (a challenge page answers instead). The
+# alternative PULLS: deploy/dts/autopull/ runs on the box, watches GHCR, and
+# calls Coolify on localhost. Set the repository variable
+# DTS_DEPLOY_MODE=pull when the box pulls, and the `deploy` job steps aside
+# instead of failing every run. See
+# deploy/dts/README.md#automatic-roll-forward-from-the-box.
+#
 # WHAT THIS DOES **NOT** CHANGE. ci-pipeline.yml's security invariant 1 — "No
 # auto-deploy from main", promotion to App Runner is a deliberate, audited,
 # cosign-verified step with an audit row, and AppStack pins
@@ -28,15 +37,20 @@
 #
 # Builds the backend and frontend images from the deploy/dts/ Dockerfiles
 # (repo-root context) and pushes each as :latest and :<short-sha> to
-# ghcr.io/<repository-owner>/contract-toaster-dts-{backend,frontend}.
+# ghcr.io/<repository-owner>/contract-toaster-dts-{backend,frontend}. The
+# publish-minio job builds the third image the compose files pull,
+# contract-toaster-dts-minio, once per MinIO release under that release's tag
+# only (see the job's own comment).
 #
 # Auth uses the built-in GITHUB_TOKEN (packages: write) — no extra secret. The
 # packages are created PRIVATE by default; flipping them to Public is a separate
 # deliberate step done outside this workflow.
 #
 # Runs on the self-hosted runner (vars.CI_RUNS_ON) while GitHub-hosted Actions
-# is unavailable; falls back to ubuntu-latest if the variable is unset. Uses the
-# plain docker CLI (no buildx/QEMU) to keep runner requirements minimal.
+# is unavailable; falls back to ubuntu-latest if the variable is unset. A
+# pull_request event always gets ubuntu-latest, the same rule as
+# ci-pipeline.yml, so pull-request code never runs on the self-hosted box. Uses
+# the plain docker CLI (no buildx/QEMU) to keep runner requirements minimal.
 
 name: Publish Docker Compose images
 
@@ -57,12 +71,22 @@ permissions:
 jobs:
   publish:
     name: Build and push
-    # A failed, cancelled or skipped CI pipeline must not publish. On a manual
-    # dispatch there is no workflow_run payload and the operator is the gate.
+    # Publish only what passed CI as a push to this repository's main. The
+    # `branches:` filter on the trigger matches the triggering run's head
+    # branch NAME only, so the job checks all four facts itself: the run
+    # succeeded, it was a `push`, its head branch is `main`, and its head
+    # repository is this one. A failed, cancelled or skipped CI pipeline, or
+    # one for any other event, publishes nothing. On a manual dispatch there
+    # is no workflow_run payload and the operator is the gate. publish-minio
+    # carries the same condition; tests/test_dts_publish_trigger_guard.py
+    # pins both.
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
-    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+      github.event_name == 'workflow_dispatch' || (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_repository.full_name == github.repository )
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.CI_RUNS_ON || 'ubuntu-latest' }}
     outputs:
       sha: ${{ steps.meta.outputs.sha }}
     env:
@@ -97,6 +121,12 @@ jobs:
           echo "image=ghcr.io/${owner}/contract-toaster-dts-${{ matrix.component }}" >> "$GITHUB_OUTPUT"
           short_sha="${TARGET_SHA::7}"
           echo "sha=${short_sha}" >> "$GITHUB_OUTPUT"
+          # The ARTIFACT REVISION is the full, immutable commit SHA (issue #42):
+          # it becomes the COMMIT_SHA build arg, the image's
+          # org.opencontainers.image.revision label and GET /version's
+          # `commit`. The short SHA above stays for tags and VERSION only; a
+          # prefix is not an immutable name.
+          echo "revision=${TARGET_SHA}" >> "$GITHUB_OUTPUT"
           # VERSION follows the AWS path's convention (ci-pipeline.yml:320-321):
           # "<short-sha>-<UTC build timestamp>", unique per build so two builds
           # of the same commit are still distinguishable in the footer.
@@ -128,7 +158,7 @@ jobs:
           # is an error on bash < 4.4 under `set -u`).
           build_flags=(-f "${{ matrix.dockerfile }}")
           build_flags+=(--build-arg "VERSION=${{ steps.meta.outputs.version }}")
-          build_flags+=(--build-arg "COMMIT_SHA=${{ steps.meta.outputs.sha }}")
+          build_flags+=(--build-arg "COMMIT_SHA=${{ steps.meta.outputs.revision }}")
           docker build \
             "${build_flags[@]}" \
             -t "${{ steps.meta.outputs.image }}:latest" \
@@ -151,10 +181,127 @@ jobs:
             | cut -d@ -f2)"
           echo "Pushed image digest: ${digest}"
 
+  publish-minio:
+    name: Build and push MinIO (once per release)
+    # MinIO no longer publishes community images, so the compose files pull
+    # ghcr.io/<owner>/contract-toaster-dts-minio, built from upstream source by
+    # deploy/dts/minio/Dockerfile. Unlike the two app images it has no :latest
+    # and no :<short-sha>: its only tag is the MinIO release (MINIO_TAG in the
+    # Dockerfile), and that tag is IMMUTABLE. The job publishes it when it is
+    # absent, skips when the published image was built from this exact
+    # Dockerfile, and FAILS when the Dockerfile changed under an existing tag,
+    # because overwriting it would silently change what a pinned deployment
+    # runs. So it rebuilds only when the Dockerfile changes, and only under a
+    # new tag.
+    if: >-
+      github.event_name == 'workflow_dispatch' || (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_repository.full_name == github.repository )
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    env:
+      TARGET_SHA: >-
+        ${{ github.event_name == 'workflow_run'
+            && github.event.workflow_run.head_sha
+            || github.sha }}
+      DOCKERFILE: deploy/dts/minio/Dockerfile
+      # Records which Dockerfile built the published image, so a later run can
+      # tell "already published" from "changed under the same tag".
+      DOCKERFILE_LABEL: contract-toaster.dockerfile.sha256
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_SHA }}
+
+      - name: Compute image ref and release tag
+        id: meta
+        run: |
+          set -euo pipefail
+          # Owner derived from the repository, as in the publish job (issue #406).
+          owner="$(echo "${{ github.repository_owner }}" | tr "[:upper:]" "[:lower:]")"
+          echo "image=ghcr.io/${owner}/contract-toaster-dts-minio" >> "$GITHUB_OUTPUT"
+          tag="$(sed -n 's/^ARG MINIO_TAG=//p' "${DOCKERFILE}")"
+          if ! [[ "${tag}" =~ ^RELEASE\.[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}-[0-9]{2}-[0-9]{2}Z$ ]]; then
+            echo "::error::${DOCKERFILE} has no usable ARG MINIO_TAG (got '${tag}')"
+            exit 1
+          fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          # Same ARTIFACT REVISION as the app images (issue #42): the full SHA.
+          echo "revision=${TARGET_SHA}" >> "$GITHUB_OUTPUT"
+          echo "dockerfile=$(sha256sum "${DOCKERFILE}" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Decide whether the release is already published
+        id: existing
+        env:
+          REF: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+          WANT: ${{ steps.meta.outputs.dockerfile }}
+        run: |
+          set -uo pipefail
+          if ! err="$(docker pull -q "${REF}" 2>&1 >/dev/null)"; then
+            # Absent (first publish of this release) reads as "manifest
+            # unknown", "not found", or "denied" for a package that does not
+            # exist yet. Anything else is a registry or network fault, and
+            # building on it could overwrite a tag that does exist.
+            if grep -qiE 'manifest unknown|not found|denied' <<<"${err}"; then
+              echo "${REF} is not published yet; building it."
+              echo "publish=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::error::could not check ${REF}: ${err}"
+            exit 1
+          fi
+          have="$(docker inspect --format "{{index .Config.Labels \"${DOCKERFILE_LABEL}\"}}" "${REF}")"
+          if [ "${have}" = "${WANT}" ]; then
+            echo "${REF} is already published from this Dockerfile; nothing to do."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "::error title=MinIO tag is immutable::${REF} exists but was built from a different ${DOCKERFILE} (published ${have:-<unlabelled>}, now ${WANT})."
+          echo "A deployment pinned to that tag would silently change. Either move MINIO_TAG"
+          echo "(and MINIO_COMMIT) to another upstream release and update both compose files,"
+          echo "or, deliberately, delete that package version in GHCR and re-run this workflow."
+          exit 1
+
+      - name: Build MinIO image
+        if: steps.existing.outputs.publish == 'true'
+        run: |
+          docker build \
+            --build-arg "VERSION=${{ steps.meta.outputs.tag }}" \
+            --build-arg "COMMIT_SHA=${{ steps.meta.outputs.revision }}" \
+            --label "${DOCKERFILE_LABEL}=${{ steps.meta.outputs.dockerfile }}" \
+            -t "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}" \
+            deploy/dts/minio
+          # The build already asserts this; print it so the run log shows it.
+          docker run --rm "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}" --version
+
+      - name: Push MinIO image (:<release> only)
+        if: steps.existing.outputs.publish == 'true'
+        run: |
+          docker push "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}"
+          digest="$(docker inspect \
+            --format='{{index .RepoDigests 0}}' \
+            "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}" \
+            | cut -d@ -f2)"
+          echo "Pushed image digest: ${digest}"
+
   deploy:
     name: Roll the DTS deployment forward
-    needs: publish
-    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    # MinIO too: a compose that names the MinIO release must not be restarted
+    # before that image exists, or the pull aborts the whole restart.
+    needs: [publish, publish-minio]
+    # In pull mode the box rolls itself forward (deploy/dts/autopull/), so a
+    # push from here would only be a second, redundant restart.
+    if: vars.DTS_DEPLOY_MODE != 'pull'
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.CI_RUNS_ON || 'ubuntu-latest' }}
     steps:
       - name: Trigger the Coolify pull-and-restart
         id: trigger
@@ -230,7 +377,8 @@ jobs:
             echo "service token scoped to the Coolify application). A 403 challenge page"
             echo "with those set is Bot Fight Mode, which no rule can skip on the free"
             echo "plan: turn it off for the zone, or run this job on a runner that"
-            echo "reaches Coolify without crossing Cloudflare."
+            echo "reaches Coolify without crossing Cloudflare. Or let the box pull:"
+            echo "install deploy/dts/autopull/ and set DTS_DEPLOY_MODE=pull."
             exit 1
           fi
           case "${code:-}" in
@@ -247,12 +395,13 @@ jobs:
       - name: Say what to verify
         if: steps.trigger.outputs.rolled == 'true'
         run: |
-          # NOT GET /version: issue #613 is open — the backend build cache can
-          # ignore a changed --build-arg COMMIT_SHA, so that endpoint may serve
-          # a stale stamp even after a good pull. The SPA bakes its own commit
-          # in at build time (VITE_COMMIT_SHA), so the Settings tab showing the
-          # two halves agree is the honest check.
+          # Issue #42 (#613 on the private tracker) made the revision a direct
+          # cache input of each image's final layer and added the
+          # org.opencontainers.image.revision label, so a warm-cache build can
+          # no longer keep an older GET /version stamp. The Settings tab, which
+          # compares the server's commit with the bundle's own, stays the
+          # quickest post-deploy check.
           echo "Coolify is pulling ${SHA} onto the DTS host."
-          echo "Verify in the app's Settings tab, not GET /version (issue #613)."
+          echo "Verify in the app's Settings tab that server and bundle agree on ${SHA}."
         env:
           SHA: ${{ needs.publish.outputs.sha }}

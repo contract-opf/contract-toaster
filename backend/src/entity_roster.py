@@ -101,15 +101,16 @@ import logging
 import os
 import sys
 import time
-import uuid
 from pathlib import Path
 from typing import Any, Iterable  # noqa: UP035
 
 from fastapi import HTTPException, status
 
 try:  # production runs `src.main`; tests put backend/src on sys.path
+    from src import audit_log
     from src.authz import require_admin
 except ImportError:  # pragma: no cover
+    import audit_log  # type: ignore[no-redef]
     from authz import require_admin  # type: ignore[no-redef]
 
 # `scripts/entity_normalize.py` is the ONE place party-name folding lives
@@ -148,40 +149,6 @@ def _entity_roster_table_name() -> str:
 def _entity_roster_table(dynamodb_resource: Any):
     name = _entity_roster_table_name()
     return dynamodb_resource.Table(name)
-
-
-def _audit_table(dynamodb_resource: Any):
-    return dynamodb_resource.Table(os.environ["AUDIT_TABLE"])
-
-
-def _write_audit_entry(
-    dynamodb_resource: Any,
-    actor: str,
-    action: str,
-    target: str,
-    target_type: str,
-    detail: dict[str, Any],
-) -> None:
-    """Append an immutable audit row (same shape as src/model_settings.py's
-    own `_write_audit_entry`)."""
-    table = _audit_table(dynamodb_resource)
-    now = time.time()
-    event_id = uuid.uuid4().hex
-    partition = time.strftime("%Y-%m", time.gmtime(now))
-    timestamp = f"{int(now)}#{event_id}"
-
-    item: dict[str, Any] = {
-        "partition": partition,
-        "timestamp": timestamp,
-        "event_id": event_id,
-        "actor": actor,
-        "action": action,
-        "target": target,
-        "target_type": target_type,
-        "outcome": "success",
-    }
-    item.update(detail)
-    table.put_item(Item=item)
 
 
 def normalize_entities(raw: Any) -> list[str]:
@@ -418,7 +385,7 @@ def set_entity_roster(
         },
     )
 
-    _write_audit_entry(
+    audit_log.write_audit_entry(
         dynamodb_resource,
         actor=actor,
         action="entity_roster_change",

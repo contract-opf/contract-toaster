@@ -39,11 +39,13 @@ Environment variables:
   RETROACTIVE_REDUCTION_DELAY_SECONDS  delay before a pending reduction may
                               run without a second-admin confirmation
                               (default 259200 = 72 hours)
+  AUDIT_TABLE                DynamoDB audit table name (append-only)
 """
 
 import logging
 import os
 import time
+import uuid
 from typing import Any
 
 import boto3
@@ -82,7 +84,9 @@ TERMINAL_REVIEW_STATUSES = {
     "MANUAL_REVIEW_REQUIRED",  # legacy read only (pre-#133 rows)
     "QUARANTINED",
     "SUPERSEDED",
-    # Mirrors backend/src/reviews.py's REVIEW_STATUSES_TERMINAL. A cancelled
+    # Mirrors backend/src/reviews.py's REVIEW_STATUSES_TERMINAL, which
+    # backend/src/retention.py now uses directly; tests/test_retention_sweep_w6.py
+    # fails if this copy and that set ever differ. A cancelled
     # review is terminal, so it must be PURGEABLE: leaving it out would mean a
     # review the user stopped keeps its uploaded contract past the retention
     # window forever, precisely because they stopped it.
@@ -161,6 +165,106 @@ def _s3():
 
 
 # ---------------------------------------------------------------------------
+# Audit writer -- this bundle's copy of backend/src/audit_log.py
+#
+# The Lambda ships independently of backend/src and cannot import it, so it
+# carries an equivalent writer: the same key shape (PK `partition` = "%Y-%m",
+# SK `timestamp` = "{epoch}#{uuid4 hex}") and the same append-only PutItem
+# condition. tests/test_audit_log_single_writer.py renders both and fails if
+# they drift. The condition is a string here rather than
+# `boto3.dynamodb.conditions.Attr`, so the handler still imports nothing
+# beyond `boto3` and `botocore.exceptions`.
+# ---------------------------------------------------------------------------
+
+AUDIT_APPEND_ONLY_CONDITION = "attribute_not_exists(#p) AND attribute_not_exists(#t)"
+AUDIT_APPEND_ONLY_NAMES = {"#p": "partition", "#t": "timestamp"}
+
+
+def _build_audit_item(
+    *,
+    actor: str,
+    action: str,
+    target: str | None = None,
+    target_type: str | None = None,
+    detail: dict[str, Any] | None = None,
+    now: float | None = None,
+    event_id: str | None = None,
+    outcome: str = "success",
+) -> dict[str, Any]:
+    """The audit row, built exactly as backend/src/audit_log.build_audit_item
+    builds it."""
+    when = now_epoch() if now is None else now
+    eid = event_id or uuid.uuid4().hex
+    keys = {
+        "partition": time.strftime("%Y-%m", time.gmtime(when)),
+        "timestamp": f"{int(when)}#{eid}",
+        "event_id": eid,
+    }
+    item: dict[str, Any] = {**keys, "actor": actor, "action": action}
+    if target is not None:
+        item["target"] = target
+    if target_type is not None:
+        item["target_type"] = target_type
+    item["outcome"] = outcome
+    if target_type == "review" and target:
+        item["review_id"] = target
+    if detail:
+        item.update(detail)
+    # Nothing in `detail` moves the key.
+    item.update(keys)
+    return item
+
+
+def _write_audit_entry(**kwargs: Any) -> dict[str, Any]:
+    """Append one immutable audit row. Raises when AUDIT_TABLE is unset or the
+    write fails: a sweep that cannot record itself surfaces as a failed
+    invocation (the Lambda Errors metric) rather than passing silently.
+    The table name is read per call (not frozen at import) like the
+    backend's writer reads it."""
+    table_name = os.environ.get("AUDIT_TABLE", "")
+    if not table_name:
+        raise RuntimeError("AUDIT_TABLE is not configured for the purge worker")
+    item = _build_audit_item(**kwargs)
+    _ddb().Table(table_name).put_item(
+        Item=item,
+        ConditionExpression=AUDIT_APPEND_ONLY_CONDITION,
+        ExpressionAttributeNames=AUDIT_APPEND_ONLY_NAMES,
+    )
+    return item
+
+
+# The actor a scheduled / on-demand sweep is recorded under.
+PURGE_WORKER_ACTOR = "system:retention-purge-worker"
+
+# Mirrors backend/src/retention.py::SWEEP_AUDIT_MAX_IDS.
+SWEEP_AUDIT_MAX_IDS = 1000
+
+
+def _sweep_audit_detail(result: dict[str, Any]) -> dict[str, Any]:
+    """Mirrors backend/src/retention.py::sweep_audit_detail EXACTLY: the
+    sweep id, mode, exact counts, and the purged / failed review ids
+    (capped). Never an object key, never substance."""
+    deleted = list(result["deleted_reviews"])
+    failed = list(result["failed_reviews"])
+    return {
+        "sweep_id": result["sweep_id"],
+        "dry_run": bool(result["dry_run"]),
+        "eligible_count": len(result["eligible_reviews"]),
+        "deleted_count": len(deleted),
+        "failed_count": len(failed),
+        "object_count": int(result["object_count"]),
+        "skipped_active_count": len(result["skipped_active"]),
+        "skipped_hold_count": len(result["skipped_hold"]),
+        "skipped_not_yet_eligible_count": len(result["skipped_not_yet_eligible"]),
+        "purged_review_ids": deleted[:SWEEP_AUDIT_MAX_IDS],
+        "failed_review_ids": failed[:SWEEP_AUDIT_MAX_IDS],
+        "review_ids_truncated": (
+            len(deleted) > SWEEP_AUDIT_MAX_IDS or len(failed) > SWEEP_AUDIT_MAX_IDS
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Settings: get / dual-control retroactive-reduction gate (invariant 5)
 # ---------------------------------------------------------------------------
 
@@ -190,37 +294,40 @@ def _window_rank(window: Any) -> float:
 
 
 def is_pending_reduction_ready(pending: dict[str, Any]) -> bool:
-    """True once the mandatory delay has elapsed for a reduction awaiting
-    second-admin confirmation.
+    """True once the mandatory delay has elapsed for a parked reduction.
 
-    A pending reduction that has already been confirmed by a second admin
-    is applied immediately in request_retention_change and never reaches
-    this "waiting on the clock" path.
+    `apply_after` is honoured when the record carries it (the backend
+    stamps it, W6.7); an older record falls back to `requested_at` + the
+    delay. A reduction a second admin confirms is applied by the backend's
+    confirm route and never reaches this "waiting on the clock" path.
     """
-    requested_at = pending["requested_at"]
+    # boto3 reads the stored epoch back as a Decimal, and `float - Decimal`
+    # raises TypeError -- coerce before the arithmetic.
+    if pending.get("apply_after") is not None:
+        return now_epoch() >= float(pending["apply_after"])
+    requested_at = float(pending["requested_at"])
     return (now_epoch() - requested_at) >= RETROACTIVE_REDUCTION_DELAY_SECONDS
 
 
 def request_retention_change(
     new_window_days: int | str,
     actor: str,
-    second_admin_confirmation: dict[str, Any] | None = None,
+    reason: str = "",
 ) -> dict[str, Any]:
-    """Apply, or gate, a change to the global retention window.
+    """Apply a forward-looking change, or park a retroactive reduction.
 
     Forward-looking changes (raising the window, or an unchanged value)
     apply single-admin, immediately.
 
-    A retroactive reduction (new_window_days < current window) requires:
-      - a second admin's confirmation, where the confirming actor is
-        DIFFERENT from the requesting actor (a self-confirmation is
-        rejected -- dual control by a single compromised session is not
-        dual control); or
-      - is placed into a `pending_reduction` state with a 72-hour delay
-        and a GC alarm (the alarm-firing side is wired in the CDK
-        EventBridge rule / CloudWatch alarm consuming this state; see
-        pipeline-stack.ts PurgeWorker construct), applied automatically
-        once `is_pending_reduction_ready` returns True on a later sweep.
+    A retroactive reduction (new_window_days < current window) is ALWAYS
+    parked in `pending_reduction` (W6.7): there is no in-request
+    confirmation. The free-text `second_admin_confirmation` this function
+    used to take was self-attested -- the "second admin" was just a string
+    the requester typed. The backend's confirm route
+    (`POST /api/admin/retention/pending/{id}/confirm`) is the only way a
+    different, authenticated admin applies it early; otherwise a sweep
+    applies it once `is_pending_reduction_ready` is True. Mirrors
+    backend/src/retention.py::request_retention_change's record shape.
 
     Returns a dict with:
       status: "APPLIED" | "PENDING_SECOND_APPROVAL"
@@ -229,7 +336,7 @@ def request_retention_change(
     settings = get_retention_settings()
     current_window = settings["retention_window_days"]
     table = _ddb().Table(RETENTION_SETTINGS_TABLE)
-    now = now_epoch()
+    now = int(now_epoch())
 
     is_retroactive_reduction = _window_rank(new_window_days) < _window_rank(current_window)
 
@@ -237,44 +344,39 @@ def request_retention_change(
         table.update_item(
             Key={"setting_id": GLOBAL_SETTING_ID},
             UpdateExpression="SET retention_window_days = :w, pending_reduction = :none, updated_at = :now",
-            ExpressionAttributeValues={":w": new_window_days, ":none": None, ":now": str(int(now))},
+            ExpressionAttributeValues={":w": new_window_days, ":none": None, ":now": str(now)},
         )
         return {"status": "APPLIED", "applied_immediately": True}
 
-    confirmed_by_different_admin = bool(
-        second_admin_confirmation
-        and second_admin_confirmation.get("actor")
-        and second_admin_confirmation["actor"] != actor
-    )
-
-    if confirmed_by_different_admin:
-        table.update_item(
-            Key={"setting_id": GLOBAL_SETTING_ID},
-            UpdateExpression="SET retention_window_days = :w, pending_reduction = :none, updated_at = :now",
-            ExpressionAttributeValues={":w": new_window_days, ":none": None, ":now": str(int(now))},
-        )
-        return {"status": "APPLIED", "applied_immediately": False}
-
-    # No valid second-admin confirmation -- enter the 72h pending-delay
-    # state. The window itself is NOT lowered yet; only a later sweep that
-    # observes is_pending_reduction_ready() == True applies it.
+    # Whole epoch seconds, because boto3 refuses a Python float on every write.
     pending_reduction = {
+        "pending_id": uuid.uuid4().hex,
         "new_window_days": new_window_days,
+        "previous_window_days": current_window,
         "requested_by": actor,
         "requested_at": now,
+        "apply_after": now + RETROACTIVE_REDUCTION_DELAY_SECONDS,
+        "reason": reason,
     }
     table.update_item(
         Key={"setting_id": GLOBAL_SETTING_ID},
         UpdateExpression="SET pending_reduction = :pending, updated_at = :now",
-        ExpressionAttributeValues={":pending": pending_reduction, ":now": str(int(now))},
+        ExpressionAttributeValues={":pending": pending_reduction, ":now": str(now)},
     )
     return {"status": "PENDING_SECOND_APPROVAL", "applied_immediately": False}
 
 
+# Mirrors backend/src/retention.py::PENDING_REDUCTION_SYSTEM_ACTOR.
+PENDING_REDUCTION_SYSTEM_ACTOR = "system:retention-delay"
+
+
 def _apply_ready_pending_reduction(settings: dict[str, Any]) -> dict[str, Any]:
-    """If a pending reduction's delay has elapsed, apply it and clear the
-    pending state. Called at the start of a sweep so a delayed reduction
-    takes effect on schedule without a human having to re-click Save."""
+    """If a pending reduction's delay has elapsed, apply it, clear the
+    pending state, and audit it (W6.7, same action and detail as
+    backend/src/retention.py::apply_ready_pending_reduction). Called at the
+    start of a sweep so a delayed reduction takes effect on schedule without
+    a human having to re-click Save. The apply is conditional on the record
+    still being the one read here, so a concurrent confirm or cancel wins."""
     pending = settings.get("pending_reduction")
     if not pending:
         return settings
@@ -283,13 +385,36 @@ def _apply_ready_pending_reduction(settings: dict[str, Any]) -> dict[str, Any]:
 
     table = _ddb().Table(RETENTION_SETTINGS_TABLE)
     now = now_epoch()
-    table.update_item(
-        Key={"setting_id": GLOBAL_SETTING_ID},
-        UpdateExpression="SET retention_window_days = :w, pending_reduction = :none, updated_at = :now",
-        ExpressionAttributeValues={
-            ":w": pending["new_window_days"],
-            ":none": None,
-            ":now": str(int(now)),
+    try:
+        table.update_item(
+            Key={"setting_id": GLOBAL_SETTING_ID},
+            UpdateExpression="SET retention_window_days = :w, pending_reduction = :none, updated_at = :now",
+            ConditionExpression="pending_reduction = :expected",
+            ExpressionAttributeValues={
+                ":w": pending["new_window_days"],
+                ":none": None,
+                ":now": str(int(now)),
+                ":expected": pending,
+            },
+        )
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            return settings
+        raise
+    before = settings.get("retention_window_days", DEFAULT_RETENTION_WINDOW_DAYS)
+    _write_audit_entry(
+        actor=PENDING_REDUCTION_SYSTEM_ACTOR,
+        action="retention_reduction_applied_after_delay",
+        target=GLOBAL_SETTING_ID,
+        target_type="retention_settings",
+        detail={
+            "pending_id": pending.get("pending_id", ""),
+            "requested_by": pending.get("requested_by", ""),
+            "requested_at": pending.get("requested_at"),
+            "reason": pending.get("reason", ""),
+            "before_retention_window_days": before,
+            "after_retention_window_days": pending["new_window_days"],
+            "result_status": "APPLIED",
         },
     )
     settings["retention_window_days"] = pending["new_window_days"]
@@ -524,7 +649,15 @@ def run_purge_sweep(dry_run: bool = False) -> dict[str, Any]:
     plus, per #454: dry_run, eligible_reviews (the backlog), failed_reviews
     (targeted objects survived -> NOT recorded as deleted), objects_by_review
     and object_count (the itemisation).
+
+    Every run, dry runs included, writes ONE audit row (`sweep_id` is its
+    target; `_sweep_audit_detail` is its content). A worker with no
+    AUDIT_TABLE refuses to start rather than deleting unrecorded.
     """
+    if not os.environ.get("AUDIT_TABLE"):
+        raise RuntimeError("AUDIT_TABLE is not configured for the purge worker")
+    sweep_id = uuid.uuid4().hex
+
     settings = get_retention_settings()
     settings = _apply_ready_pending_reduction(settings)
 
@@ -573,6 +706,26 @@ def run_purge_sweep(dry_run: bool = False) -> dict[str, Any]:
                 skipped_not_yet_eligible.append(review_id)
                 continue
 
+            # W6.6: the scan page was read before this candidate's turn and a
+            # scan is eventually consistent. A hold placed since must still
+            # win, so re-read the row strongly consistently right before
+            # acting. Mirrors backend/src/retention.py::run_purge_sweep_now.
+            current = reviews_table.get_item(
+                Key={"review_id": review_id}, ConsistentRead=True
+            ).get("Item")
+            if not current:
+                logger.warning(
+                    "retention sweep: review %s vanished mid-sweep; skipped", review_id
+                )
+                continue
+            if _is_legal_held(current):
+                skipped_hold.append(review_id)
+                continue
+            if current.get("status") not in TERMINAL_REVIEW_STATUSES:
+                skipped_active.append(review_id)
+                continue
+            review = current
+
             # Invariant 4: delete documents, then clear matched substance
             # fields.
             eligible.append(review_id)
@@ -606,7 +759,8 @@ def run_purge_sweep(dry_run: bool = False) -> dict[str, Any]:
         if not exclusive_start_key:
             break
 
-    return {
+    result = {
+        "sweep_id": sweep_id,
         "dry_run": dry_run,
         "deleted_reviews": deleted,
         "eligible_reviews": eligible,
@@ -617,6 +771,14 @@ def run_purge_sweep(dry_run: bool = False) -> dict[str, Any]:
         "skipped_hold": skipped_hold,
         "skipped_not_yet_eligible": skipped_not_yet_eligible,
     }
+    _write_audit_entry(
+        actor=PURGE_WORKER_ACTOR,
+        action="retention_purge_sweep",
+        target=sweep_id,
+        target_type="retention_sweep",
+        detail=_sweep_audit_detail(result),
+    )
+    return result
 
 
 def handler(event: dict[str, Any] = None, _context: Any = None) -> dict[str, Any]:  # noqa: RUF013

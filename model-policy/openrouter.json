@@ -350,7 +350,25 @@
     "routing, not quality: a candidate is trusted only after a live run. Rates",
     "from https://openrouter.ai/api/v1/models on 2026-10-06. How to run the",
     "test tier is in docs/evaluation.md's live-smoke section. Counts of",
-    "`selectable` entries in the passages above predate these two."
+    "`selectable` entries in the passages above predate these two.",
+    "",
+    "CACHE PRICING (issue #154): every entry that declares `prompt_caching:",
+    "true` also declares `cache_write_input_rate_multiplier` and",
+    "`cache_read_input_rate_multiplier`, as multiples of that SAME entry's",
+    "`cost_per_million_input_usd`. A prompt-cache write is billed at 1.25x",
+    "the input rate and a cache read at 0.1x -- Anthropic's published",
+    "5-minute-cache pricing for every Claude model, which OpenRouter passes",
+    "through; the #143 and test-tier probes above (a repeat call costing 8%",
+    "of the first) are consistent with the read figure. Settlement",
+    "(backend/src/reviews.py::compute_actual_usd_cents_from_usage) prices",
+    "the ledgered cache_creation_input_tokens / cache_read_input_tokens at",
+    "these multiples and the rest of the input at the base rate. An entry",
+    "that declares no multiplier prices cached input at the base rate, as",
+    "before this issue; the worst-case reservation still prices all input",
+    "at the base rate. tests/test_settlement_prices_cache_tokens.py fails if",
+    "a caching entry omits either field. Re-verify against",
+    "https://openrouter.ai/api/v1/models (input_cache_write /",
+    "input_cache_read) when a rate here changes."
   ],
   "schema_version": "1",
   "provider": "openrouter",
@@ -369,6 +387,8 @@
       "structured_outputs": false,
       "structured_outputs_note": "Issue #142, probed 2026-09-16 with the production provider block (zdr: true, data_collection: deny, require_parameters: true): a request carrying response_format.type=json_schema for this id 404s -- OpenRouter's routing funnel filters it to zero endpoints at the \"Filter by Data Policy\" step, because neither endpoint that supports response_format for this model is a zero-data-retention endpoint. `structured_outputs` here means \"the endpoint(s) reachable under THIS deployment's ZDR provider block support response_format\", not \"the model supports it somewhere\" -- see docs/design-notes.md's model-policy section. The forced-tool path (OPENROUTER_STRUCTURED_OUTPUT=1, the default) is unaffected -- tools/tool_choice routed fine in the same probe -- so this id still gets schema-enforced output, just not via response_format.",
       "prompt_caching": true,
+      "cache_write_input_rate_multiplier": 1.25,
+      "cache_read_input_rate_multiplier": 0.1,
       "prompt_caching_note": "Issue #143, probed 2026-09-16 with the production provider block (zdr: true, data_collection: deny, require_parameters: true): two identical requests with an 8,103-token system block marked cache_control ephemeral, sent with usage.include, reported cache_write_tokens 8103 then cached_tokens 8103, and the second cost 8% of the first ($0.0042 vs $0.0508) -- the ZDR route honours the breakpoint for this id. Owner decision 2026-09-17: the ephemeral provider-side cache is permitted under this deployment's zero-data-retention definition -- see docs/data-handling.md.",
       "request_contract": {
         "omit_sampling_params": [
@@ -391,6 +411,8 @@
       "structured_outputs": false,
       "structured_outputs_note": "Issue #142, probed 2026-09-16 with the production provider block (zdr: true, data_collection: deny, require_parameters: true): a request carrying response_format.type=json_schema for this id 404s -- OpenRouter's routing funnel filters it to zero endpoints at the \"Filter by Data Policy\" step, because neither endpoint that supports response_format for this model is a zero-data-retention endpoint. `structured_outputs` here means \"the endpoint(s) reachable under THIS deployment's ZDR provider block support response_format\", not \"the model supports it somewhere\" -- see docs/design-notes.md's model-policy section. The forced-tool path (OPENROUTER_STRUCTURED_OUTPUT=1, the default) is unaffected -- tools/tool_choice routed fine in the same probe -- so this id still gets schema-enforced output, just not via response_format.",
       "prompt_caching": true,
+      "cache_write_input_rate_multiplier": 1.25,
+      "cache_read_input_rate_multiplier": 0.1,
       "prompt_caching_note": "Issue #143, probed 2026-09-16 with the production provider block (zdr: true, data_collection: deny, require_parameters: true): two identical requests with an 8,103-token system block marked cache_control ephemeral, sent with usage.include, reported cache_write_tokens 8103 then cached_tokens 8103, and the second cost 8% of the first ($0.0042 vs $0.0508) -- the ZDR route honours the breakpoint for this id. Owner decision 2026-09-17: the ephemeral provider-side cache is permitted under this deployment's zero-data-retention definition -- see docs/data-handling.md.",
       "request_contract": {
         "omit_sampling_params": [
@@ -459,7 +481,9 @@
       "reasoning_max_tokens": 4000,
       "max_output_tokens": 128000,
       "structured_outputs": false,
-      "prompt_caching": true
+      "prompt_caching": true,
+      "cache_write_input_rate_multiplier": 1.25,
+      "cache_read_input_rate_multiplier": 0.1
     },
     {
       "model_id": "openai/gpt-5.6-sol",
@@ -527,7 +551,9 @@
       "context_length": 200000,
       "reasoning_max_tokens": 4000,
       "structured_outputs": false,
-      "prompt_caching": true
+      "prompt_caching": true,
+      "cache_write_input_rate_multiplier": 1.25,
+      "cache_read_input_rate_multiplier": 0.1
     },
     {
       "model_id": "openai/gpt-5.6-luna",

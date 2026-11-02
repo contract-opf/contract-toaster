@@ -21,15 +21,19 @@
  *             `.ct-tab-group__label` wrapper around a second labeled
  *             instance was removed when #599 reversed that DECISION; see
  *             git history for the retired classes)
- *   Sections  .ct-section  .ct-section-title  (#492's .ct-outcome-headline
- *             went with the result panel it titled — issue #727 deleted
- *             that panel along with the rest of the surface the Orbit
- *             Diner console replaced; see git history for the rule)
+ *   Sections  .ct-section  (.ct-section-title was retired in the QA
+ *             2026-10-31 W10 pass — nothing rendered it. #492's
+ *             .ct-outcome-headline went with the result panel it titled —
+ *             issue #727 deleted that panel along with the rest of the
+ *             surface the Orbit Diner console replaced; see git history for
+ *             both rules)
  *   Status    .ct-muted  .ct-mono  .ct-sr-only (issue #492 — announced,
  *             never painted; standard clip-rect pattern, mirrors
  *             ct-button.css's .ct-button__live and ct-file-drop.css's
  *             .ct-file-drop__input)
- *   Layout    .ct-row  .ct-stack  .ct-actions
+ *   Layout    .ct-row  .ct-row--between  .ct-row--wrap  .ct-stack
+ *             .ct-actions  .ct-row-actions(__main|__danger)
+ *   Controls  .ct-input (compact search/filter field in a panel toolbar)
  *
  * Theme-aware via tokens.css (which mirrors prefers-color-scheme). Motion:
  * transitions here are cosmetic and short; the Review console's own
@@ -90,15 +94,6 @@
 .ct-section {
   margin: 0 0 var(--ct-gap-lg);
 }
-/* Issue #600 retired the ad-hoc 1.15rem here for --ct-text-lg (20px): the
-   type scale is the only vocabulary for sizes now, and an off-scale literal
-   is exactly what the floor guard cannot reason about. This <h2> still reads
-   a step below base.css's own h2 (--ct-text-xl), which is the whole point of
-   the class. */
-.ct-section-title {
-  font-size: var(--ct-text-lg);
-  margin: 0 0 0.75rem;
-}
 
 /* Muted secondary copy. Issue #600: this was 0.85rem (13.6px), below the
    --ct-text-sm floor — "muted" is a COLOUR treatment, not a licence to
@@ -152,6 +147,28 @@
   align-items: center;
   gap: var(--ct-gap-sm);
 }
+/* Toolbar modifiers (QA 2026-10-31 W10). These names were applied by
+   ReviewHistory / AdminPlaybooks / SpendCard with no rule behind them, and
+   each call site re-declared the flex row inline — with a fixed-width search
+   field in an inner row that could not wrap, which is what pushed the History
+   toolbar to 504px inside a 375px viewport.
+   --between  spreads the row's groups to its two ends.
+   --wrap     lets the row AND its direct children shrink below their content
+              width (`min-width: 0` — a flex item's default `auto` minimum is
+              its min-content width, which is how one long child pins a row
+              open). Nest it: an inner group that is itself a row needs its
+              own --wrap so its children reflow too. */
+.ct-row--between {
+  justify-content: space-between;
+}
+.ct-row--wrap {
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.ct-row--wrap > * {
+  min-width: 0;
+  max-width: 100%;
+}
 .ct-stack {
   display: flex;
   flex-direction: column;
@@ -171,38 +188,61 @@
 .ct-actions button[type='submit'],
 .ct-actions [role='button'] { width: auto; }
 
+/* Compact text/search field for a panel toolbar (History search, playbook
+   filter, Diagnostics search, entity-roster filter). Surface, border, radius
+   and focus ring are base.css's bare-input treatment; this only sizes it.
+   Effectively `min(14rem, 100%)`, never a bare 14rem: a fixed width is a
+   min-content floor the row cannot shrink past (QA 2026-10-31 W10). It is
+   spelled as `width` + a percentage `max-width` rather than `width:
+   min(14rem, 100%)` on purpose — measured in Chromium, the min() form made
+   the field contribute its default (narrower) width to its row's
+   max-content size, so at 1280px the row came up short and wrapped the
+   count beside it onto a second line. A text input with a percentage
+   max-width is "compressible" (css-sizing-3 §5.2.2): its max-content
+   contribution is the full 14rem and its min-content contribution is zero,
+   which is exactly the pair a wrapping toolbar needs. */
+.ct-input {
+  width: 14rem;
+  max-width: 100%;
+  min-width: 0;
+  font-size: var(--ct-text-sm);
+  padding: var(--ct-space-1) var(--ct-space-3);
+}
+
 /* Table-row action group (issue #598). A plain `.ct-actions` in a narrow
    table column wraps one button per line, so three actions read as a
    vertical stack — and the one-way door (Remove) sat in it with the same
    visual weight as Rename. Two bands instead: routine actions together,
    destructive separated by a rule and pushed to the end. `flex-wrap` stays
    on both so a genuinely narrow viewport still reflows rather than
-   overflowing the row. */
-/* Actions layout for table rows: clean alignment, no awkward divider rule */
+   overflowing the row.
+
+   QA 2026-10-31, decision D5: a later `.ct-actions-grid-2x2` layout set
+   both bands to `display: contents` and dropped the rule below, which put
+   Remove in the fourth grid cell beside Rename with equal weight. The bands
+   and the rule are restored; that grid class is gone. */
 .ct-row-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--ct-space-2);
+  gap: var(--ct-gap-sm);
+  min-width: 0;
 }
 .ct-row-actions__main,
 .ct-row-actions__danger {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--ct-space-2);
+  gap: var(--ct-gap-sm);
+  min-width: 0;
 }
-
-/* 2x2 grid for table row actions */
-.ct-actions-grid-2x2 {
-  display: inline-grid;
-  grid-template-columns: repeat(2, minmax(130px, 1fr));
-  gap: var(--ct-space-2);
-  align-items: center;
-}
-.ct-row-actions.ct-actions-grid-2x2 .ct-row-actions__main,
-.ct-row-actions.ct-actions-grid-2x2 .ct-row-actions__danger {
-  display: contents;
+/* The separation itself. `margin-inline-start: auto` on a wrapped flex line
+   is a no-op, so the rule (not the gap) is what still reads as "this one is
+   different" once the bands stack at a narrow width. */
+.ct-row-actions__danger {
+  margin-inline-start: auto;
+  padding-inline-start: var(--ct-gap-sm);
+  border-inline-start: 1px solid var(--ct-border);
 }
 
 /* --------------------------------------------------- Local modal overlay */
@@ -268,10 +308,10 @@
 .toaster-receipt__paper {
   width: min(100%, 34rem);
   padding: 1rem 1.25rem 1.5rem;
-  background: var(--ct-receipt-paper, #fdfbf5);
-  color: var(--ct-receipt-ink, #2a2119);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: var(--ct-text-sm, 14px);
+  background: var(--ct-receipt-paper);
+  color: var(--ct-receipt-ink);
+  font-family: var(--ct-font-mono);
+  font-size: var(--ct-text-sm);
   line-height: 1.55;
   box-shadow: 0 1px 2px rgba(20, 14, 8, 0.14);
   /* A torn bottom edge, drawn rather than imaged (the CSP forbids remote
@@ -282,7 +322,7 @@
     56% 100%, 52% calc(100% - 6px), 48% 100%, 44% calc(100% - 6px), 40% 100%,
     36% calc(100% - 6px), 32% 100%, 28% calc(100% - 6px), 24% 100%, 20% calc(100% - 6px),
     16% 100%, 12% calc(100% - 6px), 8% 100%, 4% calc(100% - 6px), 0 100%);
-  animation: toaster-receipt-spool 520ms var(--ct-ease-out, cubic-bezier(.2, .8, .3, 1)) both;
+  animation: toaster-receipt-spool 520ms var(--ct-ease-out) both;
 }
 .toaster-receipt__line {
   display: flex;
@@ -290,8 +330,22 @@
   gap: 1rem;
   margin: 0;
 }
+/* Label left, value right. The value WRAPS inside the paper (QA 2026-10-31
+   W10): it used to be `white-space: nowrap`, and on narrow paper a model ID or
+   playbook title ran past the clip-path edge and was cut off silently. The
+   label keeps its own width (short, and never more than half the line); the
+   value takes the rest, may shrink (`min-width: 0`) and breaks anywhere — an
+   ID has no spaces to break at — staying right-aligned so a wrapped
+   continuation line still reads as belonging to the value column. */
+.toaster-receipt__label {
+  flex: 0 0 auto;
+  max-width: 50%;
+}
 .toaster-receipt__value {
-  white-space: nowrap;
+  flex: 1 1 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
 }
 /* A full-width disclosure sentence (issue #570 follow-up) rather than a
    label/value pair: the fixed-width flex row above never lets its value shrink
@@ -305,28 +359,64 @@
 }
 .toaster-receipt__value--wrap {
   display: block;
-  white-space: normal;
   overflow-wrap: break-word;
   text-align: left;
 }
 .toaster-receipt__rule {
   border: 0;
-  border-top: 1px dashed var(--ct-receipt-ink, #2a2119);
+  border-top: 1px dashed var(--ct-receipt-ink);
   opacity: 0.45;
   margin: 0.4rem 0;
 }
 .toaster-receipt__actions {
   justify-content: center;
 }
+/* The paper unrolls downward. Both keyframes are `polygon()` with the SAME
+   number of points as the torn-edge clip-path above, which is the only way
+   clip-path interpolates — the previous `inset()` → (implicit) `polygon()`
+   pair cannot be interpolated, so the browser swapped from fully clipped to
+   fully shown at the midpoint instead of spooling (QA 2026-10-31 W10). The
+   `from` frame collapses every point onto the top edge. Keep the point
+   count in step with the paper's clip-path if the edge ever changes. */
 @keyframes toaster-receipt-spool {
-  from { clip-path: inset(0 0 100% 0); transform: translateY(-8px); }
-  to   { transform: translateY(0); }
+  from {
+    clip-path: polygon(0 0, 100% 0, 100% 0,
+      96% 0, 92% 0, 88% 0, 84% 0, 80% 0,
+      76% 0, 72% 0, 68% 0, 64% 0, 60% 0,
+      56% 0, 52% 0, 48% 0, 44% 0, 40% 0,
+      36% 0, 32% 0, 28% 0, 24% 0, 20% 0,
+      16% 0, 12% 0, 8% 0, 4% 0, 0 0);
+    transform: translateY(-8px);
+  }
+  to {
+    clip-path: polygon(0 0, 100% 0, 100% calc(100% - 6px),
+      96% 100%, 92% calc(100% - 6px), 88% 100%, 84% calc(100% - 6px), 80% 100%,
+      76% calc(100% - 6px), 72% 100%, 68% calc(100% - 6px), 64% 100%, 60% calc(100% - 6px),
+      56% 100%, 52% calc(100% - 6px), 48% 100%, 44% calc(100% - 6px), 40% 100%,
+      36% calc(100% - 6px), 32% 100%, 28% calc(100% - 6px), 24% 100%, 20% calc(100% - 6px),
+      16% 100%, 12% calc(100% - 6px), 8% 100%, 4% calc(100% - 6px), 0 100%);
+    transform: translateY(0);
+  }
+}
+/* Paper and ink. Day values by default; the night values apply on the same
+   two routes tokens.css uses for the rest of the theme — the OS preference
+   (unless [data-theme='light'] vetoes it) and an explicit
+   [data-theme='dark']. Only the media query was honoured before, so a forced
+   dark theme left the receipt on day paper and a forced light theme on an
+   OS-dark machine left it on night paper. */
+.toaster-receipt__paper {
+  --ct-receipt-paper: #fdfbf5;
+  --ct-receipt-ink: #2a2119;
 }
 @media (prefers-color-scheme: dark) {
-  .toaster-receipt__paper {
+  :root:not([data-theme='light']) .toaster-receipt__paper {
     --ct-receipt-paper: #efe7d8;
     --ct-receipt-ink: #241c15;
   }
+}
+:root[data-theme='dark'] .toaster-receipt__paper {
+  --ct-receipt-paper: #efe7d8;
+  --ct-receipt-ink: #241c15;
 }
 @media (prefers-reduced-motion: reduce) {
   .toaster-receipt__paper {

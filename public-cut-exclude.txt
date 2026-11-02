@@ -56,3 +56,12 @@ tests/lint-public-cut-exclude.py
 # addresses, the real playbook bundle and gold set. This is the one directory
 # whose entire purpose is to hold what must never be public.
 overlay/
+
+# An internal owner-decision record (2026-09-08) that marked itself internal-
+# only in its own text: it discussed production accounts, a client pilot and
+# the private document corpus. The per-directory rules above did not cover
+# docs/plans/, so it reached this tree anyway. Removed on 2026-10-31 (QA
+# remediation W2, option (a): removed from the tree, history not rewritten).
+# tests/lint-publication-markers.py now fails any tracked file that carries
+# such a marker, so the next one is caught before it lands.
+docs/plans/2026-09-08-owner-decisions-handoff.md

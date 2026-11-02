@@ -586,7 +586,7 @@ describe('a prefill is not a resubmit (issue #70)', () => {
     // --- the manual run ----------------------------------------------------
     vi.unstubAllGlobals();
     screen.getByTestId('review-file-input'); // still mounted; now replace it
-    document.body.innerHTML = '';
+    document.body.replaceChildren();
     window.localStorage?.clear();
     window.sessionStorage?.clear();
 

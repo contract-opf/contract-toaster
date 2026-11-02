@@ -37,7 +37,7 @@ from fastapi import HTTPException  # noqa: E402
 from fastapi.security import HTTPAuthorizationCredentials  # noqa: E402
 import jwt  # noqa: E402  (PyJWT)
 
-SECRET = "unit-test-demo-secret"
+SECRET = "unit-test-demo-secret-0123456789abcdef0123456789"
 USER_ROW = {"cognito_sub": "local:alice", "username": "alice", "role": "user", "is_admin": False}
 ADMIN_ROW = {"cognito_sub": "local:root", "username": "root", "role": "admin", "is_admin": True}
 
@@ -59,7 +59,7 @@ class TestDemoToken(unittest.TestCase):
     def test_wrong_secret_rejected(self) -> None:
         with patch.dict("os.environ", {"DEMO_TOKEN_SECRET": SECRET}, clear=True):
             token = demo_auth.issue_demo_token(USER_ROW)
-        with patch.dict("os.environ", {"DEMO_TOKEN_SECRET": "different"}, clear=True):
+        with patch.dict("os.environ", {"DEMO_TOKEN_SECRET": "a-different-but-equally-strong-secret-9f8e7d6c5b4a"}, clear=True):
             with self.assertRaises(HTTPException) as ctx:
                 demo_auth.verify_demo_token(token)
             self.assertEqual(ctx.exception.status_code, 401)
