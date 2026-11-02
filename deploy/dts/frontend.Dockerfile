@@ -41,4 +41,18 @@ RUN npm run build
 FROM nginx:1.27-alpine
 COPY deploy/dts/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/frontend/dist /usr/share/nginx/html
+
+# ---- image provenance (issue #42) ----
+# A build arg does not cross a FROM, so the final stage redeclares the pair,
+# after every COPY, as the inputs of this last cheap block. COMMIT_SHA is the
+# ARTIFACT REVISION (the full commit SHA dts-image-publish.yml passes as
+# TARGET_SHA): the standard OCI revision annotation, plus a RUN that writes it
+# to /etc/image-revision so it is a direct cache input of a real layer. VERSION
+# is the separate RELEASE/BUILD identifier. No deployment identifier is baked
+# in: which deployment launched an image is a runtime fact.
+ARG VERSION=dev
+ARG COMMIT_SHA=unknown
+LABEL org.opencontainers.image.revision=${COMMIT_SHA} \
+      org.opencontainers.image.version=${VERSION}
+RUN printf '%s\n' "${COMMIT_SHA}" > /etc/image-revision
 EXPOSE 8080

@@ -170,7 +170,7 @@ class FakePlaybooksTable:
         item = self.items.get(Key["playbook_id"])
         return {"Item": item} if item else {}
 
-    def put_item(self, Item):
+    def put_item(self, Item, ConditionExpression=None):  # noqa: ARG002 - audit writes are conditional (W6.1); moto covers the condition
         self.items[Item["playbook_id"]] = dict(Item)
 
     def update_item(self, Key, UpdateExpression, ExpressionAttributeNames=None,
@@ -199,7 +199,7 @@ class FakeAuditTable:
     def __init__(self):
         self.items: list[dict[str, Any]] = []
 
-    def put_item(self, Item):
+    def put_item(self, Item, ConditionExpression=None):  # noqa: ARG002 - audit writes are conditional (W6.1); moto covers the condition
         self.items.append(dict(Item))
 
 

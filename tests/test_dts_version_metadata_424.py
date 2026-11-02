@@ -3,8 +3,8 @@
 CI gate for issue #424: DTS deploy target plumbs real VERSION/COMMIT_SHA.
 
 The AWS target bakes build metadata into its image correctly
-(backend/Dockerfile:1-15 declares ARG/ENV for VERSION, COMMIT_SHA and
-IMAGE_DIGEST; .github/workflows/ci-pipeline.yml passes real --build-arg
+(the metadata block at the end of backend/Dockerfile declares ARG/ENV for
+VERSION, COMMIT_SHA and IMAGE_DIGEST; .github/workflows/ci-pipeline.yml passes real --build-arg
 values), and tests/test_infra_app_stack.py check A locks that in. The DTS
 (Docker Compose) target had no equivalent plumbing at any link of the chain,
 so `GET /version` always hit its os.environ defaults and the deployed footer
@@ -94,7 +94,7 @@ def check_1_dockerfile_arg_env() -> list[str]:
             arg_default is not None,
             f"1a[{var}]: ARG {var}=<default> declared",
             f"1a[{var}]: deploy/dts/backend.Dockerfile does not declare "
-            f"`ARG {var}=<default>` — mirror backend/Dockerfile:1-15, or "
+            f"`ARG {var}=<default>` — mirror backend/Dockerfile's metadata block, or "
             f"GET /version silently reports its os.environ fallback (issue #424)",
         )
         if arg_default is not None:

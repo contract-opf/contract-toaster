@@ -1,0 +1,12 @@
+# Polls GHCR every five minutes. A new image is live within about five
+# minutes of its publish job finishing.
+[Unit]
+Description=Poll GHCR for new DTS images and roll Coolify forward
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30s
+
+[Install]
+WantedBy=timers.target

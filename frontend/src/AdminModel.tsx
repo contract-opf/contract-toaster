@@ -64,7 +64,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { type AdminPanelRefreshProps } from './adminRefresh';
 import { failedLoad, type LoadState } from './loadState';
-import { authorizedFetch, friendlyErrorMessage, readErrorDetail } from './api';
+import { authorizedFetch, friendlyErrorMessage } from './api';
+import { UserFacingError, responseError, toUserMessage } from './userMessage';
 import {
   CtBanner,
   CtButton,
@@ -338,8 +339,8 @@ function ModelRoleField({
           style={{
             padding: '0.75rem',
             borderRadius: '6px',
-            background: 'var(--ct-bg-subtle, rgba(255, 255, 255, 0.03))',
-            border: '1px solid var(--ct-border-subtle, rgba(255, 255, 255, 0.08))',
+            background: 'var(--ct-surface-sunken)',
+            border: '1px solid var(--ct-border)',
             marginTop: '0.25rem',
           }}
         >
@@ -448,7 +449,7 @@ export default function AdminModel({
         return;
       }
       if (!response.ok) {
-        throw new Error(
+        throw new UserFacingError(
           friendlyErrorMessage(
             `GET /api/admin/model-key returned HTTP ${response.status}`,
             "We couldn't load the model key settings. Please try again.",
@@ -490,7 +491,7 @@ export default function AdminModel({
         return;
       }
       if (!response.ok) {
-        throw new Error(
+        throw new UserFacingError(
           friendlyErrorMessage(
             `GET /api/admin/model-selection returned HTTP ${response.status}`,
             "We couldn't load the model choices. Please try again.",
@@ -499,7 +500,7 @@ export default function AdminModel({
       }
       const data: unknown = await response.json();
       if (!isModelSelectionSettings(data)) {
-        throw new Error(
+        throw new UserFacingError(
           friendlyErrorMessage(
             'GET /api/admin/model-selection returned an unexpected body',
             "We couldn't load the model choices. Please try again.",
@@ -545,18 +546,15 @@ export default function AdminModel({
           return;
         }
         if (!response.ok) {
-          const detail = await readErrorDetail(response);
-          throw new Error(
-            detail ??
-              friendlyErrorMessage(
-                `POST /api/admin/model-selection returned HTTP ${response.status}`,
-                "We couldn't save those model choices. Please try again.",
-              ),
+          throw await responseError(
+            response,
+            `POST /api/admin/model-selection returned HTTP ${response.status}`,
+            "We couldn't save those model choices. Please try again.",
           );
         }
         const data: unknown = await response.json();
         if (!isModelSelectionSettings(data)) {
-          throw new Error(
+          throw new UserFacingError(
             friendlyErrorMessage(
               'POST /api/admin/model-selection returned an unexpected body',
               "We couldn't save those model choices. Please try again.",
@@ -567,9 +565,7 @@ export default function AdminModel({
         setSelectionNotice('Models saved. Your next review will use them.');
       } catch (err) {
         setSelectionActionError(
-          err instanceof Error
-            ? err.message
-            : friendlyErrorMessage(err, "We couldn't save those model choices. Please try again."),
+          toUserMessage(err, "We couldn't save those model choices. Please try again."),
         );
       } finally {
         setSavingModels(false);
@@ -594,13 +590,10 @@ export default function AdminModel({
           return;
         }
         if (!response.ok) {
-          const detail = await readErrorDetail(response);
-          throw new Error(
-            detail ??
-              friendlyErrorMessage(
-                `POST /api/admin/model-key returned HTTP ${response.status}`,
-                "We couldn't save that key. Please try again.",
-              ),
+          throw await responseError(
+            response,
+            `POST /api/admin/model-key returned HTTP ${response.status}`,
+            "We couldn't save that key. Please try again.",
           );
         }
         setSettings((await response.json()) as ModelKeySettings);
@@ -609,9 +602,7 @@ export default function AdminModel({
         setNotice('Key saved. New reviews will use it from now on.');
       } catch (err) {
         setActionError(
-          err instanceof Error
-            ? err.message
-            : friendlyErrorMessage(err, "We couldn't save that key. Please try again."),
+          toUserMessage(err, "We couldn't save that key. Please try again."),
         );
       } finally {
         setSaving(false);
@@ -631,13 +622,10 @@ export default function AdminModel({
         return;
       }
       if (!response.ok) {
-        const detail = await readErrorDetail(response);
-        throw new Error(
-          detail ??
-            friendlyErrorMessage(
-              `DELETE /api/admin/model-key returned HTTP ${response.status}`,
-              "We couldn't clear that key. Please try again.",
-            ),
+        throw await responseError(
+          response,
+          `DELETE /api/admin/model-key returned HTTP ${response.status}`,
+          "We couldn't clear that key. Please try again.",
         );
       }
       const data = (await response.json()) as ModelKeySettings;
@@ -649,9 +637,7 @@ export default function AdminModel({
       );
     } catch (err) {
       setActionError(
-        err instanceof Error
-          ? err.message
-          : friendlyErrorMessage(err, "We couldn't clear that key. Please try again."),
+        toUserMessage(err, "We couldn't clear that key. Please try again."),
       );
     } finally {
       setSaving(false);

@@ -68,6 +68,7 @@ Individual gates worth knowing:
 ```bash
 python3 tests/lint-brand-free.py          # no private-org reference in a pull path
 python3 tests/lint-counterparty-names.py  # no counterparty identity, ever
+python3 tests/lint-publication-markers.py # no internal-only marker or private local path
 python3 tools/docs_sync.py audit          # docs/INDEX.md still true
 ruff check backend scripts tests infra/lambda   # lint  (issue #65)
 mypy                                      # types (issue #65)

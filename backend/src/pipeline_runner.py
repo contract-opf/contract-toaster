@@ -91,6 +91,7 @@ try:  # production runs `src.main`; tests put backend/src on sys.path
         model_settings,
         playbook_upload,
         playbook_versions,
+        retention,
         reviews,
     )
 except ImportError:  # pragma: no cover
@@ -102,6 +103,7 @@ except ImportError:  # pragma: no cover
     import model_settings  # type: ignore[no-redef]
     import playbook_upload  # type: ignore[no-redef]
     import playbook_versions  # type: ignore[no-redef]
+    import retention  # type: ignore[no-redef]
     import reviews  # type: ignore[no-redef]
 
 # scripts/review_spine.py (issue #239) composes the pipeline-stage modules
@@ -232,8 +234,15 @@ def _s3_client() -> Any:
 # ---------------------------------------------------------------------------
 
 
-def _mark_running(review_id: str, dynamodb_resource: Any) -> None:
-    """PENDING -> RUNNING, conditional (never clobbers a terminal/ERROR row)."""
+def _mark_running(review_id: str, dynamodb_resource: Any) -> bool:
+    """PENDING -> RUNNING, conditional (never clobbers a terminal/ERROR row).
+
+    Returns whether THIS call claimed the row. `False` means the row was not
+    PENDING -- already terminal (DONE, ERROR, CANCELLED, ...), or already
+    RUNNING under another run. QA W8 item 5: `run_real_pipeline` stops on
+    `False` before any model call; it used to swallow the refusal and run
+    (and pay for) the whole review anyway, then overwrite a DONE row's
+    result with its own. The mock pipeline ignores the return value."""
     table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
     try:
         table.update_item(
@@ -247,9 +256,11 @@ def _mark_running(review_id: str, dynamodb_resource: Any) -> None:
                 ":now": str(int(time.time())),
             },
         )
-    except Exception as exc:  # ConditionalCheckFailed -> not PENDING; no-op
+    except Exception as exc:  # ConditionalCheckFailed -> not PENDING; not ours
         if type(exc).__name__ != "ConditionalCheckFailedException" and not _is_conditional(exc):
             raise
+        return False
+    return True
 
 
 def _write_progress_stage(review_id: str, stage_token: str, dynamodb_resource: Any) -> None:
@@ -392,17 +403,30 @@ def _mock_decision(review_id: str, playbook_id: str) -> dict[str, Any]:
     }
 
 
-def _copy_output_object(result: dict[str, Any], s3_client: Any) -> bool:
+def _copy_output_object(
+    result: dict[str, Any],
+    s3_client: Any,
+    *,
+    review_id: str = "",
+    dynamodb_resource: Any | None = None,
+) -> bool:
     """Materialize the output .docx by copying the seeded fixture into the
     review's outputs/ prefix (redline-stage equivalent). Returns True when an
-    object was written."""
+    object was written. Tagged legal-hold at write time when the review is
+    held (W6.6) -- `REPLACE`, so the fixture's own tags never carry over."""
     output_key = result.get("output_s3_key")
     source_key = result.get("pre_baked_source_key")
     if not output_key or not source_key:
         return False
     bucket = os.environ["OUTPUTS_BUCKET"]
+    tagging = _hold_tagging(review_id, dynamodb_resource) if review_id else {}
+    if tagging:
+        tagging = {**tagging, "TaggingDirective": "REPLACE"}
     s3_client.copy_object(
-        Bucket=bucket, Key=output_key, CopySource={"Bucket": bucket, "Key": source_key}
+        Bucket=bucket,
+        Key=output_key,
+        CopySource={"Bucket": bucket, "Key": source_key},
+        **tagging,
     )
     return True
 
@@ -502,7 +526,14 @@ def _settle_reservation(
     # settle_spend's signature is (review_id, reservation_id,
     # actual_usd_cents, dynamodb_resource).
     reviews.settle_spend(
-        review_id, submission["spend_reservation_id"], actual_usd_cents, dynamodb_resource
+        review_id,
+        submission["spend_reservation_id"],
+        actual_usd_cents,
+        dynamodb_resource,
+        # QA W8 item 3: reverse the Floor-judge top-up too, as recorded.
+        # Passed only when there is one, so a review without a Floor makes
+        # exactly the call it always made.
+        **reviews.floor_top_up_settle_kwargs(submission),
     )
     submissions.update_item(
         Key={"idempotency_key": submission["idempotency_key"]},
@@ -543,7 +574,48 @@ def _settle_reservation_safely(
         )
 
 
-def _actual_cents_from_client(client: Any, dynamodb_resource: Any) -> int:
+def _sum_usage(into: dict[str, int], usage: dict[str, int]) -> None:
+    for key, value in usage.items():
+        if key == "reasoning_tokens":  # counted inside output_tokens already
+            continue
+        into[key] = into.get(key, 0) + int(value or 0)
+
+
+def _usage_by_rate_slot(
+    usage_by_model: dict[str, dict[str, int]],
+    model_ids: dict[str, str],
+    rates: tuple[float, float, float, float],
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Split a client's per-model usage into the `(primary, critic)` rate
+    slots `reviews.compute_actual_usd_cents_from_usage` prices (QA W8 item 2).
+
+    Tokens spent on the run's critic model -- the critic pass AND the Floor
+    judge, which runs on the critic model (`review_spine`, ADR 0001) -- go
+    to the critic slot; tokens on the reviewer's model go to the primary
+    slot. A model id that is neither (an off-policy break-glass id that
+    somehow differs from both) is priced in whichever slot is MORE
+    expensive, so an unexpected model can only over-count against the cap.
+    """
+    primary_usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
+    critic_usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
+    primary_in, primary_out, critic_in, critic_out = rates
+    critic_costlier = (critic_out, critic_in) > (primary_out, primary_in)
+    critic_id = model_ids.get("critic_model_id")
+    primary_id = model_ids.get("primary_model_id")
+    for model_id, usage in usage_by_model.items():
+        if model_id == critic_id:
+            bucket = critic_usage
+        elif model_id == primary_id:
+            bucket = primary_usage
+        else:
+            bucket = critic_usage if critic_costlier else primary_usage
+        _sum_usage(bucket, usage)
+    return primary_usage, critic_usage
+
+
+def _actual_cents_from_client(
+    client: Any, dynamodb_resource: Any, model_ids: dict[str, str] | None = None
+) -> int:
     """Actual settled cost (cents) for whatever `client` has invoked so far,
     priced from its `cumulative_usage` (issue #415).
 
@@ -559,7 +631,9 @@ def _actual_cents_from_client(client: Any, dynamodb_resource: Any) -> int:
     `cumulative_usage` is the SAME shape `last_usage` always was --
     `{"input_tokens": int, "output_tokens": int}` -- so it drops straight
     into `reviews.compute_actual_usd_cents_from_usage` as its single
-    argument, exactly as that function's docstring says it must. This one
+    argument, exactly as that function's docstring says it must -- plus, when
+    a call reported prompt caching, the cache-write / cache-read counts that
+    function prices at the model's declared cache rates (issue #154). This one
     combined total (primary + critic + every successful retry on the
     instance) is passed as the `primary_usage` slot with `critic_usage`
     left `None` -- there is no per-role split once the two passes have
@@ -569,7 +643,25 @@ def _actual_cents_from_client(client: Any, dynamodb_resource: Any) -> int:
     Safe to call after `client.close()`: `cumulative_usage` is a plain
     instance attribute, not a transport call -- only the underlying
     httpx.Client is torn down by close().
+
+    QA W8 item 2 -- PRICED PER MODEL when the client can say which model
+    each token was spent on. `OpenRouterModelClient.usage_by_model` splits
+    the same totals by model id, and `model_ids` (the run's
+    `_model_ids_for_run` pair) says which id is the reviewer's and which the
+    critic's. Pricing the grand total at the reviewer's rate, as the
+    paragraph above describes, under-counted every review whose critic runs
+    on a dearer model than its reviewer -- the critic pass and the Floor
+    judge are both critic-model calls. A client without `usage_by_model`
+    (a test double), or a call with no `model_ids`, keeps the single-slot
+    grand total exactly as before.
     """
+    by_model = getattr(client, "usage_by_model", None)
+    if isinstance(by_model, dict) and by_model and model_ids:
+        rates = reviews._active_provider_rates(dynamodb_resource)
+        primary_usage, critic_usage = _usage_by_rate_slot(by_model, model_ids, rates)
+        return reviews.compute_actual_usd_cents_from_usage(
+            primary_usage, critic_usage, dynamodb_resource, rates=rates
+        )
     usage = getattr(client, "cumulative_usage", None)
     if not usage:
         return 0
@@ -585,7 +677,9 @@ def run_mock_pipeline(review_id: str, payload: dict[str, Any], *,
     try:
         _mark_running(review_id, dynamodb_resource)
         result = _mock_decision(review_id, playbook_id)
-        object_written = _copy_output_object(result, s3_client)
+        object_written = _copy_output_object(
+            result, s3_client, review_id=review_id, dynamodb_resource=dynamodb_resource
+        )
         _write_terminal(review_id, result, object_written, dynamodb_resource)
         _settle_reservation_safely(review_id, dynamodb_resource)
     except Exception:  # fail closed to ERROR, never wedge PENDING
@@ -1040,18 +1134,40 @@ def _build_openrouter_client(
     return model_client.OpenRouterModelClient(api_key=api_key, cancel_checkpoint=cancel_checkpoint)
 
 
-def _write_real_output(review_id: str, result: dict[str, Any], s3_client: Any) -> str | None:
+def _hold_tagging(review_id: str, dynamodb_resource: Any | None) -> dict[str, str]:
+    """W6.6: the `Tagging` kwarg for an object written while the review is
+    under legal hold (`retention.tag_if_held`), so it is inside the
+    bucket-policy backstop from the moment it exists. `{}` when no table
+    handle was passed (a unit test of the writer alone)."""
+    if dynamodb_resource is None:
+        return {}
+    return retention.tag_if_held(review_id, dynamodb_resource)
+
+
+def _write_real_output(
+    review_id: str,
+    result: dict[str, Any],
+    s3_client: Any,
+    *,
+    dynamodb_resource: Any | None = None,
+) -> str | None:
     """PUT the spine's computed redline bytes to the same outputs/{review_id}/
     out.docx key convention the mock path uses. Returns the key when an
     object was written (REQUEST_CHANGE, including a partial delivery per
     redline_generate's #203 "partial delivery, never instead of" contract),
-    or None on ACCEPT / a fail-closed `ERROR` result (no redline_bytes)."""
+    or None on ACCEPT / a fail-closed `ERROR` result (no redline_bytes).
+    Tagged legal-hold at write time when the review is held (W6.6)."""
     redline_bytes = result.get("redline_bytes")
     if not redline_bytes:
         return None
     output_key = f"outputs/{review_id}/out.docx"
     bucket = os.environ["OUTPUTS_BUCKET"]
-    s3_client.put_object(Bucket=bucket, Key=output_key, Body=redline_bytes)
+    s3_client.put_object(
+        Bucket=bucket,
+        Key=output_key,
+        Body=redline_bytes,
+        **_hold_tagging(review_id, dynamodb_resource),
+    )
     return output_key
 
 
@@ -1133,7 +1249,13 @@ _ANALYSIS_FIELDS = (
 )
 
 
-def _write_real_analysis(review_id: str, result: dict[str, Any], s3_client: Any) -> str:
+def _write_real_analysis(
+    review_id: str,
+    result: dict[str, Any],
+    s3_client: Any,
+    *,
+    dynamodb_resource: Any | None = None,
+) -> str:
     """PUT the full review result to `outputs/{review_id}/analysis.json`.
 
     `run_review` computes findings, the analysis report, the decision, the
@@ -1164,7 +1286,8 @@ def _write_real_analysis(review_id: str, result: dict[str, Any], s3_client: Any)
     Retention needs no new machinery -- this shares the `outputs/{review_id}/`
     prefix the redline uses, and BOTH purge implementations resolve their
     targets by listing that prefix (asserted in
-    tests/test_analysis_artifact_persisted.py, not assumed).
+    tests/test_analysis_artifact_persisted.py, not assumed). Tagged legal-hold
+    at write time when the review is held (W6.6).
     """
     document = {field: result.get(field) for field in _ANALYSIS_FIELDS}
     body = json.dumps(document, sort_keys=True, indent=2, default=str).encode("utf-8")
@@ -1174,6 +1297,7 @@ def _write_real_analysis(review_id: str, result: dict[str, Any], s3_client: Any)
         Key=key,
         Body=body,
         ContentType="application/json",
+        **_hold_tagging(review_id, dynamodb_resource),
     )
     return key
 
@@ -1250,9 +1374,9 @@ def _write_real_terminal(review_id: str, result: dict[str, Any], output_s3_key: 
     exception), the spine's own `status` is ALREADY the correct terminal
     status for every expected condition (`OK`, or `ERROR` with a `reason`
     token -- issue #133 retired the "manual review" statuses) -- this just
-    persists it verbatim,
-    same "never clobbers a terminal/ERROR row" guard as the mock path's
-    _write_terminal.
+    persists it verbatim, conditional on the row still being RUNNING (QA W8
+    item 5) -- stricter than the mock path's "never clobbers an ERROR row":
+    a DONE or CANCELLED row is not this run's to overwrite either.
 
     `model_ids` (issue #449) is `_model_ids_for_run`'s dict: the per-step
     model provenance the History tab reads back. Omitted keys are simply not
@@ -1323,7 +1447,7 @@ def _write_real_terminal(review_id: str, result: dict[str, Any], output_s3_key: 
     terminal = "DONE" if status_value == "OK" else status_value
     now_str = str(int(time.time()))
     set_clauses = ["#s = :s", "updated_at = :now"]
-    values: dict[str, Any] = {":s": terminal, ":now": now_str, ":error": "ERROR"}
+    values: dict[str, Any] = {":s": terminal, ":now": now_str, ":running": "RUNNING"}
     if terminal != reviews.REVIEW_STATUS_SUCCESS_TERMINAL:
         set_clauses.append("failed_at = :failed_at")
         values[":failed_at"] = now_str
@@ -1440,7 +1564,10 @@ def _write_real_terminal(review_id: str, result: dict[str, Any], output_s3_key: 
         table.update_item(
             Key={"review_id": review_id},
             UpdateExpression="SET " + ", ".join(set_clauses),
-            ConditionExpression="attribute_not_exists(#s) OR #s <> :error",
+            # QA W8 item 5: only the run that holds the row RUNNING may
+            # land its terminal. The old guard ("anything but ERROR") let a
+            # stray run overwrite a DONE row's result, or a CANCELLED one.
+            ConditionExpression="#s = :running",
             ExpressionAttributeNames={"#s": "status"},
             ExpressionAttributeValues=values,
         )
@@ -1548,7 +1675,19 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
     # honest "run_review".
     last_progress_stage: str | None = None
     try:
-        _mark_running(review_id, dynamodb_resource)
+        if not _mark_running(review_id, dynamodb_resource):
+            # QA W8 item 5: this run does not own the row -- it is no longer
+            # PENDING (finished, failed, cancelled, or claimed by another
+            # run). Stop before any model call and write NOTHING: no
+            # terminal (a DONE row keeps its result), no stage failure, and
+            # no settlement -- the reservation belongs to whichever run (or
+            # recovery path) owns the row, and releasing it from here could
+            # credit back money that run is still spending.
+            logger.warning(
+                "Review %s was not PENDING when its run started; not running it.",
+                review_id,
+            )
+            return
 
         # The review sat in a bounded worker-pool queue before this thread
         # picked it up, so the very first thing worth asking is whether the
@@ -1751,7 +1890,20 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
                 # object-store access while the operator-facing token stays
                 # #665's classified `reason`.
                 attempt_diagnostic_write=attempt_diagnostics.make_attempt_diagnostic_write(
-                    review_id, s3_client
+                    review_id,
+                    s3_client,
+                    extra_put_kwargs=lambda: _hold_tagging(review_id, dynamodb_resource),
+                ),
+                # QA W8 item 3: the spine reports the Floor judge's worst
+                # case before its first model call; it is added to this
+                # review's reservation (and recorded on the submission row so
+                # every settle path reverses it). A failure here propagates
+                # and fails the review before anything is spent.
+                reserve_floor_spend=lambda usage: reviews.reserve_floor_spend(
+                    review_id,
+                    usage.get("input_tokens", 0),
+                    usage.get("output_tokens", 0),
+                    dynamodb_resource,
                 ),
                 # The sub-stage boundary is also the natural cancel checkpoint:
                 # the spine already stops here to report progress, so asking
@@ -1775,13 +1927,17 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
                     close()
 
         stage = "persist_result"
-        output_s3_key = _write_real_output(review_id, result, s3_client)
+        output_s3_key = _write_real_output(
+            review_id, result, s3_client, dynamodb_resource=dynamodb_resource
+        )
         # Issue #416: the evidence needed to investigate a wrong review, which
         # `run_review` computes and this runner used to discard. Written
         # BEFORE the terminal row, so a row carrying `analysis_s3_key` always
         # names an object that exists -- the same ordering `_write_real_output`
         # already establishes for the redline.
-        analysis_s3_key = _write_real_analysis(review_id, result, s3_client)
+        analysis_s3_key = _write_real_analysis(
+            review_id, result, s3_client, dynamodb_resource=dynamodb_resource
+        )
         # Issue #479 finding (round-1 fix): the ids-only Floor-coverage
         # projection of THIS result -- present for an OPF review that had
         # invariants to judge, empty otherwise -- computed from `result`
@@ -1904,7 +2060,7 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
         # cumulative_usage across both passes (and every retry) -- instead
         # of the hardcoded $0 that only the mock pipeline should ever use.
         _settle_reservation_safely(
-            review_id, dynamodb_resource, _actual_cents_from_client(client, dynamodb_resource)
+            review_id, dynamodb_resource, _actual_cents_from_client(client, dynamodb_resource, model_ids)
         )
     except ReviewCancelled:
         # Caught BEFORE the fail-closed handler below, and handled completely
@@ -1921,7 +2077,7 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
         )
         reviews.mark_cancelled(review_id, dynamodb_resource)
         _settle_reservation_safely(
-            review_id, dynamodb_resource, _actual_cents_from_client(client, dynamodb_resource)
+            review_id, dynamodb_resource, _actual_cents_from_client(client, dynamodb_resource, model_ids)
         )
     except Exception as exc:  # fail closed, never wedge PENDING/RUNNING
         # Still one catch-all -- failing closed is deliberate. What changes
@@ -1975,7 +2131,7 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
         # above already closed the client (when this call built it): it is a
         # plain instance attribute, not a transport call.
         _settle_reservation_safely(
-            review_id, dynamodb_resource, _actual_cents_from_client(client, dynamodb_resource)
+            review_id, dynamodb_resource, _actual_cents_from_client(client, dynamodb_resource, model_ids)
         )
 
 

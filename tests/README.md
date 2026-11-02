@@ -5,7 +5,10 @@ which, and how to run one file without paying for the whole gate.
 
 The landing signal is `scripts/check.sh` and nothing else — read its **exit
 code**, not its last line. `pytest` is a convenience for the files that support
-it, never the gate.
+it, never the gate. Before the suite, `check.sh` runs four fast pre-steps that
+stop it on the first failure: `ruff`, `mypy`, `scripts/docs-lint.py` (which
+also checks every relative link and heading anchor in the tracked docs) and
+`tools/docs_sync.py audit`.
 
 ## The two styles
 

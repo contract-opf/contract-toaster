@@ -61,6 +61,9 @@ just the .ts source):
      mirrors' copies of the term -- so threading the var now would be dead
      deploy config wired to nothing, and this check is inverted rather than
      deleted so a revert of half the change fails CI.
+  I. The API task-role IAM policy can list (s3:ListBucket, prefix-conditioned
+     to uploads/ and outputs/) and tag (Get/Put/DeleteObjectTagging on those
+     prefixes) the objects a legal hold covers (QA remediation W6.5).
 
 Exit codes: 0 = all checks pass, 1 = one or more checks failed.
 """
@@ -454,6 +457,75 @@ def check_g_playbook_artifacts_grant(policy: dict[str, Any]) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Check I -- legal hold can actually tag (QA remediation W6.5).
+#
+# `set_legal_hold` / `release_legal_hold` (backend/src/retention.py) list the
+# review's objects and tag/untag them `contract-toaster:legal-hold`. The role
+# held neither s3:ListBucket nor any *ObjectTagging action, so on AWS every
+# hold change raised AccessDenied -- after the row had changed and before the
+# audit row was written. The grants must exist, and must stay scoped: the
+# listing to the uploads/ and outputs/ prefixes (never the bucket root
+# unconditioned), the tagging to those prefixes' objects.
+# ---------------------------------------------------------------------------
+
+LEGAL_HOLD_TAGGING_ACTIONS = {
+    "s3:GetObjectTagging",
+    "s3:PutObjectTagging",
+    "s3:DeleteObjectTagging",
+}
+
+
+def check_i_legal_hold_grants(policy: dict[str, Any]) -> list[str]:
+    print("\nCheck I: API task-role IAM policy can list and tag held objects "
+          "(legal hold set/release, W6.5) …")
+    failures: list[str] = []
+    statements = policy.get("Properties", {}).get("PolicyDocument", {}).get("Statement", [])
+
+    tagging = [s for s in statements if _actions(s) & LEGAL_HOLD_TAGGING_ACTIONS]
+    tagging_actions: set[str] = set()
+    tagging_resources: set[str] = set()
+    for s in tagging:
+        tagging_actions |= _actions(s)
+        resource = s.get("Resource")
+        for r in resource if isinstance(resource, list) else [resource]:
+            tagging_resources.add(r)
+    failures += _assert(
+        tagging_actions >= LEGAL_HOLD_TAGGING_ACTIONS,
+        "Get/Put/DeleteObjectTagging are all granted",
+        f"got: {sorted(tagging_actions)}",
+    )
+    failures += _assert(
+        tagging_resources
+        == {
+            "arn:aws:s3:::contract-toaster-uploads-dev/uploads/*",
+            "arn:aws:s3:::contract-toaster-outputs-dev/outputs/*",
+        },
+        "tagging is scoped to exactly the uploads/* and outputs/* prefixes",
+        f"got: {sorted(map(str, tagging_resources))}",
+    )
+
+    for bucket, prefix in (("uploads", "uploads/*"), ("outputs", "outputs/*")):
+        arn = f"arn:aws:s3:::contract-toaster-{bucket}-dev"
+        listing = [
+            s for s in statements
+            if "s3:ListBucket" in _actions(s) and s.get("Resource") == arn
+        ]
+        failures += _assert(
+            len(listing) == 1,
+            f"exactly one s3:ListBucket statement on the {bucket} bucket",
+            f"got {len(listing)}",
+        )
+        if listing:
+            condition = listing[0].get("Condition", {})
+            failures += _assert(
+                condition == {"StringLike": {"s3:prefix": [prefix]}},
+                f"{bucket} ListBucket is conditioned on s3:prefix {prefix}",
+                f"got: {condition}",
+            )
+    return failures
+
+
+# ---------------------------------------------------------------------------
 # Check H -- REQUOTE_ENABLED reaches NOTHING (issue #628).
 #
 # Issue #569 (review round 3) threaded this var to the App Runner service so
@@ -523,6 +595,7 @@ def main() -> int:
         all_failures += check_cde_task_role_grants(policy)
         all_failures += check_f_uploads_read_grant(policy)
         all_failures += check_g_playbook_artifacts_grant(policy)
+        all_failures += check_i_legal_hold_grants(policy)
 
     if all_failures:
         print(f"\n{len(all_failures)} check(s) failed:")

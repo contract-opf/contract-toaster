@@ -468,7 +468,7 @@ class TestLegalHoldTagsInputObject(PurgePrefixTestBase):
         )
 
         retention_module.release_legal_hold(
-            "rid-hold-release", ADMIN, self.ddb, self.s3
+            "rid-hold-release", "Matter closed", ADMIN, self.ddb, self.s3
         )
 
         self.assertNotEqual(

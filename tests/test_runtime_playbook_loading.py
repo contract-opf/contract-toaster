@@ -243,7 +243,10 @@ class TestExecutionPathGatesOnRuntimeActivation(RuntimePlaybookLoadingTestBase):
         that actually opens playbooks/<id>.json (_load_playbook_bundle) and
         prove it is never called when nothing is active -- the empty-shell
         default (no playbook ever activated)."""
-        self._put_review_row(status="RUNNING")
+        # QA W8 item 5: a run only proceeds on a row it can claim, and the
+        # runner picks a review up PENDING (it used to seed RUNNING, which a
+        # run now refuses to touch).
+        self._put_review_row(status="PENDING")
         payload = self._payload(release_bundle_hash="")  # nothing was ever active to record
 
         with patch.object(pipeline_runner, "_load_playbook_bundle") as load_bundle, patch.object(
@@ -269,7 +272,10 @@ class TestExecutionPathGatesOnRuntimeActivation(RuntimePlaybookLoadingTestBase):
         is a real, once-valid hash) but has since been deactivated --
         run_real_pipeline must not silently review against whatever is
         CURRENTLY on disk for this playbook_id just because it once matched."""
-        self._put_review_row(status="RUNNING")
+        # QA W8 item 5: a run only proceeds on a row it can claim, and the
+        # runner picks a review up PENDING (it used to seed RUNNING, which a
+        # run now refuses to touch).
+        self._put_review_row(status="PENDING")
         stale_hash = self._seed_eiaa_active_bundle()
         # Simulate deactivation landing between submission (202) and this
         # execution actually starting.
@@ -303,7 +309,10 @@ class TestExecutionPathGatesOnRuntimeActivation(RuntimePlaybookLoadingTestBase):
         real stage (fetch_upload) -- proof it got there, without needing
         the full docx/model fixture machinery
         tests/test_dts_pipeline_runner_real_review.py already covers."""
-        self._put_review_row(status="RUNNING")
+        # QA W8 item 5: a run only proceeds on a row it can claim, and the
+        # runner picks a review up PENDING (it used to seed RUNNING, which a
+        # run now refuses to touch).
+        self._put_review_row(status="PENDING")
         seeded_hash = self._seed_eiaa_active_bundle()
         payload = self._payload(release_bundle_hash=seeded_hash)
 

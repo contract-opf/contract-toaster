@@ -51,7 +51,7 @@ The first deploy of an environment requires steps that won't be needed again.
     cdk bootstrap aws://<account-id>/us-east-1
     ```
 
-5. **Set stack parameters.** Copy `infra/cdk.context.example.json` to `infra/cdk.context.json` and fill in `githubOwner`, `alarmsEmail`, `appDomain`, `adminEmail` (the GC's `@company.com` address), and `hostedDomain` — see `infra/README.md` "Deploy identity context" for what each controls. `infra/cdk.context.json` is **git-ignored**; it holds this deployment's real tenant values and is never committed (issue #409).
+5. **Set stack parameters.** Copy `infra/cdk.context.example.json` to `infra/cdk.context.json` and fill in `githubOwner`, `alarmsEmail`, `appDomain`, `adminEmail` (the GC's `@company.com` address), `hostedDomain`, and `allowedEmailDomains` (the email domains Cognito sign-ins may come from) — see `infra/README.md` "Deploy identity context" for what each controls. `infra/cdk.context.json` is **git-ignored**; it holds this deployment's real tenant values and is never committed (issue #409).
 
 6. **First deploy.** Provision infrastructure first, then promote an image (the two are separate concerns now — infra is CDK, the running image is a pinned digest):
     ```bash
@@ -76,13 +76,13 @@ The first deploy of an environment requires steps that won't be needed again.
 
 11. **Verify alarm delivery (bootstrap acceptance — required before declaring prod operable).** An unconfirmed SNS email subscription receives no alarm mail — silent monitoring failure is the exact defect this step closes. Two sub-steps, both required:
 
-    a. **Confirm the SNS email subscription.** After CDK deploys the SNS topic and its email subscription targeting `legal-eng@company.com`, AWS sends a confirmation email to that address. Open the email and click **Confirm subscription**. Verify in the AWS Console (SNS → Topics → `contract-toaster-alarms` → Subscriptions) that the subscription status shows **Confirmed**, not **PendingConfirmation**. Do not proceed to sub-step (b) until status is **Confirmed** — an unconfirmed subscription will silently drop every alarm notification.
+    a. **Confirm the SNS email subscription.** After CDK deploys the SNS topic and its email subscription targeting `legal-eng@company.com`, AWS sends a confirmation email to that address. Open the email and click **Confirm subscription**. Verify in the AWS Console (SNS → Topics → `contract-toaster-alarms-<env>` → Subscriptions) that the subscription status shows **Confirmed**, not **PendingConfirmation**. Do not proceed to sub-step (b) until status is **Confirmed** — an unconfirmed subscription will silently drop every alarm notification.
 
     b. **Send a test alarm and confirm receipt.** Force one alarm into ALARM state to prove end-to-end delivery:
        ```bash
-       # Substitute the real alarm name as deployed (visible in CloudWatch → Alarms)
+       # The 5xx alarm as deployed (infra/lib/nested/observability-stack.ts); <env> is dev or prod
        aws cloudwatch set-alarm-state \
-         --alarm-name contract-toaster-app-runner-5xx-<env> \
+         --alarm-name contract-toaster-<env>-apprunner-5xx-rate \
          --state-value ALARM \
          --state-reason "Bootstrap acceptance test — verifying SNS→email delivery" \
          --region us-east-1
@@ -90,7 +90,7 @@ The first deploy of an environment requires steps that won't be needed again.
        Wait up to 5 minutes. Confirm that an alarm notification email arrives at `legal-eng@company.com`. After confirming receipt, restore the alarm:
        ```bash
        aws cloudwatch set-alarm-state \
-         --alarm-name contract-toaster-app-runner-5xx-<env> \
+         --alarm-name contract-toaster-<env>-apprunner-5xx-rate \
          --state-value OK \
          --state-reason "Bootstrap acceptance test complete — restoring to OK" \
          --region us-east-1
@@ -186,7 +186,9 @@ cdk deploy --context imageDigest=sha256:<digest> --context env=dev
 cdk deploy --context imageDigest=sha256:<digest> --context env=prod
 ```
 
-Promotion verifies the image signature before App Runner is repointed; an unsigned or tampered digest is refused. Confirm the authenticated `/version` endpoint (or App Runner deployment metadata) reports the digest you promoted. Production is only ever mutated by an explicit promotion of a named digest — nothing auto-mutates it.
+Promotion verifies the image signature before App Runner is repointed; an unsigned or tampered digest is refused.
+
+**Promoting to prod.** The GitHub Actions `ci-pipeline.yml` promote job refuses `promote=prod` (its STEP G, before it takes AWS credentials). CI builds and signs into `contract-toaster-api-dev` only, while prod's App Runner service pulls from `contract-toaster-api-prod` in the prod account, and the workflow has no role that can copy an image and its cosign signature across accounts — promoting anyway would audit and pin a digest prod cannot pull. Until a cross-account copy role exists, an operator holding credentials for both accounts copies the image *and* its signature with `cosign copy <dev-registry>/contract-toaster-api-dev@sha256:<digest> <prod-registry>/contract-toaster-api-prod@sha256:<digest>` (the digest is unchanged by the copy), then runs the prod account's CodeBuild promote project with `IMAGE_DIGEST=sha256:<digest>` — it verifies the signature *in the prod repository*, writes the audit row and updates the SSM parameter — and finally `cdk deploy --context env=prod --context imageDigest=sha256:<digest>`. Promoting to dev through the workflow is unaffected. Confirm the authenticated `/version` endpoint (or App Runner deployment metadata) reports the digest you promoted. Production is only ever mutated by an explicit promotion of a named digest — nothing auto-mutates it.
 
 For infrastructure changes (`infra/`):
 
@@ -320,56 +322,93 @@ must pass before committing.
 
 ### Adding a new playbook version
 
-This is the canonical Contract Toaster review-improvement loop.
+This is the canonical Contract Toaster review-improvement loop. Every step is
+in the admin UI's **Playbooks** tab (`frontend/src/AdminPlaybooks.tsx`), which
+calls the `/api/admin/playbooks/...` routes listed in
+[ARCHITECTURE.md → Routes](ARCHITECTURE.md#routes).
 
-1. From the admin UI, click **Download current** to get the current `contract-toaster-vX.Y.Z.json`.
-2. Edit locally.
-3. Bump the version field: patch for clarifications, minor for new topics or footnote templates, major for structural changes.
-4. From the admin UI, **Upload new version**. The server validates against `playbooks/schema.json` before accepting and stores it as `draft`.
-5. Run the release gates: schema validation, detector coverage, prompt/gold-set regression, stochastic stability, redline fixtures, retrieval/corpus checks where applicable, and Legal approval over the full release bundle.
-6. Activate the release bundle deliberately. Only after activation do future reviews use it. Past reviews remain pegged to the bundle they were run against.
+1. In the playbook's version table, **Download** the active version.
+2. Edit it locally against `playbooks/schema.json`, and bump its version:
+   patch for clarifications, minor for new topics or footnote templates,
+   major for structural changes.
+3. **Upload a new version.** The server parses and validates it, computes the
+   content hash itself, and stores it as `draft`.
+4. Run the release gates that live outside the product: schema validation,
+   detector coverage, prompt/gold-set regression, stochastic stability and
+   redline fixtures (see [docs/playbook-governance.md](docs/playbook-governance.md)).
+   The product enforces only one of them, **Gate 7**: a version activates only
+   when a recorded legal approval names its exact content hash.
+5. **Approve and activate** the version. Approval and activation are separate
+   audited acts; a version that is already approved shows a plain
+   **Activate**. Only reviews submitted after activation use it; past reviews
+   stay pegged to the bundle hash they ran under.
 
-To revert to an earlier version: from the version history view, click **Revert** on the desired release bundle. This creates a new active bundle that points back to the earlier content-addressed artifacts, preserving the audit trail.
+To return to an earlier version, use **Roll back** on it (offered only on a
+`retired` version, i.e. one that was active before). See the next section for
+what that does and does not do.
 
 ### Rolling back a bad playbook or prompt
 
-When an active playbook or prompt version is producing wrong output (a hard rejection that should not fire, a missed rejection, a leaked-policy summary), roll it back rather than scrambling to author a fix under pressure.
+When an active playbook version is producing wrong output (a hard rejection
+that should not fire, a missed rejection, a leaked-policy summary), roll it
+back rather than authoring a fix under pressure.
 
-1. Admin UI → Release bundles → version history → **Roll back** on the last-known-good bundle. This is one click: it sets that bundle `active` again and demotes the bad bundle to `retired`. The content-addressed snapshot of the bad bundle is preserved, not deleted.
-2. The rollback writes an `audit` entry recording actor, the bad version hash, the restored version hash, and a free-text reason.
-3. Every review run under the bad bundle is **automatically quarantined** — status `QUARANTINED`, flagged so its decision is not relied upon. Query `reviews` by the release-bundle hash or by any component hash (`playbook_hash`, `prompt_hash`, `standard_form_hash`, `model_policy_hash`, `corpus_snapshot_version`) to find the affected population.
-4. **In-flight reviews under the bad bundle (RUNNING at rollback time) are not aborted.** They run to completion so the audit trail and spend ledger stay consistent. The initial rollback sweep quarantines all already-terminal reviews; a **second quarantine sweep keyed by bundle hash** runs continuously (triggered on each pipeline-terminal write and on a short-interval schedule) and quarantines any review whose release-bundle component hash matches the bad bundle, regardless of current status — this catches reviews that were `RUNNING` at rollback time and subsequently land `DONE`. You do not need to manually find and quarantine these late completions; the sweep handles them. If you need to confirm the sweep has run, check the admin UI → Release bundles → bad bundle → "quarantined reviews" count, which should include any late completions within minutes of their landing `DONE`.
-5. **Re-run** quarantined reviews against the restored bundle once it is active. Re-running creates new review records pegged to the good bundle; the quarantined originals are marked `SUPERSEDED` and retained for audit. Notify any attorney who already received a quarantined output.
+**What exists today:**
 
-Rollback is the immediate control; authoring a corrected new version comes after the bad one is out of service.
+1. Admin UI → **Playbooks** → the playbook's version table → **Roll back** on
+   the last-known-good version (`POST /api/admin/playbooks/{playbook_id}/versions/{version}/rollback`).
+   It sets that version `active`, demotes the current one to `retired`, and
+   points `playbooks.active_release_bundle_hash` at the restored bundle, so the
+   next submission uses it. The bad version's row and stored artifact are kept.
+2. The rollback writes one append-only `release_bundle_rollback` audit row.
+   `GET /api/admin/releases` lists recent activations and rollbacks.
+3. **Nothing is quarantined automatically.** Reviews already run under the bad
+   bundle keep their status, and reviews `RUNNING` at rollback time finish
+   normally. Find the affected population yourself: each review row records
+   the `release_bundle_hash` and `playbook_hash` it ran under (the
+   `reviews.playbook_hash-index` GSI serves the second), and
+   [docs/audit-queries.md](docs/audit-queries.md) / `GET /api/audit` hold the
+   matching investigations. Tell
+   any attorney who received one of those outputs.
+4. The one automatic `QUARANTINED` write is narrower: a review **submitted**
+   under a bundle that was retired before its execution **started** is refused
+   at execution start (see "Review quarantined because its submission-time
+   bundle was retired before execution" below).
+5. Ask the uploader to re-run an affected review; a re-run is a new review
+   under the restored bundle.
+
+**PLANNED, not built** (see [docs/implementation-status.md](docs/implementation-status.md)):
+quarantining every review run under the bad bundle on rollback, a continuous
+sweep that quarantines reviews landing `DONE` after it, a per-bundle
+"quarantined reviews" count, and marking re-run originals `SUPERSEDED`.
+
+Rollback is the immediate control; authoring a corrected new version comes
+after the bad one is out of service.
 
 ### Suspending intake (deactivate without a successor)
 
-Use this procedure when you need to take the tool out of service entirely — for example, when the **first-ever bundle is found bad and there is no prior bundle to roll back to**, or when you must suspend review intake during a quarantine investigation and you do not yet have a replacement bundle to activate.
+Use this when you need to stop new reviews entirely: the **first-ever version
+is found bad and there is nothing to roll back to**, or intake must stop during
+an investigation before a replacement is ready.
 
-**When to use deactivate vs. rollback.**
+**There is no deactivate route or button today.** Deactivating the active
+bundle while keeping the playbook (and later re-activating it) is **PLANNED**
+— see [docs/implementation-status.md](docs/implementation-status.md) and
+ARCHITECTURE.md's "Release-bundle deactivate action". What you can do now:
 
-| Situation | Action |
-|-----------|--------|
-| A bad bundle exists and a known-good prior bundle is available | **Rollback** (see "Rolling back a bad playbook or prompt" above) |
-| The first-ever bundle is bad (no prior bundle to revert to) | **Deactivate** (this section) |
-| Intake must be suspended during an investigation, no replacement is ready yet | **Deactivate** (this section) |
+| Situation | Action that exists |
+|-----------|--------------------|
+| A bad version exists and a known-good earlier version is available | **Roll back** (previous section) |
+| Stop all new reviews, reversibly | Settings tab → set the **daily spend ceiling** to the minimum (1 cent; `POST /api/admin/spend-cap`). Every new submission is then refused with `429` before any spend. Clearing it (`null`) restores the deployment's `DAILY_SPEND_CAP_USD_CENTS`. Audited. On a deployment with no settings store, lower `DAILY_SPEND_CAP_USD_CENTS` and redeploy instead |
+| Stop particular reviewers | **Users** tab → set their status to `suspended` (`PATCH /api/users/{sub}`) |
+| Withdraw the playbook for good | **Remove** it on the Playbooks tab (`DELETE /api/admin/playbooks/{playbook_id}`). Submissions for it then get `503 "no active playbook"`. This is a **one-way door**: it deletes the playbook's version rows; bringing it back means uploading it again |
 
-**Procedure:**
-
-1. **Deactivate the active bundle.** Admin UI → Release bundles → the currently active bundle → **Deactivate**. This action requires GC approval (the same admin-approval level required to activate). Confirm the action with a free-text reason (e.g., "first-ever bundle found bad — v1.0.0 misses clause X; suspending intake pending v1.0.1").
-2. The deactivate action writes an `audit` entry recording the actor, the deactivated bundle hash, the reason, and the timestamp. The deactivated bundle transitions to `retired` status (its content-addressed snapshot is preserved).
-3. **Intake is now suspended.** Any attempt to submit a new review via `POST /api/reviews` will immediately receive HTTP `503` with the message **"no active playbook"**. Communicate to reviewers that the tool is temporarily unavailable.
-4. **In-flight reviews (PENDING or RUNNING at the time of deactivation) are not aborted.** They continue to completion — their bundle was resolved and recorded at submission, so they run against the bundle that was active when they were submitted. Wait for any in-flight reviews to complete before declaring the environment fully quiesced, if that matters for your investigation.
-5. **Quarantine reviews if necessary.** If the deactivated bundle was producing bad output, quarantine affected reviews via Admin UI → Release bundles → the retired bundle → "Quarantine associated reviews". This marks them `QUARANTINED` and prevents attorneys from relying on those outputs. Notify any attorney who already received output from the bad bundle.
-6. **Author and activate a replacement bundle.** Once the underlying problem is resolved, upload a new playbook version, run the release gates (schema validation, detector coverage, prompt/gold-set regression, legal approval), and activate the new release bundle. Activation clears the no-active-bundle state immediately — new reviews can be submitted from that point on.
-7. **Re-enable intake announcement.** After activation, notify reviewers that the tool is back in service.
-
-**Re-enabling intake without a new bundle version** (if deactivation was precautionary and the existing bundle is found good on closer inspection):
-
-1. Admin UI → Release bundles → the retired bundle → **Re-activate**. This re-promotes it to `active` status and clears the no-active-bundle state.
-2. Confirm in the audit log that the re-activation entry records the actor and reason.
-3. Run the bootstrap-acceptance smoke test (`GET /health` → `{"status":"ok"}`; submit a synthetic test review) to confirm the service is healthy before notifying reviewers.
+In every case, reviews already `PENDING` or `RUNNING` are not aborted; their
+bundle was resolved at submission. To stop one, use its **Cancel**
+(`POST /api/reviews/{review_id}/cancel`). Nothing is quarantined
+automatically (see the previous section). When the problem is fixed, upload
+and activate a corrected version, restore the ceiling, and tell reviewers the
+tool is back.
 
 ### Onboarding a reviewer
 
@@ -410,19 +449,66 @@ To re-enable a returning employee, set status back to `active`; they sign in nor
 
 ### Adding a document to the corpus
 
-1. Admin UI → Corpus → Upload.
-2. Select the `.docx`, choose document type (`executed-final`, `accepted-draft`, `rejected-draft`), counterparty name, and date.
-3. The upload triggers a **Bedrock Knowledge Base ingestion job** (chunk → embed → index into the S3 Vectors store). Wait for the job to report complete.
-4. The result is a **draft corpus snapshot**, not yet authoritative. Legal curates clause metadata (`reusable_precedent`, `approved_use_scope`, polarity, supersession), then retrieval regression and leakage tests run against the candidate snapshot.
-5. Activate the snapshot deliberately. Future reviews retrieve only from the active corpus snapshot and record that snapshot version.
+**Mostly PLANNED.** Retrieval is dormant by owner decision
+([docs/rag-dormant.md](docs/rag-dormant.md)), so no review reads a corpus
+today and there is no Corpus screen in the admin UI. What exists is the
+ingestion half, as an admin API: `POST /api/corpus` runs the real ingestion
+pipeline (clause extraction, content-addressed `clause_id`s, polarity
+separation, embeddings, staging-index ingestion, manifest hash) over
+caller-supplied, already-extracted paragraphs and returns a **draft** staging
+snapshot. It never activates the snapshot, and nothing activates one yet.
 
-No "retrain" step. The model itself is unchanged; only the retrieved precedent set changes.
+The target procedure, for when retrieval is revived: upload an executed
+agreement with its document type (`executed-final`, `accepted-draft`,
+`rejected-draft`), counterparty and date; Legal curates clause metadata
+(`reusable_precedent`, `approved_use_scope`, polarity, supersession);
+retrieval regression and leakage tests run against the candidate snapshot;
+only then is it activated, and reviews record the snapshot they used. There is
+no "retrain" step either way: the model is unchanged, only the precedent set.
 
 ### Viewing the audit log
 
-Admin UI → Audit. Filter by user, by action type, by playbook version, by date range. Export as CSV.
+`GET /api/audit` (admin) serves the [docs/audit-queries.md](docs/audit-queries.md)
+catalogue as a query API: with no `query` parameter it returns the list of
+investigations and their parameters; with one it runs that investigation
+(key/index access only, `limit` clamped). There is **no Audit screen and no
+CSV export** in the admin UI yet (**PLANNED**); call the route directly, or
+query the DynamoDB table with the catalogue's queries.
 
-For deeper queries (e.g., "every review that used playbook 1.0.0 and was REQUEST_CHANGE"), the table is also queryable via DynamoDB queries; see [docs/audit-queries.md](docs/audit-queries.md) for the standard query catalogue.
+### Audit table key change
+
+The audit table's partition key is `partition` (the `YYYY-MM` month bucket)
+and its sort key `timestamp` (`"{epoch}#{event_id}"`) — the shape every
+writer puts and the DTS table has always had. AWS stacks synthesized before
+this change declared the partition key as `pk`, so on those deployments
+**every backend audit write failed** (DynamoDB rejects an item missing the
+table's key attribute) and the table holds only the CI promotion rows, which
+were written in the old `pk` shape.
+
+A key change is a table replacement, and CloudFormation will not replace a
+custom-named table in place, so the CDK gives the table a new logical ID
+(`AuditLogTable`). The old resource leaves the stack under its `RETAIN`
+policy — it is not deleted — and the new one is created under the same name,
+which only succeeds once the old table is gone. On an environment deployed
+before the change:
+
+1. **Back it up.** `aws dynamodb create-backup --table-name contract-toaster-audit-<env> --backup-name audit-pk-shape-<date>`.
+   Record the backup ARN on the change ticket; this backup is the only
+   copy of the old promotion rows. (PITR does not survive table deletion
+   beyond its own 35-day window; the on-demand backup does.)
+2. **Delete the old table** with an operator role. The immutability
+   policy denies `UpdateItem`/`DeleteItem` to every principal, not
+   `DeleteTable`; treat this as a break-glass-grade action and record it on
+   the ticket.
+3. **Deploy** (`cdk deploy`). The new table, its GSIs and its stream are
+   created; the stream ARN changes, so anything consuming
+   `AuditTableStreamArn` picks up the new output on the same deploy.
+4. **Verify** with an audited admin action, then `GET /api/audit` — the row
+   must come back.
+
+The old rows are not migrated: they are promotion records in a shape the
+audit query API does not read. Restore the backup to a side table if one is
+ever needed. A fresh environment needs none of this.
 
 ### Changing document retention
 
@@ -435,29 +521,30 @@ Admin UI → Settings → **Document retention** slider (0 days–3 years, defau
 
 **Dual-control requirement for retroactive reductions.** A retroactive reduction — lowering the retention window below its current value — is a single-admin, immediately destructive action on unversioned S3 objects (deletes are real and irreversible). To prevent accidental or compromised-session destruction, retroactive reductions require one of the following before the sweep runs:
 
-- **Second admin confirmation.** A different admin must confirm the reduction in the UI within the current session. The confirmation is logged to `audit` with both actors' identities, the old and new window values, and a free-text reason.
-- **72-hour delay with GC alarm.** If a second admin is unavailable, the reduction enters a *pending* state for 72 hours. A CloudWatch alarm immediately notifies the GC (General Counsel) — the `contract-toaster-retention-reduction` alarm fires, sending an SNS notification to the GC's email — so Legal is aware before the sweep runs. The sweep executes automatically at the end of the delay unless cancelled by any admin. Cancellation is logged to `audit`.
+- **Saving a reduction parks it.** The requester must give a reason (required). Nothing is lowered yet: the reduction is listed on the Document retention panel as pending, with the requester, the reason, and the time it will apply. A second reduction cannot be requested while one is pending (409) — cancel the first.
+- **Second admin confirmation.** A different admin, signed in as themselves, opens the panel and clicks **Confirm reduction** (twice — it is a two-step button). The requester's own Confirm button is disabled and the server refuses it (403); there is no field to type another admin's name. API: `POST /api/admin/retention/pending/{pending_id}/confirm`. The confirmation is logged to `audit` (`retention_reduction_confirmed`) with both actors, the old and new window values, and the reason.
+- **72-hour delay with GC alarm.** If a second admin is unavailable, the reduction enters a *pending* state for 72 hours. The GC (General Counsel) alarm fires as soon as the reduction is parked, so Legal is aware before anything is deleted. **AWS:** the backend writes one `RETENTION_REDUCTION_REQUESTED` line to the App Runner application log; a metric filter counts it and the `contract-toaster-retention-reduction-<env>` CloudWatch alarm notifies the alarms SNS topic — subscribe the GC's address to that topic (it otherwise reaches only the `alarmsEmail` subscriber). **DTS:** set `RETENTION_ALERT_URL` to an Uptime Kuma push monitor that notifies Legal ([deploy/dts/README.md](deploy/dts/README.md)); unset, DTS has no out-of-band alarm and the reduction is visible only on the retention panel and in `audit`. The reduction applies itself at the end of the delay (the next purge sweep after it: the Lambda on AWS, the in-process sweep on DTS; audited as `retention_reduction_applied_after_delay`) unless any admin cancels it first with **Cancel reduction** (`POST /api/admin/retention/pending/{pending_id}/cancel`, audited as `retention_reduction_cancelled`).
 
 Forward-looking changes — raising the window, or setting a future-effective date — are not retroactive reductions and continue to apply single-admin with immediate effect. Moving **to** `forever` is a forward-looking change (single-admin, immediate); moving **away from** `forever` to any finite window is always a retroactive reduction and requires dual control, same as any other reduction.
 
-The dual-control / delay requirement is enforced server-side; the API rejects a retroactive-reduction sweep that lacks either a second-admin confirmation token or the mandatory delay. The authoritative policy and purge invariant are in [docs/data-handling.md](docs/data-handling.md) (purge invariant 5). The threat context (admin-UI XSS reaching this path) is in [docs/threat-model.md](docs/threat-model.md) → Malicious admin or compromised session.
+The dual-control / delay requirement is enforced server-side: `POST /api/admin/retention` never lowers the window for a reduction, and rejects the retired `second_admin_confirmation` field with 400. The authoritative policy and purge invariant are in [docs/data-handling.md](docs/data-handling.md) (purge invariant 5). The threat context (admin-UI XSS reaching this path) is in [docs/threat-model.md](docs/threat-model.md) → Malicious admin or compromised session.
 
 **`forever` / indefinite preservation (issue #34).** In addition to the bounded 0-day–3-year window, `POST /api/admin/retention` accepts the literal setting `"forever"` — records snapshotted at it are never purge-eligible, at any age. Use it for a class of review that must stay answerable indefinitely (e.g. executed agreements a GC wants recoverable years later) rather than relying on the 90-day default. `GET /api/admin/retention` returns the full set of selectable options (`window_options`, including `forever`) alongside the current and default windows. The admin-UI slider surfacing this option as a selectable choice (rather than the API alone) is tracked separately.
 
 ### Placing and releasing a legal hold
 
-A legal hold **overrides document retention**: a held review or held corpus document is never purged, regardless of the retention slider or a `0`-day setting. This exists to prevent evidence destruction; the authoritative policy lives in [docs/data-handling.md](docs/data-handling.md) → Legal hold.
+A legal hold **overrides document retention**: a held review is never purged, regardless of the retention slider or a `0`-day setting. This exists to prevent evidence destruction; the authoritative policy lives in [docs/data-handling.md](docs/data-handling.md) → Legal hold.
 
 **To place a hold:**
 
-1. Admin UI → find the **review** (or the **corpus** document/collection) → **Place legal hold**, with a matter reference and reason.
-2. This sets the per-review (or per-corpus) `legal_hold` flag. The purge worker skips anything with the flag set, even documents far past the retention window and even at retention `0`.
-3. The storage layer is marked too: held S3 objects receive an Object Lock legal hold or a protected hold tag covered by bucket-policy denies. Application roles cannot delete held objects by bypassing the app.
+1. Admin UI → Document retention → pick the **review** → **Place legal hold**, with a matter reference and reason. (Corpus documents cannot be held: a corpus legal hold is PLANNED, not implemented — see [docs/data-handling.md](docs/data-handling.md) → Hold flags.)
+2. This sets the per-review `legal_hold` flag. The purge worker skips anything with the flag set, even documents far past the retention window and even at retention `0`.
+3. The storage layer is marked too: every object the review owns is tagged `contract-toaster:legal-hold=true`, which the bucket-policy deny reads; an object written for the review later while it is held is tagged as it is written. If the tagging fails the hold is not placed at all and the UI says so — retry. Application roles cannot delete held objects by bypassing the app.
 4. The action is logged to `audit` with actor, target, matter reference, and reason.
 
 **To release a hold:**
 
-1. Only release on explicit instruction from counsel managing the matter. Admin UI → the held item → **Release legal hold**, recording who authorized release.
+1. Only release on explicit instruction from counsel managing the matter. Admin UI → the held item → type the release reason (required; name who authorized the release and the matter reference) → **Release legal hold** (click twice to confirm). The reason is stored on the review row and in the audit entry. If the UI reports the release could not be applied to stored documents, nothing changed; retry, and if it persists check the service's S3 tagging permissions.
 2. On release, the item returns to normal retention governance — it is **not** purged immediately; it becomes eligible for purge under the current window at the next worker run.
 3. The release is logged to `audit`.
 
@@ -473,16 +560,16 @@ The cap is enforced by an **atomic reservation**, not a pre-check: before a pipe
 
 **Users hitting the daily cap mid-day.** When a user receives a "daily limit reached" error on a legitimate review (not just a retry), the ceiling is full. Diagnose and resolve in this order:
 
-1. **Check for phantom reservations first.** Admin UI → Cost ledger → today's reservations. Compare the reserved total to the sum of settled, ledgered attempts for the day. A persistent gap with no active execution behind it is an abandoned (phantom) reservation inflating the counter. Resolve it via the admin reconcile action, which settles that review's reservation to its actual cost. Do not edit the counter by hand — a blind edit races live reservations.
+1. **Check for phantom reservations first.** `GET /api/admin/spend` (the Settings tab shows today's figures) reports `outstanding_reservation_usd_cents`, today's reserved-but-never-settled remainder. There is no Cost ledger screen and **no reconcile action yet** (both **PLANNED**); until there is, a phantom reservation clears itself at the day boundary. A persistent outstanding remainder with no review in flight behind it (`GET /api/admin/health`) is an abandoned reservation inflating the counter. Do not edit the counter by hand — a blind edit races live reservations; raise the ceiling for the rest of the day instead (step 2).
 2. **If no phantoms, the cap is legitimately full.** At the default `$20/day` ceiling, ~20 typical reviews (or one reservation held at once, since issue #148) exhaust the budget (see [ARCHITECTURE.md](ARCHITECTURE.md) → Cost shape for the arithmetic; one ~80-page review can settle at ~$27 and fill it on its own). If the daily volume is regularly hitting this, raise the ceiling:
    - Admin UI → Settings → **Daily spend ceiling** → increase (e.g. to `$50/day`, which allows ~4 concurrent reservations at ~$11.06 each, or ~50 typical reviews per day, while still bounding blast radius).
    - The new ceiling applies immediately; in-flight reviews unaffected.
-3. **After a ceiling raise, reconcile.** If phantom reservations also contributed, reconcile them after the raise so tomorrow starts clean.
+3. **After a ceiling raise, put it back** the next day if phantom reservations were the cause; the counter starts clean at the day boundary.
 4. Log the ceiling change to the audit record (the change writes an audit entry automatically).
 
 If the cap fills during an abnormal burst (suspected runaway or injection attempt), do **not** raise the ceiling — leave it in place and investigate the cost outlier in the audit log.
 
-**Clearing a stuck reservation.** If a pipeline dies between reserving and settling (e.g., the execution is aborted before the settle step), its estimate can sit on the counter as "phantom" spend, making today look more expensive than it is. To diagnose: compare the counter's reserved total against the sum of settled, ledgered attempts for the day. A persistent gap with no active execution behind it is an abandoned reservation. Resolve it by settling that review's reservation to its actual (often zero) cost via the admin reconcile action — do not edit the counter by hand, because a blind edit races live reservations. The daily counter resets at the day boundary, so a stuck reservation self-clears the next day; reconcile sooner only if it is blocking legitimate reviews under the cap.
+**Clearing a stuck reservation.** If a pipeline dies between reserving and settling (e.g., the execution is aborted before the settle step), its estimate can sit on the counter as "phantom" spend, making today look more expensive than it is. To diagnose: compare the counter's reserved total against the sum of settled, ledgered attempts for the day. A persistent gap with no active execution behind it is an abandoned reservation. The admin reconcile action that would settle it to its actual (often zero) cost is **PLANNED**, not built. Do not edit the counter by hand, because a blind edit races live reservations. The daily counter resets at the day boundary, so a stuck reservation self-clears the next day; reconcile sooner only if it is blocking legitimate reviews under the cap.
 
 ### Duplicate submissions and idempotent retries
 
@@ -725,9 +812,52 @@ restart, check that `DEPLOY_TARGET=dts` is set (recovery is skipped on the
 AWS target by design) and look for
 `RUNNER_RECOVERY: orphaned-review recovery could not run; API continues`,
 which means the boot read itself failed and the API came up anyway. If N is
-large after every deploy, the deploys are landing on top of live reviews —
-drain them first, the same way "Rolling back a bad playbook or prompt"
-advises for bundle activations.
+large after every deploy, the deploys are landing on top of live reviews.
+Nothing drains them automatically: pause autopull and wait for the queue to
+empty first (see "Coolify deployments and autopull" below).
+
+### Coolify deployments and autopull (Docker Compose target)
+
+A Coolify-hosted Docker Compose deployment (`deploy/dts/docker-compose.coolify.yml`)
+is rolled forward **from the box itself** by `coolify-autopull`, a systemd
+timer that runs `deploy/dts/autopull/coolify-autopull.sh` every five minutes.
+Installation, the env file and every operating command are in
+[deploy/dts/README.md → Automatic roll-forward from the box](deploy/dts/README.md#automatic-roll-forward-from-the-box).
+What an operator needs to know:
+
+- **How it rolls forward.** `dts-image-publish.yml` publishes `:latest`
+  images only after a green CI run for a **push** to this repository's
+  `main`. Each autopull run pulls them; if the backend and frontend disagree on
+  `org.opencontainers.image.revision` it waits. When the digests change it
+  checks, through the GitHub compare API, that the new revision is on the
+  `main` of `AUTOPULL_GITHUB_REPO` (`identical` or `behind`). If it is not, or
+  the check cannot be made, it **refuses**: it re-tags the images back to the
+  last rolled-out digests and exits 1. Leave `AUTOPULL_GITHUB_REPO` unset and
+  this check is skipped, so set it. Otherwise it calls Coolify's restart
+  endpoint on localhost, waits up to `AUTOPULL_VERIFY_SECONDS` (default 420)
+  for healthy containers at the new revision, and rolls back to the previous
+  digests if they never get there.
+- **A rollout restarts in-flight reviews; there is no drain.** The restart
+  replaces the API container, and reviews run on a thread pool inside it.
+  Every review that is `PENDING` or `RUNNING` at that moment ends `ERROR` with
+  `reason=runner_restarted` when the new container starts (see "What a
+  redeploy does to running reviews" above), and its uploader has to submit it
+  again. Autopull does not wait for the queue to empty. If that matters,
+  **pause autopull** first, wait until `GET /api/admin/health` shows nothing
+  in flight, then roll forward by hand.
+- **Pause and resume.** `systemctl stop coolify-autopull.timer` pauses it (a
+  run already in progress finishes); `systemctl start coolify-autopull.timer`
+  resumes it, and the next run rolls out whatever was published meanwhile.
+  To roll forward by hand while paused, run
+  `systemctl start coolify-autopull.service` once. To pin a commit instead,
+  change the Coolify compose image tags from `:latest` to `:<short-sha>`.
+  While the timer is stopped, the `AUTOPULL_HEARTBEAT_URL` monitor reports a
+  missed heartbeat, which is expected.
+- **Demo logins.** The first bootstrap of a deployment seeds `admin/admin` and
+  `user/user`, and only the first: they do not come back once deleted. On any
+  deployment reachable from the internet, delete them as
+  [deploy/dts/README.md → Demo users, seeded once](deploy/dts/README.md#demo-users-seeded-once)
+  describes.
 
 ### A wrong decision was rendered
 
@@ -747,7 +877,7 @@ available. From the admin UI:
    - **Playbook gap** — add a topic, an acceptable variation, or a structured hard rejection. Cut a new draft playbook and activate only through the release-bundle gates.
    - **Retrieval gap** — relevant precedent wasn't in the active corpus snapshot. Add it to a draft corpus snapshot, curate, test, and activate.
    - **Model error** — log it, raise with Anthropic if pattern emerges, consider re-prompting.
-4. If the review is being relied on, mark it `QUARANTINED`, activate the corrected bundle, re-run it, and mark the original `SUPERSEDED` after replacement.
+4. If the review is being relied on, tell its attorney not to rely on it, activate the corrected version, and have it re-run. There is no product action that marks a review `QUARANTINED` or `SUPERSEDED` by hand yet (**PLANNED**); record the decision in the incident note.
 
 **Past the review's retention window.** The purge worker has already cleared `verdict_summary` and
 `issue_rationale_text` from the row and deleted the uploaded document, redline, and
@@ -808,7 +938,7 @@ If the service is down and no admin is available:
 
 ### Break-glass: restoring admin access
 
-There is **no dedicated CDK-managed break-glass IAM role for v1** (issue #229). An earlier `AuthStack` revision created one whose trust policy used a managed-policy ARN (`arn:aws:iam::aws:policy/AdministratorAccess`) as its `FederatedPrincipal` — an invalid IAM principal that would have failed `CreateRole` at deploy time, so that path had never actually been exercisable. There is also no real IAM Identity Center permission-set ARN or SAML-provider ARN available yet to wire a proper dedicated role, so break-glass instead uses the **`AdministratorAccess` SSO permission set already granted for this account** (see `aws-access-request.md` → Fulfillment record) — MFA-enforced by the SSO identity provider on every sign-in, used narrowly for this procedure only.
+There is **no dedicated CDK-managed break-glass IAM role for v1** (issue #229). An earlier `AuthStack` revision created one whose trust policy used a managed-policy ARN (`arn:aws:iam::aws:policy/AdministratorAccess`) as its `FederatedPrincipal` — an invalid IAM principal that would have failed `CreateRole` at deploy time, so that path had never actually been exercisable. There is also no real IAM Identity Center permission-set ARN or SAML-provider ARN available yet to wire a proper dedicated role, so break-glass instead uses the **`AdministratorAccess` SSO permission set already granted for this account** (the access-request fulfilment record that grants it is kept with the operator's own records, not in this repository) — MFA-enforced by the SSO identity provider on every sign-in, used narrowly for this procedure only.
 
 1. Sign in via the SSO portal using the `AdministratorAccess` permission set (MFA is enforced by the SSO identity provider). Note the reason/ticket you are acting under.
 2. Set `is_admin=true` on the relevant `users` row (by `cognito_sub`, or reconcile by `email` if the user has signed in at least once) via the DynamoDB console or CLI.
@@ -828,14 +958,16 @@ There is no separate "backup" job; the configured retention is the backup.
 
 ## Observability
 
+**What ships today** (`infra/lib/nested/observability-stack.ts`): the dashboard `contract-toaster-<env>` with real App Runner, Bedrock and Step Functions graphs, and three alarms — `contract-toaster-<env>-apprunner-5xx-rate`, `contract-toaster-<env>-bedrock-invocation-errors` and `contract-toaster-<env>-bedrock-throttles` — publishing to the SNS topic `contract-toaster-alarms-<env>`. The other tiles and alarms below are the target design; the dashboard renders them as placeholder text until the custom metrics behind them exist (**PLANNED**, see [docs/implementation-status.md](docs/implementation-status.md)). The Docker Compose target has none of this; see "Coolify deployments and autopull" for its heartbeat.
+
 - **CloudWatch dashboard.** `contract-toaster-prod` and `contract-toaster-dev`. Tiles: deployed version, request rate, error rate (4xx and 5xx separately), p99 latency, Bedrock invocations per day, cost-to-date, Step Functions stage failures, stale `PENDING`/`RUNNING` reviews, semaphore saturation, abandoned spend reservations, purge deleted/skipped counts, audit-archive stream lag, and **count of failed (`ERROR`) reviews by `reason`** (issue #133 retired the two manual-review states those tiles used to count). The admin **failures queue** (`GET /api/admin/manual-review`) lists every failed review, by reason, so the legal admin can triage them without querying DynamoDB directly.
-- **Alarms.** Configured to email `legal-eng@company.com` (owner: Marc Mandel, General Counsel; subscribers: legal-eng team; cadence: immediate SNS → email on alarm state change) on: App Runner 5xx > 5% for 5 min; Bedrock errors > 0; Cognito sign-in failures spike; cost-to-date exceeds budget threshold; stale review status (PENDING/RUNNING beyond threshold); **any failed (`ERROR`) review that remains unacknowledged for more than 24 hours** (the `contract-toaster-manual-review-stale` alarm, kept under its original name since issue #133 retired the manual-review statuses — fires if the failures-queue count is > 0 and the oldest unacknowledged entry exceeds 24 hours, so a 4:55 PM failure does not silently wait overnight); failed/timed-out pipeline stage; abandoned reservation; purge worker error; audit stream lag; denied audit-table mutation; break-glass role assumption; governance retention bypass attempt.
+- **Alarms.** Configured to email `legal-eng@company.com` (owner: Marc Mandel, General Counsel; subscribers: legal-eng team; cadence: immediate SNS → email on alarm state change) on: App Runner 5xx > 5% for 5 min; Bedrock errors > 0; Cognito sign-in failures spike; cost-to-date exceeds budget threshold; stale review status (PENDING/RUNNING beyond threshold); **any failed (`ERROR`) review that remains unacknowledged for more than 24 hours** (the **PLANNED** `contract-toaster-manual-review-stale` alarm, named for the manual-review statuses issue #133 retired — fires if the failures-queue count is > 0 and the oldest unacknowledged entry exceeds 24 hours, so a 4:55 PM failure does not silently wait overnight); failed/timed-out pipeline stage; abandoned reservation; purge worker error; audit stream lag; denied audit-table mutation; break-glass role assumption; governance retention bypass attempt.
 
 ### Bootstrap alarm acceptance test
 
 Bootstrap step 11 (see "Day-one bootstrap" above) is the **required** one-time proof that alarm delivery is live. It must be completed — and its outcome recorded — before the environment is declared prod-operable. The test covers two failure modes that configuration alone cannot rule out:
 
-1. **Unconfirmed SNS subscription** — AWS does not deliver alarm mail to a `PendingConfirmation` subscription; the alarm fires silently. Confirming the subscription in the AWS Console (SNS → Topics → `contract-toaster-alarms` → Subscriptions) closes this gap.
+1. **Unconfirmed SNS subscription** — AWS does not deliver alarm mail to a `PendingConfirmation` subscription; the alarm fires silently. Confirming the subscription in the AWS Console (SNS → Topics → `contract-toaster-alarms-<env>` → Subscriptions) closes this gap.
 2. **End-to-end delivery failure** — SMTP relay, spam filter, or alias misconfiguration can silently drop messages after the subscription is confirmed. Forcing a test alarm state via `aws cloudwatch set-alarm-state` and waiting for the notification email at `legal-eng@company.com` proves the full delivery path.
 
 The test is documented here so operators who stand up a new environment know it is mandatory, not optional hygiene. The bootstrap log (or deployment PR/issue) must record: the date, the alarm name tested, and the name of the person who confirmed receipt at `legal-eng@company.com`. Absence of that record means the environment has not satisfied acceptance criterion 2 ("Alarm alias real, tested, with named owner").
@@ -846,6 +978,6 @@ Issue #133 (owner decision 2026-09-16): a review never concludes as "manual revi
 
 **Owner.** The legal admin (General Counsel or their delegate) is responsible for checking the failures queue **daily** — ideally first thing each morning. For each entry the legal admin determines whether the review needs to be re-run (after the underlying cause is fixed), escalated to engineering, or simply acknowledged and the uploader notified.
 
-**SLA.** The target is acknowledgement within one business day of the review failing. The `contract-toaster-manual-review-stale` alarm provides the backstop: it fires if any failed review remains without acknowledgement for more than 24 hours, alerting `legal-eng@company.com` (engineering can then ping the legal admin if the queue has not been checked). The 24-hour window is intentionally longer than a single working session to accommodate end-of-day submissions.
+**SLA.** The target is acknowledgement within one business day of the review failing. The **PLANNED** `contract-toaster-manual-review-stale` alarm would provide the backstop (it is not deployed yet, so until it is, the daily check is the only control): it fires if any failed review remains without acknowledgement for more than 24 hours, alerting `legal-eng@company.com` (engineering can then ping the legal admin if the queue has not been checked). The 24-hour window is intentionally longer than a single working session to accommodate end-of-day submissions.
 - **CloudTrail.** All **management** API calls logged to `audit-archive` bucket. Console queryable via Athena. Note that AWS currently logs Bedrock `InvokeModel`, `InvokeModelWithResponseStream`, `Converse`, and `ConverseStream` as **management** events — so these give us a control-plane audit signal (who invoked the model, when) without enabling data events. That signal does **not** capture prompt or output content, by design; the per-review facts come from the application `audit` table, and raw prompts/outputs are never written to CloudWatch (see [docs/threat-model.md](docs/threat-model.md) → Logging). Per-object **S3 data events** remain off by default for cost; to enable them for a specific bucket during an investigation, update the trail's event selectors in CDK and `cdk deploy`, then disable again when the investigation closes.
 - **Step Functions console inspection — what you will and will not see (issue #19).** When you open an execution in the Step Functions console to diagnose a stuck or failed review, execution-history event inputs and outputs will contain **S3 object references, content hashes, review identifiers, status values, and token/cost facts — not document text, prompts, or model output**. This is intentional and enforced by the pointer-only payload rule (see [docs/threat-model.md](docs/threat-model.md) → Step Functions execution history and [docs/data-handling.md](docs/data-handling.md) → Step Functions execution-history classification). Substantive content travels via the encrypted `uploads`/`outputs` S3 buckets; you must retrieve the relevant S3 object directly (with appropriate authorization) if you need to inspect the document or model output for a specific review. Do not expect to recover document text from execution history — if a payload looks sparse, that is the correct behavior, not a missing-field bug.

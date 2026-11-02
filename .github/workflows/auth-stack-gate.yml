@@ -47,7 +47,7 @@ on:
 jobs:
   auth-stack-gate:
     name: AuthStack structural gate (Cognito + Google IdP)
-    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.CI_RUNS_ON || 'ubuntu-latest' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

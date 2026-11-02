@@ -41,7 +41,7 @@ on:
 jobs:
   frontend-stack-gate:
     name: FrontendStack structural gate (Amplify Hosting + React SPA)
-    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.CI_RUNS_ON || 'ubuntu-latest' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

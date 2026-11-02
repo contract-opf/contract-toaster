@@ -303,3 +303,109 @@ def ensure_entity_roster_table(dynamodb_resource: object) -> None:
     except Exception:  # noqa: BLE001 - the table is created; the wait is a courtesy
         logger.warning("STARTUP: entity-roster table created but did not confirm ACTIVE.")
     logger.info("STARTUP: created the entity-roster table for the Docker Compose target.")
+
+
+# ---------------------------------------------------------------------------
+# Demo session-signing secret (QA 2026-10-31, report #3)
+# ---------------------------------------------------------------------------
+#
+# On a deployment whose AUTH_MODE wires the password path (`password` or
+# `both`), every session is an HS256 token signed with DEMO_TOKEN_SECRET, so
+# the secret is only as good as its value. The values most likely to reach a
+# running container are the ones printed in this public repository
+# (`deploy/dts/.env.example` shipped one) or the first thing an operator
+# types. The boot refuses any of:
+#
+#   - unset or blank;
+#   - shorter than DEMO_TOKEN_SECRET_MIN_BYTES (32) bytes;
+#   - a known placeholder, compared ignoring case and punctuation, or
+#     anything that begins with a "change me" / "replace me" phrase;
+#   - one character repeated.
+#
+# `demo_auth._demo_token_secret` applies the same rule at the point of use,
+# so a code path that never ran the lifespan (a test client, a script) still
+# cannot sign or accept a token with a weak secret.
+#
+# This module's "names only, never values" rule holds here too: no message
+# built below contains the secret, not even a well-known placeholder.
+
+DEMO_TOKEN_SECRET_ENV = "DEMO_TOKEN_SECRET"  # noqa: S105
+DEMO_TOKEN_SECRET_MIN_BYTES = 32
+GENERATE_SECRET_HINT = "Generate one with `openssl rand -hex 32`"  # noqa: S105
+
+# Normalised form (lower-case, alphanumerics only); see _normalise_secret.
+_KNOWN_PLACEHOLDER_SECRETS = frozenset({
+    "changemetoalongrandomstring",  # what deploy/dts/.env.example used to ship
+    "changeme",
+    "changethis",
+    "secret",
+    "password",
+    "demotokensecret",
+    "localsecret",
+    "replaceme",
+    "yoursecret",
+    "yoursecrethere",
+    "mysecret",
+    "supersecret",
+    "testsecret",
+    "devsecret",
+    "default",
+    "example",
+    "placeholder",
+})
+_PLACEHOLDER_PREFIXES = ("changeme", "changethis", "replaceme", "setme", "yoursecret")
+
+_PASSWORD_AUTH_MODES = frozenset({"password", "both"})
+
+
+def _normalise_secret(value: str) -> str:
+    return "".join(ch for ch in value.lower() if ch.isalnum())
+
+
+def demo_token_secret_problem(secret: Optional[str]) -> Optional[str]:  # noqa: UP045
+    """Why `secret` cannot sign demo sessions, or None if it can.
+
+    The reason describes the value's shape ("is shorter than 32 bytes"),
+    never the value itself, so it is safe to log and to raise."""
+    if secret is None or not secret.strip():
+        return "is not set"
+    if len(secret.encode("utf-8")) < DEMO_TOKEN_SECRET_MIN_BYTES:
+        return f"is shorter than {DEMO_TOKEN_SECRET_MIN_BYTES} bytes"
+    normalised = _normalise_secret(secret)
+    if normalised in _KNOWN_PLACEHOLDER_SECRETS or normalised.startswith(_PLACEHOLDER_PREFIXES):
+        return "is a published placeholder value"
+    if len(set(secret)) == 1:
+        return "is a single repeated character"
+    return None
+
+
+def format_demo_token_secret_message(problem: str) -> str:
+    """The refusal line. Takes the shape description from
+    `demo_token_secret_problem`, never the value."""
+    return (
+        f"STARTUP: refusing to start — {DEMO_TOKEN_SECRET_ENV} {problem}. It signs "
+        "every password-mode session, so it must be a long random value. "
+        f"{GENERATE_SECRET_HINT}, set it as {DEMO_TOKEN_SECRET_ENV} in the "
+        "deployment's environment, and restart."
+    )
+
+
+def verify_demo_token_secret(
+    environ: Optional[Mapping[str, str]] = None,  # noqa: UP045
+) -> None:
+    """Fail the process if the deployment wires password sign-in
+    (`AUTH_MODE` is `password` or `both`) and DEMO_TOKEN_SECRET is unusable.
+
+    A no-op under `AUTH_MODE=sso` (the AWS default), where no demo token is
+    ever issued or accepted. Raises `SystemExit`, the same way and for the
+    same reason as `verify_required_env`."""
+    env = os.environ if environ is None else environ
+    mode = (env.get("AUTH_MODE") or "sso").strip().lower()
+    if mode not in _PASSWORD_AUTH_MODES:
+        return
+    problem = demo_token_secret_problem(env.get(DEMO_TOKEN_SECRET_ENV))
+    if problem is None:
+        return
+    message = format_demo_token_secret_message(problem)
+    logger.error(message)
+    raise SystemExit(message)

@@ -36,7 +36,7 @@ on:
 jobs:
   identity-auth-threat-model:
     name: Identity/auth threat model guard
-    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.CI_RUNS_ON || 'ubuntu-latest' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

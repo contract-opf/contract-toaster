@@ -100,10 +100,7 @@ Environment variables consumed:
 
 from __future__ import annotations
 
-import os
 import sys
-import time
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -123,8 +120,9 @@ import seed_active_bundle  # noqa: E402
 
 try:  # production runs `src.main`; tests put backend/src on sys.path
     # (same dual-context import shape as backend/src/pipeline_runner.py)
-    from src import playbook_versions
+    from src import audit_log, playbook_versions
 except ImportError:  # pragma: no cover
+    import audit_log  # type: ignore[no-redef]
     import playbook_versions  # type: ignore[no-redef]
 
 # The version identifier stamped on the ONE `playbook_versions` row the
@@ -154,37 +152,6 @@ class SampleInvalidError(Exception):
     runtime validation every other active-bundle resolution relies on
     (scripts/playbook_validation.py). Should never happen for a committed,
     tested playbook -- this is defense in depth, not the expected path."""
-
-
-def _write_audit_entry(
-    dynamodb_resource: Any,
-    actor: str,
-    action: str,
-    target: str,
-    detail: dict[str, Any],
-) -> None:
-    """Append an immutable audit row -- same table/shape as every other
-    mutation in this codebase (ARCHITECTURE.md -> "Audit posture";
-    src/model_settings.py's own `_write_audit_entry` is the closest
-    sibling)."""
-    table = dynamodb_resource.Table(os.environ["AUDIT_TABLE"])
-    now = time.time()
-    event_id = uuid.uuid4().hex
-    partition = time.strftime("%Y-%m", time.gmtime(now))
-    timestamp = f"{int(now)}#{event_id}"
-
-    item: dict[str, Any] = {
-        "partition": partition,
-        "timestamp": timestamp,
-        "event_id": event_id,
-        "actor": actor,
-        "action": action,
-        "target": target,
-        "target_type": "shipped_playbook",
-        "outcome": "success",
-    }
-    item.update(detail)
-    table.put_item(Item=item)
 
 
 def _skip(playbook_id: str, reason: str) -> dict[str, Any]:
@@ -274,9 +241,10 @@ def seed_shipped_playbook(
         playbook_id, content_hash, dynamodb_resource
     )
 
-    _write_audit_entry(
+    audit_log.write_audit_entry(
         dynamodb_resource=dynamodb_resource,
         actor=actor_identity,
+        target_type="shipped_playbook",
         action="shipped_playbook_seeded",
         target=f"{playbook_id}#{content_hash}",
         detail={
