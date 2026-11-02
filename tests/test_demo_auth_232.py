@@ -379,7 +379,7 @@ class TestHttpSurface(DemoAuthTestBase):
         # The login route itself takes no Cognito bearer token.
         backend_main.app.dependency_overrides.pop(backend_main.get_current_user, None)
         # A successful login now mints a demo session token (needs the secret).
-        os.environ["DEMO_TOKEN_SECRET"] = "test-demo-secret"
+        os.environ["DEMO_TOKEN_SECRET"] = "test-demo-secret-0123456789abcdef0123456789abcdef"
         response = self.client.post("/api/auth/login", json={"username": "user", "password": "user"})
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
@@ -428,7 +428,7 @@ class TestHttpSurface(DemoAuthTestBase):
         self.client.post("/api/admin/auth-mode", json={"auth_mode": "password"})
 
         backend_main.app.dependency_overrides.pop(backend_main.get_current_user, None)
-        os.environ["DEMO_TOKEN_SECRET"] = "test-demo-secret"
+        os.environ["DEMO_TOKEN_SECRET"] = "test-demo-secret-0123456789abcdef0123456789abcdef"
         login_response = self.client.post(
             "/api/auth/login", json={"username": "user", "password": "user"}
         )
@@ -456,7 +456,7 @@ class TestHttpSurface(DemoAuthTestBase):
         self._as(ADMIN_SUB, ADMIN["email"])
         self.client.post("/api/admin/auth-mode", json={"auth_mode": "password"})
         backend_main.app.dependency_overrides.pop(backend_main.get_current_user, None)
-        os.environ["DEMO_TOKEN_SECRET"] = "test-demo-secret"
+        os.environ["DEMO_TOKEN_SECRET"] = "test-demo-secret-0123456789abcdef0123456789abcdef"
 
         login_response = self.client.post(
             "/api/auth/login", json={"username": "user", "password": "user"}

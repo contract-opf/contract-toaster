@@ -176,6 +176,7 @@ def check_gate_script() -> list[str]:
         ("contrast audit", "npm run audit:contrast"),
         ("focus/reduced-motion audit", "npm run audit:focus"),
         ("layout audit", "npm run audit:layout"),
+        ("css-refs audit", "npm run audit:css-refs"),
     ):
         failures += _assert(
             needle in text,

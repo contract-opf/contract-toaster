@@ -101,6 +101,7 @@ from fastapi import (
 from fastapi.responses import JSONResponse
 
 from src import (
+    audit_log,
     config,
     disposition,
     download,
@@ -115,7 +116,7 @@ from src import (
     upload_validation,
 )
 from src.auth import get_current_user
-from src.demo_auth import enforce_default_credentials_rotation
+from src.demo_auth import enforce_default_credentials_rotation, enforce_session_version
 from src.users import json_safe, require_active_user
 
 logger = logging.getLogger(__name__)
@@ -227,6 +228,7 @@ def get_active_user_row(
     src/main.py::get_active_user_row, including that enforcement step; see
     that function's docstring."""
     caller_row = require_active_user(current_user.get("sub", ""), dynamodb_resource)
+    enforce_session_version(current_user, caller_row)
     enforce_default_credentials_rotation(caller_row, request.url.path)
     return caller_row
 
@@ -430,11 +432,8 @@ def get_cover_note_leakage_corpus_resolver(
 # ---------------------------------------------------------------------------
 # Audit helpers.
 #
-# Same `audit` table shape src/users.py::_write_audit_entry and
-# src/retention.py::_write_audit_entry already use (PK `partition` =
-# "%Y-%m", SK `timestamp` = "{epoch}#{event_id}") -- duplicated here rather
-# than imported (those helpers are module-private) per this package's
-# existing small-duplication convention.
+# Every row goes through `audit_log.write_audit_entry`, the one append-only
+# writer (PK `partition` = "%Y-%m", SK `timestamp` = "{epoch}#{event_id}").
 # ---------------------------------------------------------------------------
 
 
@@ -447,68 +446,53 @@ def _write_audit_row(
     target_type: str,
     detail: dict[str, Any] | None = None,
 ) -> None:
-    audit_table_name = os.environ.get("AUDIT_TABLE")
-    if not audit_table_name:
-        # Best-effort: never gate the request itself on audit-table config,
-        # same posture as upload_validation._write_rejection_audit.
-        return
-    table = dynamodb_resource.Table(audit_table_name)
-    now = time.time()
-    event_id = uuid.uuid4().hex
-    item: dict[str, Any] = {
-        "partition": time.strftime("%Y-%m", time.gmtime(now)),
-        "timestamp": f"{int(now)}#{event_id}",
-        "event_id": event_id,
-        "actor": actor,
-        "action": action,
-        "target": target,
-        "target_type": target_type,
-        "outcome": "success",
-    }
-    # Issue #253: the audit table's `review_id-index` GSI
-    # (infra/lib/nested/data-stack.ts) is what docs/audit-queries.md's "full
-    # history of one review/document" query is keyed by -- and nothing had
-    # ever written the attribute it indexes, so the index was empty and that
-    # query could never return a row. A review-scoped audit row already
-    # carries the review id in `target`; this stamps it under the name the
-    # index expects as well. Additive and non-substantive (it is the same
-    # opaque identifier, twice), and only for review-scoped rows -- an
-    # `upload`-scoped row's target is an upload id, not a review id, and
-    # putting it on this index would make the history query answer with
-    # another entity's events.
-    if target_type == "review" and target:
-        item["review_id"] = target
-    if detail:
-        item.update(detail)
-    try:
-        # Post-landing review of issue #499, finding 2: this write is
-        # called from inside `except leakage_scan.LeakageDetectedError` at
-        # the cover-note route's leakage-block branch -- Python does not
-        # route an exception raised inside one `except` clause to a sibling
-        # `except Exception` of the same `try`, so an unguarded put_item
-        # failure here (a DynamoDB throttle/outage) escaped uncaught and
-        # turned that route's promised quiet 502 into an unhandled 500,
-        # with the leakage block itself going unaudited on top of it. Audit
-        # writes are best-effort BY DESIGN (see the missing-AUDIT_TABLE
-        # early return above) -- guarding the put_item itself, rather than
-        # at any one call site, covers all six call sites the same way,
-        # including the success-path write at the end of the cover-note
-        # route, which has the identical failure mode. The warning log is
-        # the durable record of the event when the write itself fails.
-        table.put_item(Item=item)
-    except Exception:  # noqa: BLE001 -- audit is best-effort; never gate the request on it
-        logger.warning(
-            "AUDIT: failed to write audit row action=%s target=%s target_type=%s",
-            action,
-            target,
-            target_type,
-        )
+    """This module's request-path audit row: `audit_log.write_audit_entry`
+    with `best_effort=True`.
+
+    Best-effort BY DESIGN. Post-landing review of issue #499, finding 2:
+    this is called from inside `except leakage_scan.LeakageDetectedError` at
+    the cover-note route's leakage-block branch -- an exception raised there
+    is not routed to a sibling `except Exception` of the same `try`, so an
+    unguarded write failure (a DynamoDB throttle/outage) turned that route's
+    quiet 502 into an unhandled 500. A missing AUDIT_TABLE is a no-op, the
+    same posture as upload_validation._write_rejection_audit, and a failed
+    write is logged by `audit_log` and swallowed.
+
+    Issue #253: a review-scoped row (`target_type == "review"`) is stamped
+    with `review_id` for the audit table's `review_id-index`; an
+    `upload`-scoped row is not, because its target is not a review id.
+    """
+    audit_log.write_audit_entry(
+        dynamodb_resource,
+        actor=actor,
+        action=action,
+        target=target,
+        target_type=target_type,
+        detail=detail,
+        best_effort=True,
+    )
+
+
+def upload_audit_target(review_id: str | None, filename: str) -> str:
+    """The audit `target` for an upload row: the review id when there is
+    one, otherwise the first 16 hex characters of sha256(filename).
+
+    Never the filename itself. A contract filename routinely names the
+    counterparty ("Mutual NDA - Acme.docx"), which makes it Confidential
+    substance (issue #518) -- and the audit table outlives every retention
+    window. The digest still lets an investigator who holds the file confirm
+    "this rejection was that upload" without the table carrying the name."""
+    if review_id:
+        return review_id
+    return hashlib.sha256((filename or "").encode("utf-8")).hexdigest()[:16]
 
 
 def _upload_rejection_audit_write(dynamodb_resource: Any, actor: str):
     """Adapter satisfying upload_validation.AuditWrite's call shape
     (`audit_write(action=..., review_id=..., filename=..., reason_code=...,
-    detail=...)`), translated into this package's audit-row shape."""
+    detail=...)`), translated into this package's audit-row shape. The
+    filename is reduced to `upload_audit_target`'s digest and goes no
+    further."""
 
     def _write(
         *,
@@ -522,7 +506,7 @@ def _upload_rejection_audit_write(dynamodb_resource: Any, actor: str):
             dynamodb_resource,
             actor=actor,
             action=action,
-            target=review_id or filename,
+            target=upload_audit_target(review_id, filename),
             target_type="upload",
             detail={"reason_code": reason_code, "detail": detail, "outcome": "rejected"},
         )

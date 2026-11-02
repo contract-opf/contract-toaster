@@ -289,6 +289,10 @@ describe('AdminRetention — "Release legal hold" is a two-step confirm (#428 ca
 
     render(<AdminRetention />);
     const row = await screen.findByTestId('hold-row-rev-held-1');
+    // W6.5: a release needs a reason; the button is inert until one is typed.
+    fireEvent.change(within(row).getByTestId('release-reason-rev-held-1'), {
+      target: { value: 'Matter closed' },
+    });
     const release = within(row).getByRole('button', { name: 'Release legal hold' });
 
     fireEvent.click(release);
@@ -309,6 +313,10 @@ describe('AdminRetention — "Release legal hold" is a two-step confirm (#428 ca
 
     render(<AdminRetention />);
     const row = await screen.findByTestId('hold-row-rev-held-1');
+    // W6.5: a release needs a reason; the button is inert until one is typed.
+    fireEvent.change(within(row).getByTestId('release-reason-rev-held-1'), {
+      target: { value: 'Matter closed' },
+    });
     const release = within(row).getByRole('button', { name: 'Release legal hold' });
 
     fireEvent.click(release); // arm
@@ -316,6 +324,39 @@ describe('AdminRetention — "Release legal hold" is a two-step confirm (#428 ca
 
     await waitFor(() => {
       expect(callsFor(fetchMock, 'DELETE', '/api/admin/retention/holds/rev-held-1')).toBe(1);
+    });
+  });
+
+  it('cannot release without a reason, and sends the reason it was given (W6.5)', async () => {
+    const fetchMock = stubFetch({
+      '/api/admin/retention': RETENTION_SETTINGS,
+      '/api/admin/retention/holds': { holds: [HELD_REVIEW] },
+      'DELETE /api/admin/retention/holds/rev-held-1': { ok: true },
+    });
+
+    render(<AdminRetention />);
+    const row = await screen.findByTestId('hold-row-rev-held-1');
+    const release = within(row).getByRole('button', { name: 'Release legal hold' });
+    expect((release as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.change(within(row).getByTestId('release-reason-rev-held-1'), {
+      target: { value: '   ' },
+    });
+    expect((release as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.change(within(row).getByTestId('release-reason-rev-held-1'), {
+      target: { value: 'Matter 42 settled' },
+    });
+    fireEvent.click(release); // arm
+    fireEvent.click(release); // confirm
+    await waitFor(() => {
+      expect(callsFor(fetchMock, 'DELETE', '/api/admin/retention/holds/rev-held-1')).toBe(1);
+    });
+    const del = fetchMock.mock.calls.find(
+      ([, init]) => (init as RequestInit | undefined)?.method === 'DELETE',
+    );
+    expect(JSON.parse((del?.[1] as RequestInit).body as string)).toEqual({
+      reason: 'Matter 42 settled',
     });
   });
 
@@ -328,6 +369,10 @@ describe('AdminRetention — "Release legal hold" is a two-step confirm (#428 ca
 
     render(<AdminRetention />);
     const row = await screen.findByTestId('hold-row-rev-held-1');
+    // W6.5: a release needs a reason; the button is inert until one is typed.
+    fireEvent.change(within(row).getByTestId('release-reason-rev-held-1'), {
+      target: { value: 'Matter closed' },
+    });
     const release = within(row).getByRole('button', { name: 'Release legal hold' });
 
     fireEvent.click(release); // arm

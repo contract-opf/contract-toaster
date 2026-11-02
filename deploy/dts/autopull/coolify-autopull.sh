@@ -21,7 +21,11 @@
 #      state yet: record them and do NOT restart, so installing this never
 #      causes a surprise restart. Unchanged: only check that the service's
 #      containers are running and healthy, and report it (exit 1 if not).
-#   4. Changed: POST Coolify's services restart endpoint with `latest=true`
+#   4. Changed, and AUTOPULL_GITHUB_REPO is set: confirm the new revision is
+#      on that repository's main (GitHub compare API). If it is not, or that
+#      cannot be confirmed, refuse: re-tag the watched refs back to the
+#      digests last rolled out and exit 1 without restarting.
+#      Then POST Coolify's services restart endpoint with `latest=true`
 #      (the API twin of "Restart (pull latest)"). A refused call is retried on
 #      the next run.
 #   5. Accepted is not the same as up. Wait (AUTOPULL_VERIFY_SECONDS) until
@@ -47,14 +51,19 @@
 #                            up healthy before it is rolled back. 0 turns
 #                            verification and rollback off.
 #   AUTOPULL_VERIFY_INTERVAL default 10; seconds between checks
+#   AUTOPULL_GITHUB_REPO     optional; <owner>/<repo> whose main every new
+#                            revision must be on before it rolls out
+#   AUTOPULL_GITHUB_TOKEN    optional; a read-only token for that check (a
+#                            private repository, or the API's rate limit)
 #   AUTOPULL_HEARTBEAT_URL   optional; an Uptime Kuma push URL (or anything
 #                            that takes ?status=up|down&msg=). Every run
 #                            reports up or down, so a stopped timer shows as
 #                            a missed heartbeat too.
 #
 # Exit status: 0 when there was nothing to do, a rollout came up, or the run
-# was deferred; 1 when a pull, a restart call or a rollout failed, or the
-# service is being held at the previous revision.
+# was deferred; 1 when a pull, a restart call or a rollout failed, a new
+# revision could not be confirmed on main, or the service is being held at
+# the previous revision.
 #
 # Install and operate: deploy/dts/README.md#automatic-roll-forward-from-the-box
 
@@ -69,6 +78,8 @@ BAD_FILE="${STATE_FILE}.bad"
 VERIFY_SECONDS="${AUTOPULL_VERIFY_SECONDS:-420}"
 VERIFY_INTERVAL="${AUTOPULL_VERIFY_INTERVAL:-10}"
 HEARTBEAT_URL="${AUTOPULL_HEARTBEAT_URL:-}"
+GITHUB_REPO="${AUTOPULL_GITHUB_REPO:-}"
+GITHUB_TOKEN="${AUTOPULL_GITHUB_TOKEN:-}"
 REVISION_LABEL="org.opencontainers.image.revision"
 
 last_msg="ok"
@@ -197,6 +208,42 @@ if [ "$(cat "${STATE_FILE}")" = "$(printf '%s' "${current}")" ]; then
   fi
   last_msg="up to date and healthy at revision ${revision:-unknown}"
   exit 0
+fi
+
+# Defence in depth: roll forward only onto a commit on GITHUB_REPO's main.
+# The publish workflow already publishes only what passed CI on main; this
+# re-checks it from the box, so an image that got onto the watched tag any
+# other way is never rolled out. The compare API answers `identical` or
+# `behind` exactly when the revision is reachable from main.
+revision_is_on_main() {
+  local answer status url
+  if ! [[ "${revision}" =~ ^[0-9a-f]{40}$ ]]; then
+    log "refusing to roll forward: ${REVISION_LABEL} is '${revision}', not a full commit SHA"
+    return 1
+  fi
+  url="https://api.github.com/repos/${GITHUB_REPO}/compare/main...${revision}"
+  if [ -n "${GITHUB_TOKEN}" ]; then
+    answer="$(curl -fsS --max-time 20 -H 'Accept: application/vnd.github+json' \
+      -H @<(printf 'Authorization: Bearer %s\n' "${GITHUB_TOKEN}") "${url}")" || answer=""
+  else
+    answer="$(curl -fsS --max-time 20 -H 'Accept: application/vnd.github+json' "${url}")" || answer=""
+  fi
+  # The top-level status is the one immediately followed by ahead_by; the
+  # per-file entries further down carry their own `status`.
+  status="$(tr -d ' \t\r\n' <<<"${answer}" | grep -oE '"status":"[a-z]+","ahead_by"' | head -n 1 | cut -d'"' -f4)" || status=""
+  case "${status}" in
+    identical|behind) return 0 ;;
+    "") log "refusing to roll forward: could not confirm ${revision} is on ${GITHUB_REPO} main (no answer from the GitHub compare API)" ;;
+    *) log "refusing to roll forward: ${revision} is not on ${GITHUB_REPO} main (compare status: ${status})" ;;
+  esac
+  return 1
+}
+
+if [ -n "${GITHUB_REPO}" ] && ! revision_is_on_main; then
+  # The pull moved the watched tags onto the unverified image; move them back
+  # so a restart from anywhere else keeps running what was last rolled out.
+  retag_previous || log "could not re-tag the previous images"
+  exit 1
 fi
 
 log "new images at revision ${revision:-unknown}; asking Coolify to pull and restart"

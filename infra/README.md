@@ -5,24 +5,37 @@ defined as code using [AWS CDK v2](https://docs.aws.amazon.com/cdk/v2/guide/).
 
 ## Stack layout
 
-The entry point is `bin/contract-toaster.ts`, which instantiates a single top-level stack:
+The entry point is `bin/contract-toaster.ts`, which instantiates a single top-level stack
+and these nested stacks (`lib/contract-toaster-stack.ts`, in construction order):
 
 ```
 ContractToasterStack  (contract-toaster-dev | contract-toaster-prod)
-├── NetworkStack        — VPC, subnets, security groups (#55+)
-├── DataStack           — S3 buckets, DynamoDB tables (#51, #52)
-├── AuthStack           — Cognito user pool + Google IdP (#53)
-├── AppStack            — App Runner service + Step Functions pipeline (#55, #59)
-├── FrontendStack       — Amplify Hosting + React SPA (#54)
-└── ObservabilityStack  — CloudWatch dashboards + CloudTrail (#57)
+├── NetworkStack        — VPC, subnets, security groups; NAT + Bedrock interface endpoints (hardened only)
+├── KmsKeysStack        — per-data-class CMKs: uploads, outputs, corpus, audit, DynamoDB (hardened only), Step Functions (always)
+├── DataStack           — S3 buckets and DynamoDB tables
+├── AuthStack           — Cognito user pool + Google IdP, pre-token Lambda
+├── PipelineStack       — Step Functions review pipeline and its Lambdas (the review stage is still a MOCK on this target)
+├── CicdStack           — CodeBuild CI, cosign signing, ECR
+├── AppStack            — App Runner API service, pinned to an image digest
+├── WafStack            — WAF WebACL in front of App Runner (hardened only; skipped under profile=minimal)
+├── FrontendStack       — Amplify Hosting + React SPA, CSP and security headers
+└── ObservabilityStack  — SNS alarm topic, CloudWatch dashboard and alarms, CloudTrail (hardened only)
 ```
 
 The top-level stack also owns:
 
-- **Environment-scoped customer-managed KMS key** — one CMK per environment;
-  per-data-class keys (uploads / redlines / corpus / audit) are added in #70.
-- **Base IAM roles** — `deployRole` (CI deploys) and `appRunnerTaskRole` (runtime
-  container); both start with empty permission sets filled in by downstream issues.
+- **An environment-baseline CMK** (`alias/<appName>-<env>`). The data itself
+  is encrypted with the per-data-class keys in `KmsKeysStack`, not this one;
+  under `profile=minimal` the S3 and DynamoDB keys are not created and those
+  stores use AWS-managed encryption instead (see "Deploy profiles").
+- **Base IAM roles** — `deployRole` (CI deploys) and `appRunnerTaskRole`
+  (runtime container). `AppStack` attaches the task role's scoped policy
+  (`app-stack.ts`).
+
+The App Runner image runs **Python 3.12** (`backend/Dockerfile`), while the
+toolchain, CI and the Docker Compose image use 3.13 (`.python-version`,
+`deploy/dts/backend.Dockerfile`). `tests/test_python_version_parity_63.py`
+pins the 3.13 declarations; the AWS image is the known exception.
 
 ## Environments
 
@@ -31,7 +44,8 @@ The top-level stack also owns:
 | `dev`       | `111111111111`  | us-east-1  | `contract-toaster-dev`  |
 | `prod`      | `222222222222`  | us-east-1  | `contract-toaster-prod` |
 
-Account IDs in `cdk.json` are placeholders — replace them with real AWS account IDs
+Account IDs in `cdk.json` are dummy values (`111111111111`, `222222222222`) so
+an offline `cdk synth` works anywhere — replace them with real AWS account IDs
 before deploying. Dev and prod are **always separate AWS accounts**; deploying both
 into the same account is not supported.
 
@@ -50,6 +64,7 @@ admin identity, or sign-in enforcement domain.
 | `appDomain`     | **Yes** — no default | —                       | Cognito hosted-UI callback/logout URL domain (SPA hosting domain) |
 | `adminEmail`    | **Yes** — no default | —                       | Initial admin (GC) email seeded into `admin_bootstrap` |
 | `hostedDomain`  | **Yes** — no default | —                       | Google Workspace hosted domain enforced for sign-in (two independent layers — see `auth-stack.ts`) |
+| `allowedEmailDomains` | **Yes** — no default | —                 | Comma-separated email domains a Cognito sign-in may come from; injected into App Runner as `ALLOWED_EMAIL_DOMAINS`. Synth refuses a blank entry, `*` or anything that is not a bare domain |
 | `appName`       | No        | `contract-toaster`                 | Resource-name prefix |
 | `githubRepo`    | No        | `contract-toaster`                 | GitHub repo name CodeBuild watches |
 | `profile`       | No        | `hardened`                         | Deploy profile — see "Deploy profiles" below |
@@ -83,6 +98,20 @@ documented where they're used: `imageDigest` (see
 `cosignCertId`/`cosignOidcIssuer` (see `cicd-stack.ts` — only needed for a
 signing workflow other than the default GitHub Actions OIDC one).
 
+## Runtime variables the stack does not set
+
+`AppStack` injects the table and bucket names the API needs, and
+`ALLOWED_EMAIL_DOMAINS` from the required `allowedEmailDomains` context above.
+Two runtime settings are not injected; set them on the App Runner service when
+the default does not fit (their meaning is documented once, in
+[deploy/dts/README.md](../deploy/dts/README.md#spend-concurrency-and-sign-in-variables)):
+
+- `DAILY_SPEND_CAP_USD_CENTS` — default `2000` ($20/day). This target has no
+  admin settings store (`MODEL_SETTINGS_TABLE` is not provisioned), so the
+  Settings tab cannot override it here; change the variable and redeploy.
+- `PIPELINE_MAX_CONCURRENCY` — default `5`; read for the occupancy figure in
+  `GET /api/admin/health`.
+
 ## Usage
 
 ```bash
@@ -90,7 +119,7 @@ signing workflow other than the default GitHub Actions OIDC one).
 npm install
 
 # Synthesize the dev stack (dry run) — see "Deploy identity context" above;
-# githubOwner/alarmsEmail/appDomain/adminEmail/hostedDomain must be supplied
+# githubOwner/alarmsEmail/appDomain/adminEmail/hostedDomain/allowedEmailDomains must be supplied
 # via --context or infra/cdk.context.json, omitted here for brevity.
 npx cdk synth --context env=dev
 
@@ -153,7 +182,7 @@ end-to-end minimal deploy on those two fronts.
 ## Security invariants
 
 - **Fail-closed auth**: Cognito pre-token Lambda rejects on error — never grants on failure (#53).
-- **Per-data-class KMS**: One CMK per env at skeleton; per-class keys in #70.
+- **Per-data-class KMS**: separate CMKs for uploads, outputs, corpus, audit and DynamoDB under the default `hardened` profile (`kms-keys-stack.ts`); `minimal` falls back to AWS-managed keys.
 - **Split API role + scoped download**: Separate deploy vs. task roles here; scoped
   pre-signed download URLs in #71.
 - **XSS/CSP**: Amplify CSP header in #72; no `innerHTML` with user content (#54). The
@@ -168,6 +197,9 @@ end-to-end minimal deploy on those two fronts.
 
 ## Nested stack notes
 
-Each nested stack is a logical domain boundary. They are intentionally empty
-placeholders in this skeleton (issue #50) — resources land in the issues listed
-next to each stack above.
+Each nested stack is a logical domain boundary; see the stack list above for
+what each one creates. Two are deliberately incomplete on this target: the
+`PipelineStack` review stage is a mock Lambda (the Docker Compose target runs
+the real review chain), and the `ObservabilityStack` dashboard renders several
+tiles as placeholder text until the custom metrics behind them exist — see
+[docs/implementation-status.md](../docs/implementation-status.md).

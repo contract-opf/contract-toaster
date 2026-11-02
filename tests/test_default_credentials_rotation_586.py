@@ -55,7 +55,7 @@ os.environ.setdefault("PLAYBOOKS_TABLE", "contract-toaster-playbooks-rotation586
 os.environ.setdefault(
     "PLAYBOOK_VERSIONS_TABLE", "contract-toaster-playbook-versions-rotation586-test"
 )
-os.environ.setdefault("DEMO_TOKEN_SECRET", "unit-test-demo-secret")
+os.environ.setdefault("DEMO_TOKEN_SECRET", "unit-test-demo-secret-0123456789abcdef0123456789")
 
 import boto3  # noqa: E402, I001
 from fastapi import FastAPI  # noqa: E402

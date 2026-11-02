@@ -146,10 +146,14 @@ Environment variables:
 
 import os
 import time
-import uuid
 from typing import Any
 
 from boto3.dynamodb.conditions import Key
+
+try:  # production runs `src.main`; tests put backend/src on sys.path
+    from src import audit_log
+except ImportError:  # pragma: no cover
+    import audit_log  # type: ignore[no-redef]
 
 # Lifecycle statuses (docs/playbook-governance.md -> "Release-bundle
 # lifecycle"). `playbook_versions.status` is the sole lifecycle authority;
@@ -207,46 +211,8 @@ def _playbook_versions_table(dynamodb_resource: Any):
     return dynamodb_resource.Table(os.environ["PLAYBOOK_VERSIONS_TABLE"])
 
 
-def _audit_table(dynamodb_resource: Any):
-    return dynamodb_resource.Table(os.environ["AUDIT_TABLE"])
-
-
 def now_epoch() -> float:
     return time.time()
-
-
-def _write_audit_entry(
-    dynamodb_resource: Any,
-    actor: str,
-    action: str,
-    target: str,
-    detail: dict[str, Any],
-    now_epoch_value: float | None = None,
-) -> None:
-    """Append an immutable audit row for a release-bundle activation or
-    rollback (ARCHITECTURE.md -> "Audit posture": "Release-bundle
-    activations and rollbacks"). Identifiers, statuses, and hashes only —
-    never document substance. Same shape as
-    backend/src/retention.py::_write_audit_entry / backend/src/users.py.
-    """
-    table = _audit_table(dynamodb_resource)
-    now = now_epoch_value if now_epoch_value is not None else now_epoch()
-    event_id = uuid.uuid4().hex
-    partition = time.strftime("%Y-%m", time.gmtime(now))
-    timestamp = f"{int(now)}#{event_id}"
-
-    item: dict[str, Any] = {
-        "partition": partition,
-        "timestamp": timestamp,
-        "event_id": event_id,
-        "actor": actor,
-        "action": action,
-        "target": target,
-        "target_type": "playbook_version",
-        "outcome": "success",
-    }
-    item.update(detail)
-    table.put_item(Item=item)
 
 
 def version_already_recorded(
@@ -426,9 +392,11 @@ def record_playbook_version_download(
     dynamodb_resource: Any,
 ) -> None:
     """Append an immutable audit row for a playbook version download."""
-    _write_audit_entry(
+    audit_log.write_audit_entry(
         dynamodb_resource=dynamodb_resource,
         actor=actor_identity,
+        now=now_epoch(),
+        target_type="playbook_version",
         action="playbook_version_downloaded",
         target=f"{playbook_id}#{version}",
         detail={
@@ -511,9 +479,10 @@ def activate_playbook_version(
         ExpressionAttributeValues={":active": STATUS_ACTIVE, ":activated_at": activated_at},
     )
 
-    _write_audit_entry(
+    audit_log.write_audit_entry(
         dynamodb_resource=dynamodb_resource,
         actor=actor_identity,
+        target_type="playbook_version",
         action="release_bundle_activate",
         target=f"{playbook_id}#{version}",
         detail={
@@ -528,7 +497,7 @@ def activate_playbook_version(
             ),
             "content_hash": target.get("content_hash"),
         },
-        now_epoch_value=now,
+        now=now,
     )
 
     result = dict(target)
@@ -718,9 +687,10 @@ def record_legal_approval(
         },
     )
 
-    _write_audit_entry(
+    audit_log.write_audit_entry(
         dynamodb_resource=dynamodb_resource,
         actor=actor_identity,
+        target_type="playbook_version",
         action="playbook_version_legal_approval",
         target=f"{playbook_id}#{version}",
         detail={
@@ -728,7 +698,7 @@ def record_legal_approval(
             "version": version,
             "content_hash": content_hash,
         },
-        now_epoch_value=now,
+        now=now,
     )
 
     result = dict(target)
@@ -809,9 +779,10 @@ def rollback_playbook_version(
         ExpressionAttributeValues={":active": STATUS_ACTIVE},
     )
 
-    _write_audit_entry(
+    audit_log.write_audit_entry(
         dynamodb_resource=dynamodb_resource,
         actor=actor_identity,
+        target_type="playbook_version",
         action="release_bundle_rollback",
         target=f"{playbook_id}#{version}",
         detail={
@@ -833,7 +804,7 @@ def rollback_playbook_version(
             "gate7_reevaluated": False,
             "gate7_skip_reason": "previously_activated_target",
         },
-        now_epoch_value=now,
+        now=now,
     )
 
     result = dict(target)
@@ -968,9 +939,10 @@ def update_playbook_version_notes(
         ExpressionAttributeValues={":notes": notes},
     )
 
-    _write_audit_entry(
+    audit_log.write_audit_entry(
         dynamodb_resource=dynamodb_resource,
         actor=actor_identity,
+        target_type="playbook_version",
         action="playbook_version_notes_update",
         target=f"{playbook_id}#{version}",
         detail={
@@ -978,7 +950,7 @@ def update_playbook_version_notes(
             "version": version,
             "notes_length": len(notes),
         },
-        now_epoch_value=now,
+        now=now,
     )
 
     result = dict(target)
@@ -1070,9 +1042,10 @@ def rename_playbook(
         ExpressionAttributeValues={":d": display_name},
     )
 
-    _write_audit_entry(
+    audit_log.write_audit_entry(
         dynamodb_resource=dynamodb_resource,
         actor=actor_identity,
+        target_type="playbook_version",
         action="playbook_renamed",
         target=playbook_id,
         detail={
@@ -1080,7 +1053,7 @@ def rename_playbook(
             "previous_display_name": previous or "",
             "display_name": display_name,
         },
-        now_epoch_value=now,
+        now=now,
     )
 
     return {"playbook_id": playbook_id, "display_name": display_name}
@@ -1130,13 +1103,14 @@ def remove_playbook(
         ExpressionAttributeValues={":empty": "", ":true": True},
     )
 
-    _write_audit_entry(
+    audit_log.write_audit_entry(
         dynamodb_resource=dynamodb_resource,
         actor=actor_identity,
+        target_type="playbook_version",
         action="playbook_removed",
         target=playbook_id,
         detail={"playbook_id": playbook_id, "versions_deleted": len(items)},
-        now_epoch_value=now,
+        now=now,
     )
 
     return {"playbook_id": playbook_id, "removed": True, "versions_deleted": len(items)}
@@ -1151,7 +1125,7 @@ def list_playbook_version_trail(
     Returns `playbook_id`, `version`, `uploaded_by`, `uploaded_at`,
     `status`, `content_hash` (only when one was recorded), and the mutable
     `notes` field — never document substance. That is exactly
-    `_write_audit_entry`'s posture, which this surface mirrors:
+    `audit_log.write_audit_entry`'s posture, which this surface mirrors:
     "Identifiers, statuses, and hashes only — never document substance"
     (ARCHITECTURE.md -> "Audit posture"). A `content_hash` is a digest from
     which no document is recoverable, and it is already written into the

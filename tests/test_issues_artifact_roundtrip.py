@@ -207,6 +207,15 @@ class AnalysisArtifactTestBase(unittest.TestCase):
             "critic_delta": CRITIC_DELTA,
         }
         key = pipeline_runner._write_real_analysis(review_id, result, self.s3)
+        # QA W8 item 5: `_write_real_terminal` lands only on a row its run
+        # holds RUNNING (it no longer overwrites a DONE row), so the seeded
+        # row is put where a live run has it before its terminal write.
+        self.table.update_item(
+            Key={"review_id": review_id},
+            UpdateExpression="SET #s = :running",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={":running": "RUNNING"},
+        )
         pipeline_runner._write_real_terminal(review_id, result, None, self.ddb, key)
         return key
 
@@ -370,6 +379,23 @@ class TestCoverNoteGateSeesRealFindings(AnalysisArtifactTestBase):
 
 
 class TestPurgeDestroysTheArtifact(AnalysisArtifactTestBase):
+    def setUp(self) -> None:
+        super().setUp()
+        # QA W6.4: every sweep writes one audit row and refuses to start
+        # without the audit table, so the fixture now provides it.
+        self.audit = self.ddb.create_table(
+            TableName=os.environ["AUDIT_TABLE"],
+            KeySchema=[
+                {"AttributeName": "partition", "KeyType": "HASH"},
+                {"AttributeName": "timestamp", "KeyType": "RANGE"},
+            ],
+            AttributeDefinitions=[
+                {"AttributeName": "partition", "AttributeType": "S"},
+                {"AttributeName": "timestamp", "AttributeType": "S"},
+            ],
+            BillingMode="PAY_PER_REQUEST",
+        )
+
     def test_after_a_purge_issues_read_back_none_through_the_real_reader(self):
         """The property that actually matters: serving substance from S3 is
         only safe if the purge reaches it. It does -- via the

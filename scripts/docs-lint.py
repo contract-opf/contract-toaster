@@ -75,16 +75,31 @@ Check G: Implementation-status ledger presence and coverage
   RUNBOOK.md is written "docs as spec" — it describes admin-UI workflows
   and observability surfaces ahead of the code.  docs/implementation-status.md
   must exist, define the SHIPPED / STUBBED / PLANNED legend, and cover the
-  fictional capabilities named in issue #230's Evidence — playbook upload/
-  version-history/rollback (RUNBOOK.md:253-272), release-bundle deactivation
-  (:286-299), Admin UI Corpus upload (:339-346), audit-log viewer/CSV export
-  (:349-353), cost-ledger reconcile (:400-411), and disposition capture /
-  manual-review filter (:615-617) — each with a status.  The two demo-critical
-  fictional steps named in the issue (playbook seed, corpus upload) must each
-  be either backed by a real, present CLI script (a scripts/*.py path with a
-  `__main__` entrypoint) or explicitly marked PLANNED or STUBBED — either
-  status means the row does not silently imply the step is operator-usable.
+  capabilities named in issue #230's Evidence — playbook upload/version-
+  history/rollback, release-bundle deactivation, Admin UI corpus upload,
+  audit-log viewer/CSV export, cost-ledger reconcile, and disposition capture /
+  manual-review filter — each with a status, each citing the RUNBOOK section
+  by its heading anchor (`RUNBOOK.md#...`), and each anchor must exist in
+  RUNBOOK.md.  (QA 2026-10-31 W11 replaced the original `RUNBOOK.md:NNN`
+  line ranges: every one had gone stale and nothing could notice.)  The two
+  demo-critical steps named in the issue (playbook seed, corpus upload) must
+  each be backed by a real, present CLI script (a scripts/*.py path with a
+  `__main__` entrypoint), or explicitly marked PLANNED or STUBBED, or be
+  SHIPPED citing an `/api/...` route that ARCHITECTURE.md's route table
+  documents (that table is itself checked against the app by
+  tests/test_architecture_route_table.py).
   (issue #230, 2026-07-08)
+
+Check H: Relative links and heading anchors resolve
+  Every relative Markdown link in a tracked `*.md` file (outside docs/planning/
+  and frontend/vendor/) must point at a tracked file or directory, and every
+  `#fragment` on a link to a Markdown file (or within the same file) must match
+  a heading slug in that file under GitHub's rules (lower-cased, punctuation
+  other than `-` and `_` dropped, spaces turned into `-`, `-1`, `-2` ... on
+  repeats) or an explicit `<a id>` / `<a name>` anchor. External links are not
+  fetched; links in fenced code blocks and inline code spans are ignored.
+  (QA 2026-10-31 W11: twelve dead links had built up with nothing to catch
+  them.)
 
 Usage:
     python3 scripts/docs-lint.py
@@ -99,7 +114,9 @@ Denylist governance:
 
 import json
 import re
+import subprocess
 import sys
+import urllib.parse
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -521,20 +538,27 @@ def check_f() -> list[str]:
 # Status vocabulary the ledger must use.
 _LEDGER_STATUS_TOKENS = ("SHIPPED", "STUBBED", "PLANNED")
 
-# (label, required RUNBOOK line-range substring) for the fictional capabilities
-# named verbatim in issue #230's Evidence section.
+# (label, required RUNBOOK anchor citation) for the capabilities named in
+# issue #230's Evidence section. Anchors, not line ranges: a line range goes
+# stale on the next edit above it, an anchor only when the heading changes,
+# and check_g() verifies the heading still exists.
 _LEDGER_REQUIRED_CAPABILITIES = [
-    ("playbook upload / version-history / rollback", "253-272"),
-    ("release-bundle deactivation", "286-299"),
-    ("admin UI corpus upload", "339-346"),
-    ("audit-log viewer / CSV export", "349-353"),
-    ("cost-ledger reconcile", "400-411"),
-    ("disposition capture / manual-review filter", "615-617"),
+    ("playbook upload / version-history / rollback", "RUNBOOK.md#rolling-back-a-bad-playbook-or-prompt"),
+    ("release-bundle deactivation", "RUNBOOK.md#suspending-intake-deactivate-without-a-successor"),
+    ("admin UI corpus upload", "RUNBOOK.md#adding-a-document-to-the-corpus"),
+    ("audit-log viewer / CSV export", "RUNBOOK.md#viewing-the-audit-log"),
+    ("cost-ledger reconcile", "RUNBOOK.md#adjusting-the-daily-spend-ceiling"),
+    ("disposition capture / manual-review filter", "RUNBOOK.md#failures-queue-owner-and-sla"),
 ]
 
-# The two demo-critical fictional steps named by the issue — each must be
-# either CLI-backed or explicitly marked PLANNED or STUBBED in its ledger row.
-_LEDGER_DEMO_CRITICAL_LINE_REFS = ["253-272", "339-346"]
+# The two demo-critical steps named by the issue (playbook seed, corpus
+# upload) — each must be CLI-backed, route-backed, or marked PLANNED/STUBBED.
+_LEDGER_DEMO_CRITICAL_LINE_REFS = [
+    "RUNBOOK.md#rolling-back-a-bad-playbook-or-prompt",
+    "RUNBOOK.md#adding-a-document-to-the-corpus",
+]
+
+_LEDGER_ROUTE_PATTERN = re.compile(r"`(?:(?:GET|POST|PUT|PATCH|DELETE) )?(/api/[^`\s]*)`")
 
 _LEDGER_SCRIPT_PATH_PATTERN = re.compile(r"scripts/[A-Za-z0-9_\-./]+\.py")
 
@@ -573,17 +597,24 @@ def check_g() -> list[str]:
                 f"not use the status token '{token}'."
             )
 
+    runbook_anchors = heading_anchors(read(RUNBOOK))
     for label, line_ref in _LEDGER_REQUIRED_CAPABILITIES:
+        anchor = line_ref.split("#", 1)[1]
+        if anchor not in runbook_anchors:
+            failures.append(
+                f"  Ledger capability '{label}' cites {line_ref}, but RUNBOOK.md "
+                f"has no heading with that anchor."
+            )
         row = _ledger_row(text, line_ref)
         if row is None:
             failures.append(
                 f"  Ledger does not cover '{label}' (expected a row citing "
-                f"RUNBOOK.md:{line_ref})."
+                f"{line_ref})."
             )
             continue
         if not any(token in row for token in _LEDGER_STATUS_TOKENS):
             failures.append(
-                f"  Ledger row for '{label}' (RUNBOOK.md:{line_ref}) has no "
+                f"  Ledger row for '{label}' ({line_ref}) has no "
                 f"SHIPPED/STUBBED/PLANNED status.\n"
                 f"    > {row.strip()}"
             )
@@ -600,15 +631,240 @@ def check_g() -> list[str]:
         backed = script_paths and all(
             _ledger_script_has_cli_entrypoint(p) for p in script_paths
         )
+        if not backed and "SHIPPED" in row:
+            documented = read(ARCHITECTURE).split("#### Routes", 1)[-1]
+            routes = _LEDGER_ROUTE_PATTERN.findall(row)
+            backed = bool(routes) and all(f"`{r}`" in documented for r in routes)
         if not backed:
             failures.append(
-                f"  Demo-critical RUNBOOK.md:{line_ref} row is not marked "
-                f"PLANNED or STUBBED and does not cite a real CLI script "
-                f"with a '__main__' entrypoint.\n"
+                f"  Demo-critical {line_ref} row is not marked PLANNED or "
+                f"STUBBED and cites neither a real CLI script with a '__main__' "
+                f"entrypoint nor a documented /api/ route.\n"
                 f"    > {row.strip()}"
             )
 
     return failures
+
+
+# ── Check H — relative links and heading anchors resolve ────────────────────
+
+# Trees whose Markdown is out of scope: docs/planning/ is historical working
+# material (and holds a corpus that must never be read), frontend/vendor/ is
+# the designer's read-only source of record — we could not fix a link there.
+LINK_SCOPE_EXCLUDE_PREFIXES = ("docs/planning/", "frontend/vendor/")
+
+_FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
+_ATX_RE = re.compile(r"^ {0,3}(#{1,6})[ \t]+(.*?)[ \t]*$")
+_SETEXT_RE = re.compile(r"^ {0,3}(=+|-+)[ \t]*$")
+_HTML_ANCHOR_RE = re.compile(r"<a\s[^>]*?\b(?:id|name)\s*=\s*[\"']([^\"']+)[\"']", re.IGNORECASE)
+# A code span may wrap a line but never crosses a blank line (a paragraph).
+_INLINE_CODE_RE = re.compile(r"(`+)(?:(?!\1)(?!\n[ \t]*\n)[\s\S])+?\1")
+_INLINE_LINK_RE = re.compile(
+    r"!?\[(?:[^\[\]]|\[[^\]]*\])*\]\(\s*(<[^>]*>|[^)\s]+)(?:\s+(?:\"[^\"]*\"|'[^']*'))?\s*\)"
+)
+_REF_DEF_RE = re.compile(r"^ {0,3}\[[^\]]+\]:\s*(<[^>]*>|\S+)")
+_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*:")
+
+
+def _strip_inline_markdown(text: str) -> str:
+    """Reduce heading source to the text GitHub renders (and so slugs)."""
+    text = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", text)  # links/images -> text
+    text = re.sub(r"<[^>]+>", "", text)  # inline HTML tags
+    text = text.replace("`", "")
+    return re.sub(r"(\*{1,3}|~~)", "", text)
+
+
+def github_slug(heading: str) -> str:
+    """GitHub's heading anchor: lower-case, drop punctuation other than `-`
+    and `_`, spaces to hyphens. Repeats are numbered by heading_anchors()."""
+    text = _strip_inline_markdown(heading).strip().lower()
+    text = re.sub(r"[^\w\- ]", "", text)
+    return text.replace(" ", "-")
+
+
+def _content_lines(text: str):
+    """Yield (lineno, line) for every line outside a fenced code block."""
+    fence: str | None = None
+    for lineno, line in enumerate(text.splitlines(), 1):
+        m = _FENCE_RE.match(line)
+        if m:
+            marker = m.group(1)
+            if fence is None:
+                fence = marker
+                continue
+            if marker[0] == fence[0] and len(marker) >= len(fence):
+                fence = None
+                continue
+        if fence is None:
+            yield lineno, line
+
+
+def heading_anchors(text: str) -> set[str]:
+    """Every fragment a link may target in this Markdown text."""
+    anchors: set[str] = set()
+    seen: dict[str, int] = {}
+
+    def add(heading: str) -> None:
+        slug = github_slug(heading)
+        n = seen.get(slug, 0)
+        seen[slug] = n + 1
+        anchors.add(slug if n == 0 else f"{slug}-{n}")
+
+    prev = ""
+    for _lineno, line in _content_lines(text):
+        for m in _HTML_ANCHOR_RE.finditer(line):
+            anchors.add(m.group(1).lower())
+        atx = _ATX_RE.match(line)
+        if atx:
+            add(re.sub(r"[ \t]+#+$", "", atx.group(2)))
+            prev = ""
+            continue
+        if (
+            _SETEXT_RE.match(line)
+            and prev.strip()
+            and not re.match(r"^\s*([-*+>|]|\d+[.)])", prev)
+        ):
+            add(prev.strip())
+            prev = ""
+            continue
+        prev = line
+    return anchors
+
+
+def _blank(m: re.Match) -> str:
+    return re.sub(r"[^\n]", " ", m.group(0))
+
+
+def iter_links(text: str):
+    """Yield (lineno, target) for every inline link and reference definition
+    outside fenced code blocks and inline code spans. Link text may wrap onto
+    the next line, so the scan runs over the whole text with fenced lines and
+    code spans blanked out (newlines kept, so line numbers stay true)."""
+    lines = text.splitlines()
+    kept = dict(_content_lines(text))
+    body = "\n".join(line if i in kept else "" for i, line in enumerate(lines, 1))
+    body = _INLINE_CODE_RE.sub(_blank, body)
+    for m in _INLINE_LINK_RE.finditer(body):
+        yield body.count("\n", 0, m.start()) + 1, m.group(1).strip("<>")
+    for lineno, line in enumerate(body.split("\n"), 1):
+        ref = _REF_DEF_RE.match(line)
+        if ref:
+            yield lineno, ref.group(1).strip("<>")
+
+
+def _tracked_files(repo_root: Path) -> list[str]:
+    out = subprocess.run(
+        ["git", "ls-files", "-z"], cwd=repo_root, capture_output=True, check=True  # noqa: S607
+    ).stdout.decode("utf-8")
+    return [p for p in out.split("\0") if p]
+
+
+def link_scope(tracked: list[str]) -> list[str]:
+    """The Markdown files whose links Check H holds to account."""
+    return sorted(
+        p for p in tracked
+        if p.endswith(".md") and not p.startswith(LINK_SCOPE_EXCLUDE_PREFIXES)
+    )
+
+
+def _normalise(path: str) -> str | None:
+    """Collapse `.` and `..` in a repo-relative path; None if it climbs out."""
+    out: list[str] = []
+    for part in path.split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if not out:
+                return None
+            out.pop()
+            continue
+        out.append(part)
+    return "/".join(out)
+
+
+def check_links(repo_root: Path = REPO_ROOT, tracked: list[str] | None = None) -> list[str]:
+    """Check H. `tracked` defaults to the repository's tracked files; the
+    tests pass their own list for a throw-away tree."""
+    if tracked is None:
+        tracked = _tracked_files(repo_root)
+    tracked_set = set(tracked)
+    tracked_dirs: set[str] = set()
+    for p in tracked:
+        parts = p.split("/")[:-1]
+        for i in range(1, len(parts) + 1):
+            tracked_dirs.add("/".join(parts[:i]))
+    anchor_cache: dict[str, set[str]] = {}
+
+    def anchors_for(rel: str) -> set[str]:
+        if rel not in anchor_cache:
+            anchor_cache[rel] = heading_anchors(
+                (repo_root / rel).read_text(encoding="utf-8", errors="replace")
+            )
+        return anchor_cache[rel]
+
+    failures: list[str] = []
+    for src in link_scope(tracked):
+        text = (repo_root / src).read_text(encoding="utf-8", errors="replace")
+        src_dir = src.rsplit("/", 1)[0] if "/" in src else ""
+        for lineno, target in iter_links(text):
+            if not target or _SCHEME_RE.match(target) or target.startswith("//"):
+                continue
+            path_part, _, fragment = target.partition("#")
+            path_part = urllib.parse.unquote(path_part.split("?", 1)[0])
+            if path_part:
+                joined = path_part if path_part.startswith("/") else f"{src_dir}/{path_part}"
+                resolved = _normalise(joined)
+                if resolved is None:
+                    failures.append(f"  {src}:{lineno}: link climbs out of the repository: {target}")
+                    continue
+                if resolved not in tracked_set and resolved not in tracked_dirs:
+                    failures.append(f"  {src}:{lineno}: no such tracked file: {target}")
+                    continue
+            else:
+                resolved = src
+            if (
+                fragment
+                and resolved.endswith(".md")
+                and resolved in tracked_set
+                and urllib.parse.unquote(fragment).lower() not in anchors_for(resolved)
+            ):
+                failures.append(
+                    f"  {src}:{lineno}: no heading anchor '#{fragment}' in {resolved}"
+                )
+    return failures
+
+
+# Known dead links in files another workstream was rewriting when Check H
+# landed (QA 2026-10-31: docs/threat-model.md was off-limits to the docs truth
+# pass). Each entry is (source file, link target). An entry is only honoured
+# while the link is still broken: once it resolves, the stale entry itself
+# fails the check, so this list can only shrink.
+LINK_KNOWN_BROKEN: set[tuple[str, str]] = set()
+
+
+def check_h() -> list[str]:
+    failures = check_links()
+    kept: list[str] = []
+    used: set[tuple[str, str]] = set()
+    for line in failures:
+        hit = next(
+            (
+                (src, target) for src, target in LINK_KNOWN_BROKEN
+                if line.startswith(f"  {src}:")
+                and (f"'{target}'" in line or line.endswith(f": {target}"))
+            ),
+            None,
+        )
+        if hit is None:
+            kept.append(line)
+        else:
+            used.add(hit)
+    for src, target in sorted(LINK_KNOWN_BROKEN - used):
+        kept.append(
+            f"  LINK_KNOWN_BROKEN entry ({src}, {target}) no longer fails: remove it "
+            "from scripts/docs-lint.py"
+        )
+    return kept
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -622,6 +878,7 @@ def main() -> int:
         ("E", "No literal AWS account ID in RUNBOOK command bodies", check_e),
         ("F", "No placeholder phrases in authoritative docs", check_f),
         ("G", "Implementation-status ledger presence and coverage", check_g),
+        ("H", "Relative links and heading anchors resolve", check_h),
     ]
 
     overall_pass = True

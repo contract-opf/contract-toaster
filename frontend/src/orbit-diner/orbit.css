@@ -219,18 +219,6 @@
 .od-toast-texture {
   filter: var(--od-doneness, none);
 }
-.od-toast-save {
-  position: absolute;
-  left: 19%;
-  right: 19%;
-  top: 61%;
-  font-size: 14px;
-  font-weight: 600;
-  background: #fff0bedd;
-  padding: 3px 7px;
-  border-radius: 4px;
-  color: #452912;
-}
 .od-console[data-status="running"] .od-slice,
 .od-console[data-status="pending"] .od-slice {
   top: -26%;
@@ -772,16 +760,6 @@
 .od-receipt-printer:disabled .od-receipt-paper {
   opacity: 0;
 }
-.od-printer-label {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -1%;
-  color: #f3ebdd;
-  font-size: 14px;
-  text-shadow: 0 1px 2px #000;
-  font-weight: 600;
-}
 .od-till {
   position: absolute;
   left: 10%;
@@ -814,22 +792,6 @@
 }
 .od-readback p {
   margin-bottom: 8px;
-}
-.od-result-keys {
-  margin: 20px 5% 12px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
-  align-items: center;
-}
-.od-result-keys > .od-key {
-  flex: 1;
-  padding: 12px;
-  min-height: 54px;
-}
-.od-result-keys > p {
-  font-size: 14px;
-  width: 100%;
 }
 .od-butter-art {
   width: 42px;
@@ -958,6 +920,22 @@
   transform: rotate(-2deg);
   font-size: 16px;
 }
+/* The preflight ticket's document title (OrbitDiner.tsx renders it above the
+   word-count stat). Added in our copy, not the vendor kit — the kit shipped
+   the markup with no rule, so a title painted as plain body copy (QA
+   2026-10-31 W10). Space Grotesk to match the console's own headings; a long
+   title breaks anywhere rather than widening the ticket. */
+.od-ticket-title {
+  font-family:
+    Space Grotesk,
+    Arial,
+    sans-serif;
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1.25;
+  margin: 0 0 6px;
+  overflow-wrap: anywhere;
+}
 .od-ticket-stat {
   font-family:
     IBM Plex Mono,
@@ -972,14 +950,6 @@
 .od-warning {
   border-left: 3px solid #bc7828;
   padding-left: 12px;
-}
-.od-bread-bin {
-  padding: 20px 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 18px;
-  flex-wrap: wrap;
 }
 .od-odometer {
   font-family:
@@ -1069,17 +1039,6 @@
 .od-applied-guidance p {
   white-space: pre-wrap;
   margin-top: 12px;
-}
-.od-results {
-  margin: 36px auto 0;
-  max-width: 1250px;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 32px;
-  align-items: start;
-}
-.od-results > .od-paper-panel:only-child {
-  grid-column: 1/-1;
 }
 .od-outcome {
   font-family:
@@ -1215,13 +1174,6 @@
 .od-catalog-entry span:last-child:not(:first-child) {
   font-size: 14px;
   opacity: 0.75;
-}
-.od-history-row {
-  display: grid;
-  gap: 8px;
-  border-bottom: 1px solid #bdb099;
-  padding: 16px 0;
-  margin-bottom: 16px;
 }
 .od-shortcuts {
   display: grid;
@@ -1376,10 +1328,6 @@
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 20px;
   }
-  .od-bread-bin {
-    flex-direction: column;
-    justify-content: flex-start;
-  }
   .od-preflight {
     transform: none;
   }
@@ -1389,9 +1337,6 @@
   .od-pad-content {
     padding-top: 14%;
     min-height: 450px;
-  }
-  .od-results {
-    grid-template-columns: minmax(0, 1fr);
   }
   .od-disposition-keys {
     gap: 12px;
@@ -1456,10 +1401,6 @@
   }
   .od-console[data-status="done"] .od-slice {
     top: -48%;
-  }
-  .od-toast-save {
-    font-size: 14px;
-    top: 57%;
   }
   .od-intake-controls {
     gap: 12px;
@@ -1579,11 +1520,6 @@
   .od-receipt-paper > span {
     display: none;
   }
-  .od-printer-label {
-    position: static;
-    color: #f5ead6;
-    font-size: 16px;
-  }
   .od-receipt-printer:disabled {
     opacity: 0.55 !important;
   }
@@ -1604,9 +1540,6 @@
   .od-readback {
     margin: 15px 5px;
   }
-  .od-result-keys {
-    margin: 16px 4px;
-  }
   .od-disposition {
     margin: 18px 0 0;
   }
@@ -1617,10 +1550,6 @@
   .od-ticket-column {
     display: block;
     padding-top: 8px;
-  }
-  .od-bread-bin {
-    flex-direction: row;
-    padding: 18px 5px 0;
   }
   .od-counter-papers {
     margin-top: 18px;
@@ -1648,10 +1577,6 @@
     font-size: 16px;
     line-height: 30px;
     background-size: auto;
-  }
-  .od-results {
-    gap: 24px;
-    margin-top: 28px;
   }
   .od-dialog-paper {
     padding: 22px;
@@ -1794,11 +1719,6 @@
 }
 .od-plain .od-receipt-paper {
   display: none;
-}
-.od-plain .od-printer-label {
-  position: static;
-  color: #243542;
-  text-shadow: none;
 }
 .od-plain .od-receipt-printer {
   border: 1px solid #8d9da2;
@@ -2215,13 +2135,6 @@
   .od-pad-shell {
     transform: none;
   }
-  .od-results {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .od-bread-bin {
-    flex-direction: column;
-    justify-content: flex-start;
-  }
 }
 @container od-console (max-width: 560px) {
   .od-register-controls {
@@ -2239,9 +2152,6 @@
   }
   .od-ticket-column {
     display: block;
-  }
-  .od-bread-bin {
-    flex-direction: row;
   }
 }
 

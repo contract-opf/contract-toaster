@@ -113,8 +113,10 @@ the overlay's purpose; editing an engine file is a divergence to be fixed
 upstream instead.
 
 **The cut** — publishing by building a fresh-history tree from the private repo
-and landing it on the public one (`scripts/public-cut.sh`), never by flipping
-the private repo's visibility. Its history holds a real client corpus and can
+and landing it on the public one, never by flipping the private repo's
+visibility. Historical: the cut script lived in the private origin, never in
+this tree, and the model retired on 2026-09-09, when this public repository
+became the development trunk (AGENTS.md, "Two repo-specific traps"). Its history holds a real client corpus and can
 never be published.
 
 **The corpus** — the real signed agreements the playbook was derived from.

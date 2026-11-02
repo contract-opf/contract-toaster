@@ -5,6 +5,7 @@ import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as cwActions from 'aws-cdk-lib/aws-cloudwatch-actions';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as kms from 'aws-cdk-lib/aws-kms';
+import * as logs from 'aws-cdk-lib/aws-logs';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as sfn from 'aws-cdk-lib/aws-stepfunctions';
 import * as sns from 'aws-cdk-lib/aws-sns';
@@ -32,6 +33,12 @@ export interface ObservabilityStackProps extends cdk.NestedStackProps {
    * contract-toaster-stack.ts.
    */
   readonly appRunnerServiceName?: string;
+  /**
+   * App Runner service id (the CFN `ServiceId` attribute). Names the service's
+   * application log group, which the retention-reduction GC alarm (W6.8)
+   * filters. Omitted in a standalone synth, where no alarm is created.
+   */
+  readonly appRunnerServiceId?: string;
   /**
    * Review pipeline state machine (issue #57 AC: "Step Functions stage
    * failures" tile). Optional -- omitted, the tile/metric is still rendered
@@ -120,6 +127,8 @@ export class ObservabilityStack extends cdk.NestedStack {
   readonly appRunner5xxAlarm: cloudwatch.Alarm;
   readonly bedrockErrorAlarm: cloudwatch.Alarm;
   readonly bedrockThrottleAlarm: cloudwatch.Alarm;
+  /** W6.8: the GC alarm on a parked retention reduction. */
+  readonly retentionReductionAlarm?: cloudwatch.Alarm;
 
   constructor(scope: Construct, id: string, props: ObservabilityStackProps) {
     super(scope, id, props);
@@ -419,6 +428,49 @@ export class ObservabilityStack extends cdk.NestedStack {
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
     this.bedrockThrottleAlarm.addAlarmAction(new cwActions.SnsAction(this.alarmsTopic));
+
+    // -----------------------------------------------------------------------
+    // GC alarm on a retroactive retention reduction (QA remediation W6.8;
+    // docs/data-handling.md purge invariant 5). backend/src/retention_alerts.py
+    // writes ONE `RETENTION_REDUCTION_REQUESTED {json}` line to the App Runner
+    // application log each time a reduction is parked; this filter counts it
+    // and the alarm notifies the alarms topic on any one, so Legal hears about
+    // a reduction while it is still pending (it cannot apply for 72 hours
+    // unless a second admin confirms it). The log group is App Runner's own
+    // `/aws/apprunner/{service}/{service-id}/application`, which App Runner
+    // creates when the service starts -- hence the service id prop. Without
+    // it (standalone synth of this nested stack) there is nothing to filter.
+    // -----------------------------------------------------------------------
+    if (props.appRunnerServiceId) {
+      const appLogGroup = logs.LogGroup.fromLogGroupName(
+        this,
+        'AppRunnerApplicationLogGroup',
+        `/aws/apprunner/${appRunnerServiceName}/${props.appRunnerServiceId}/application`,
+      );
+      const reductionFilter = new logs.MetricFilter(this, 'RetentionReductionRequestedFilter', {
+        logGroup: appLogGroup,
+        filterPattern: logs.FilterPattern.literal('"RETENTION_REDUCTION_REQUESTED"'),
+        metricNamespace: 'ContractToaster/Retention',
+        metricName: 'RetentionReductionRequested',
+        metricValue: '1',
+      });
+      this.retentionReductionAlarm = new cloudwatch.Alarm(this, 'RetentionReductionAlarm', {
+        alarmName: `contract-toaster-retention-reduction-${envName}`,
+        alarmDescription:
+          'An admin requested a retroactive retention reduction. It is pending ' +
+          'and applies after 72 hours unless a different admin confirms it sooner ' +
+          'or any admin cancels it. See RUNBOOK.md -> Changing document retention.',
+        metric: reductionFilter.metric({
+          statistic: cloudwatch.Stats.SUM,
+          period: cdk.Duration.minutes(5),
+        }),
+        threshold: 1,
+        evaluationPeriods: 1,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      });
+      this.retentionReductionAlarm.addAlarmAction(new cwActions.SnsAction(this.alarmsTopic));
+    }
 
     // -----------------------------------------------------------------------
     // CloudWatch dashboard `contract-toaster-{env}` (issue #57 AC).

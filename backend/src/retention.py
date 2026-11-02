@@ -51,10 +51,13 @@ from typing import Any
 from fastapi import HTTPException, status
 
 try:  # production runs `src.main`; tests put backend/src on sys.path
+    from src import audit_log, retention_alerts
     from src import reviews as reviews_module
     from src.authz import require_admin
     from src.users import json_safe
 except ImportError:  # pragma: no cover
+    import audit_log  # type: ignore[no-redef]
+    import retention_alerts  # type: ignore[no-redef]
     import reviews as reviews_module  # type: ignore[no-redef]
     from authz import require_admin  # type: ignore[no-redef]
     from users import json_safe  # type: ignore[no-redef]
@@ -122,30 +125,25 @@ def _validate_window(window_days: int | str) -> None:
             ),
         )
 
-# Same terminal-review-status set as the purge worker (invariant 1) --
-# reviews outside this set are active executions and must never be counted
-# as purge-eligible by the preview, even far past the retention window.
-TERMINAL_REVIEW_STATUSES = {
-    "DONE",
-    "ERROR",
-    # Issue #133 retired these two as anything a writer produces; rows stored
-    # with them before that change are still terminal and still purgeable.
-    "ERROR_MANUAL_REVIEW_REQUIRED",  # legacy read only (pre-#133 rows)
-    "MANUAL_REVIEW_REQUIRED",  # legacy read only (pre-#133 rows)
-    "QUARANTINED",
-    "SUPERSEDED",
-}
+# Invariant 1: only terminal reviews are ever purge-eligible -- reviews
+# outside this set are active executions and must never be counted or
+# purged, even far past the retention window.
+#
+# This is `reviews.REVIEW_STATUSES_TERMINAL` itself, not a copy. The copy
+# this module used to carry left out CANCELLED, so on DTS a review the user
+# stopped kept its uploaded contract past the retention window forever,
+# precisely because they stopped it. The purge worker Lambda cannot import
+# backend/src and keeps its own copy; tests/test_retention_sweep_w6.py holds
+# it equal to this one.
+TERMINAL_REVIEW_STATUSES = frozenset(reviews_module.REVIEW_STATUSES_TERMINAL)
 
-# Every status a reviews row can carry (issue #52): the purge worker's
-# terminal set above plus the app's own vocabulary. The sweep and the hold
+# Every status a reviews row can carry (issue #52). The sweep and the hold
 # list read the table one `status-index` partition at a time, so "every row"
 # is spelled as "every partition in this set" -- a hold can sit on a review
 # in any status, and the sweep's `skipped_active` bucket has to see the
 # in-flight rows it reports.
 _ALL_KNOWN_REVIEW_STATUSES = frozenset(
-    TERMINAL_REVIEW_STATUSES
-    | reviews_module.REVIEW_STATUSES_NON_TERMINAL
-    | reviews_module.REVIEW_STATUSES_TERMINAL
+    TERMINAL_REVIEW_STATUSES | reviews_module.REVIEW_STATUSES_NON_TERMINAL
 )
 
 
@@ -177,47 +175,14 @@ def _settings_table(dynamodb_resource: Any):
     return dynamodb_resource.Table(os.environ["RETENTION_SETTINGS_TABLE"])
 
 
-def _audit_table(dynamodb_resource: Any):
-    return dynamodb_resource.Table(os.environ["AUDIT_TABLE"])
-
-
-def _write_audit_entry(
-    dynamodb_resource: Any,
-    actor: str,
-    action: str,
-    target: str,
-    target_type: str,
-    detail: dict[str, Any],
-) -> None:
-    """Append an immutable audit row. Identifiers and setting values only --
-    never document substance (same posture as src/users.py::_write_audit_entry
-    and ARCHITECTURE.md -> "Audit posture")."""
-    table = _audit_table(dynamodb_resource)
-    now = now_epoch()
-    event_id = uuid.uuid4().hex
-    partition = time.strftime("%Y-%m", time.gmtime(now))
-    timestamp = f"{int(now)}#{event_id}"
-
-    item: dict[str, Any] = {
-        "partition": partition,
-        "timestamp": timestamp,
-        "event_id": event_id,
-        "actor": actor,
-        "action": action,
-        "target": target,
-        "target_type": target_type,
-        "outcome": "success",
-    }
-    # Issue #253: same stamp src/review_routes.py::_write_audit_row applies,
-    # for the same reason -- a legal hold set or released against a review is
-    # part of that review's audit history, and docs/audit-queries.md's "full
-    # history of one review/document" query reads the audit table's
-    # `review_id-index`. Only review-scoped rows: a `retention_settings` row
-    # targets a global setting, not a review.
-    if target_type == "review" and target:
-        item["review_id"] = target
-    item.update(detail)
-    table.put_item(Item=item)
+def _audit(dynamodb_resource: Any, **fields: Any) -> dict[str, Any] | None:
+    """Append an immutable audit row through `audit_log`, the one writer.
+    Identifiers and setting values only -- never document substance
+    (ARCHITECTURE.md -> "Audit posture"). Stamped with this module's own
+    `now_epoch` so a test that pins the clock pins the audit row too. A
+    review-scoped row (a legal hold set or released) is stamped with
+    `review_id` for the `review_id-index` by `audit_log` (issue #253)."""
+    return audit_log.write_audit_entry(dynamodb_resource, now=now_epoch(), **fields)
 
 
 # ---------------------------------------------------------------------------
@@ -266,6 +231,20 @@ def get_retention_settings(
 
     result["default_retention_window_days"] = DEFAULT_RETENTION_WINDOW_DAYS
     result["window_options"] = [dict(opt) for opt in RETENTION_WINDOW_OPTIONS]
+    pending = result.get("pending_reduction")
+    if pending:
+        # W6.7: the server, not the browser, says whether THIS viewer may
+        # confirm -- the requester never may. `apply_after` is filled in for a
+        # row parked before it was recorded.
+        pending = dict(pending)
+        pending.setdefault(
+            "apply_after", int(pending.get("requested_at", 0)) + RETROACTIVE_REDUCTION_DELAY_SECONDS
+        )
+        viewer = caller_user_row.get("cognito_sub", "")
+        pending["viewer_can_confirm"] = bool(
+            viewer and pending.get("pending_id") and viewer != pending.get("requested_by")
+        )
+        result["pending_reduction"] = pending
     # The row goes straight into GET /api/admin/retention's JSONResponse, and
     # boto3 reads a stored bounded window (and a pending reduction's numbers)
     # back as Decimals -- the same 500 GET /api/users had (#440). See
@@ -274,33 +253,46 @@ def get_retention_settings(
 
 
 # ---------------------------------------------------------------------------
-# request_retention_change -- POST (admin), dual control (#13 / #61)
+# request_retention_change -- POST (admin), real dual control (#13 / #61, W6.7)
 # ---------------------------------------------------------------------------
+
+# Invariant 5: a retroactive reduction waits this long for a second admin
+# before it applies itself. Mirrors the purge worker Lambda's
+# RETROACTIVE_REDUCTION_DELAY_SECONDS default.
+RETROACTIVE_REDUCTION_DELAY_SECONDS = 72 * 3600
+
+# The actor an automatic, delay-expired application is recorded under.
+PENDING_REDUCTION_SYSTEM_ACTOR = "system:retention-delay"
+
+_GLOBAL_KEY = {"setting_id": GLOBAL_SETTING_ID}
+
+
+def _clean_reason(reason: Any) -> str:
+    return reason.strip() if isinstance(reason, str) else ""
 
 
 def request_retention_change(
     new_window_days: int | str,
     caller_user_row: dict[str, Any],
     dynamodb_resource: Any,
-    second_admin_confirmation: dict[str, Any] | None = None,
+    reason: str = "",
 ) -> dict[str, Any]:
-    """POST /api/admin/retention.
+    """POST /api/admin/retention. Body: {"retention_window_days", "reason"}.
 
     Forward-looking changes (raising the window, or an unchanged value)
     apply single-admin, immediately. A retroactive reduction (new window <
-    current window, ranked by `_window_rank` so the `forever` sentinel
-    always outranks any bounded window) requires either a second, different
-    admin's confirmation, or is parked in `pending_reduction` for the
-    mandatory 72-hour delay (applied automatically by the purge worker once
-    the delay elapses -- see infra/lambda/purge_worker/handler.py). A lone
-    admin cannot satisfy dual control by confirming their own request.
+    current window, ranked by `_window_rank` so `forever` outranks every
+    bounded window) NEVER applies from this request (W6.7). It is parked as
+    a pending record -- `pending_id`, requester, required `reason`,
+    `apply_after` -- that either a DIFFERENT authenticated admin confirms
+    (`confirm_pending_reduction`), any admin cancels
+    (`cancel_pending_reduction`), or the purge sweep applies once the 72-hour
+    delay has passed (`apply_ready_pending_reduction` on DTS, the Lambda on
+    AWS). The free-text "second admin" this request used to accept was
+    self-attested, so one admin could apply a 0-day window on their own.
 
-    `new_window_days` may be an int in [0, 1095] (RUNBOOK.md: "0 days-3
-    years") or the literal string `"forever"` (issue #34: indefinite
-    preservation -- the selected records are never purged).
-
-    Raises HTTPException(403) if the caller is not an admin, 400 if
-    new_window_days is neither a valid int in range nor `"forever"`.
+    Raises HTTPException(403) for a non-admin, 400 for an invalid window or
+    a reduction without a reason, 409 when a reduction is already pending.
     """
     require_admin(caller_user_row, "Admin privilege required to change retention settings.")
 
@@ -310,75 +302,298 @@ def request_retention_change(
     settings_table = _settings_table(dynamodb_resource)
     settings = get_retention_settings(caller_user_row, dynamodb_resource)
     current_window = settings["retention_window_days"]
-    now = now_epoch()
+    current_pending = settings.get("pending_reduction") or None
+    now = int(now_epoch())
 
     is_retroactive_reduction = _window_rank(new_window_days) < _window_rank(current_window)
 
     if not is_retroactive_reduction:
         settings_table.update_item(
-            Key={"setting_id": GLOBAL_SETTING_ID},
+            Key=_GLOBAL_KEY,
             UpdateExpression="SET retention_window_days = :w, pending_reduction = :none, updated_at = :now",
-            ExpressionAttributeValues={":w": new_window_days, ":none": None, ":now": str(int(now))},
+            ExpressionAttributeValues={":w": new_window_days, ":none": None, ":now": str(now)},
         )
         result = {"status": "APPLIED", "applied_immediately": True}
-        _write_audit_entry(
+        detail: dict[str, Any] = {
+            "before_retention_window_days": current_window,
+            "after_retention_window_days": new_window_days,
+            "result_status": result["status"],
+        }
+        if current_pending:
+            # A forward change supersedes a parked reduction; say so.
+            detail["cleared_pending_id"] = current_pending.get("pending_id", "")
+        _audit(
             dynamodb_resource,
             actor=actor,
             action="retention_change",
             target=GLOBAL_SETTING_ID,
             target_type="retention_settings",
-            detail={
-                "before_retention_window_days": current_window,
-                "after_retention_window_days": new_window_days,
-                "result_status": result["status"],
-            },
+            detail=detail,
         )
         return result
 
-    confirmed_by_different_admin = bool(
-        second_admin_confirmation
-        and second_admin_confirmation.get("actor")
-        and second_admin_confirmation["actor"] != actor
-    )
-
-    if confirmed_by_different_admin:
-        settings_table.update_item(
-            Key={"setting_id": GLOBAL_SETTING_ID},
-            UpdateExpression="SET retention_window_days = :w, pending_reduction = :none, updated_at = :now",
-            ExpressionAttributeValues={":w": new_window_days, ":none": None, ":now": str(int(now))},
+    reason = _clean_reason(reason)
+    if not reason:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A reason is required to request a retention reduction.",
         )
-        result = {"status": "APPLIED", "applied_immediately": False}
-    else:
-        # No valid second-admin confirmation -- enter the 72h pending-delay
-        # state. The window itself is NOT lowered yet. `requested_at` is a
-        # whole epoch second: boto3 refuses a Python float on every write
-        # ("Float types are not supported"), and a 72h delay needs no finer
-        # grain. See tests/test_retention_pending_reduction_moto.py.
-        pending_reduction = {
-            "new_window_days": new_window_days,
-            "requested_by": actor,
-            "requested_at": int(now),
-        }
+    if current_pending:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "A retention reduction is already pending. Confirm or cancel it "
+                "before requesting another."
+            ),
+        )
+
+    pending_reduction = {
+        "pending_id": uuid.uuid4().hex,
+        "new_window_days": new_window_days,
+        "previous_window_days": current_window,
+        "requested_by": actor,
+        # Whole epoch seconds: boto3 refuses a Python float on every write
+        # (tests/test_retention_pending_reduction_moto.py).
+        "requested_at": now,
+        "apply_after": now + RETROACTIVE_REDUCTION_DELAY_SECONDS,
+        "reason": reason,
+    }
+    try:
         settings_table.update_item(
-            Key={"setting_id": GLOBAL_SETTING_ID},
+            Key=_GLOBAL_KEY,
             UpdateExpression="SET pending_reduction = :pending, updated_at = :now",
-            ExpressionAttributeValues={":pending": pending_reduction, ":now": str(int(now))},
+            ConditionExpression="attribute_not_exists(pending_reduction) OR pending_reduction = :none",
+            ExpressionAttributeValues={
+                ":pending": pending_reduction,
+                ":now": str(now),
+                ":none": None,
+            },
         )
-        result = {"status": "PENDING_SECOND_APPROVAL", "applied_immediately": False}
+    except Exception as exc:
+        if _is_conditional_failure(exc):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A retention reduction is already pending.",
+            ) from None
+        raise
 
-    _write_audit_entry(
+    _audit(
         dynamodb_resource,
         actor=actor,
-        action="retention_change",
+        action="retention_reduction_requested",
         target=GLOBAL_SETTING_ID,
         target_type="retention_settings",
         detail={
+            "pending_id": pending_reduction["pending_id"],
             "before_retention_window_days": current_window,
             "after_retention_window_days": new_window_days,
-            "result_status": result["status"],
+            "apply_after": pending_reduction["apply_after"],
+            "reason": reason,
+            "result_status": "PENDING_SECOND_APPROVAL",
         },
     )
-    return result
+    # W6.8: the GC alarm -- a structured log line the AWS metric filter
+    # counts, plus the optional DTS push. After the audit row, and never a
+    # gate: the reduction is parked whether or not the alarm got through.
+    retention_alerts.announce_reduction_request(pending_reduction, current_window)
+    return {
+        "status": "PENDING_SECOND_APPROVAL",
+        "applied_immediately": False,
+        "pending_id": pending_reduction["pending_id"],
+        "apply_after": pending_reduction["apply_after"],
+    }
+
+
+def _current_pending(dynamodb_resource: Any, pending_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """(settings row, pending record) for `pending_id`, or 404."""
+    row = (
+        _settings_table(dynamodb_resource)
+        .get_item(Key=_GLOBAL_KEY, ConsistentRead=True)
+        .get("Item")
+        or {}
+    )
+    pending = row.get("pending_reduction") or {}
+    if not pending_id or pending.get("pending_id") != pending_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No pending retention reduction with that id.",
+        )
+    return row, pending
+
+
+def _apply_pending(dynamodb_resource: Any, pending: dict[str, Any]) -> None:
+    """Lower the window to the pending value and clear the record -- only if
+    that same record is still the pending one (a concurrent cancel or
+    confirm loses cleanly)."""
+    _settings_table(dynamodb_resource).update_item(
+        Key=_GLOBAL_KEY,
+        UpdateExpression="SET retention_window_days = :w, pending_reduction = :none, updated_at = :now",
+        ConditionExpression="pending_reduction.pending_id = :pid",
+        ExpressionAttributeValues={
+            ":w": pending["new_window_days"],
+            ":none": None,
+            ":now": str(int(now_epoch())),
+            ":pid": pending["pending_id"],
+        },
+    )
+
+
+def _pending_audit_detail(row: dict[str, Any], pending: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "pending_id": pending.get("pending_id", ""),
+        "requested_by": pending.get("requested_by", ""),
+        "requested_at": pending.get("requested_at"),
+        "reason": pending.get("reason", ""),
+        "before_retention_window_days": row.get(
+            "retention_window_days", DEFAULT_RETENTION_WINDOW_DAYS
+        ),
+        "after_retention_window_days": pending.get("new_window_days"),
+    }
+
+
+def confirm_pending_reduction(
+    pending_id: str,
+    caller_user_row: dict[str, Any],
+    dynamodb_resource: Any,
+) -> dict[str, Any]:
+    """POST /api/admin/retention/pending/{pending_id}/confirm.
+
+    The second half of dual control: an authenticated admin (strict
+    `is_admin is True`, `authz.require_admin`) who is NOT the requester
+    applies the parked reduction now. The confirmer's identity is the
+    caller's own row -- never anything in the request body.
+
+    Raises HTTPException(403) for a non-admin or for the requester, 404 for
+    an unknown or no-longer-pending id.
+    """
+    require_admin(caller_user_row, "Admin privilege required to confirm a retention reduction.")
+    actor = caller_user_row.get("cognito_sub", "")
+    row, pending = _current_pending(dynamodb_resource, pending_id)
+    if not actor or actor == pending.get("requested_by"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="A retention reduction must be confirmed by a different admin than the one who requested it.",
+        )
+    try:
+        _apply_pending(dynamodb_resource, pending)
+    except Exception as exc:
+        if _is_conditional_failure(exc):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No pending retention reduction with that id.",
+            ) from None
+        raise
+    _audit(
+        dynamodb_resource,
+        actor=actor,
+        action="retention_reduction_confirmed",
+        target=GLOBAL_SETTING_ID,
+        target_type="retention_settings",
+        detail={**_pending_audit_detail(row, pending), "result_status": "APPLIED"},
+    )
+    return {"status": "APPLIED", "applied_immediately": False, "pending_id": pending_id}
+
+
+def cancel_pending_reduction(
+    pending_id: str,
+    caller_user_row: dict[str, Any],
+    dynamodb_resource: Any,
+    reason: str = "",
+) -> dict[str, Any]:
+    """POST /api/admin/retention/pending/{pending_id}/cancel. Body:
+    {"reason": str} (optional). Any admin -- including the requester -- may
+    withdraw a parked reduction; the window is left as it is.
+
+    Raises HTTPException(403) for a non-admin, 404 for an unknown or
+    no-longer-pending id.
+    """
+    require_admin(caller_user_row, "Admin privilege required to cancel a retention reduction.")
+    actor = caller_user_row.get("cognito_sub", "")
+    row, pending = _current_pending(dynamodb_resource, pending_id)
+    try:
+        _settings_table(dynamodb_resource).update_item(
+            Key=_GLOBAL_KEY,
+            UpdateExpression="SET pending_reduction = :none, updated_at = :now",
+            ConditionExpression="pending_reduction.pending_id = :pid",
+            ExpressionAttributeValues={
+                ":none": None,
+                ":now": str(int(now_epoch())),
+                ":pid": pending_id,
+            },
+        )
+    except Exception as exc:
+        if _is_conditional_failure(exc):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No pending retention reduction with that id.",
+            ) from None
+        raise
+    _audit(
+        dynamodb_resource,
+        actor=actor,
+        action="retention_reduction_cancelled",
+        target=GLOBAL_SETTING_ID,
+        target_type="retention_settings",
+        detail={
+            **_pending_audit_detail(row, pending),
+            "cancel_reason": _clean_reason(reason),
+            "result_status": "CANCELLED",
+        },
+    )
+    return {"status": "CANCELLED", "pending_id": pending_id}
+
+
+def apply_ready_pending_reduction(dynamodb_resource: Any) -> bool:
+    """Apply a parked reduction whose 72-hour delay has passed, and audit it
+    (DTS; the purge worker Lambda does the same on AWS). Called at the start
+    of every DTS sweep. Returns True when one was applied.
+
+    `apply_after` is honoured when recorded; a row parked before it was
+    recorded falls back to `requested_at` + the delay, as the Lambda does."""
+    if not os.environ.get("RETENTION_SETTINGS_TABLE"):
+        return False
+    row = (
+        _settings_table(dynamodb_resource)
+        .get_item(Key=_GLOBAL_KEY, ConsistentRead=True)
+        .get("Item")
+        or {}
+    )
+    pending = row.get("pending_reduction") or None
+    if not pending:
+        return False
+    apply_after = pending.get("apply_after")
+    if apply_after is None:
+        apply_after = float(pending.get("requested_at", 0)) + RETROACTIVE_REDUCTION_DELAY_SECONDS
+    if now_epoch() < float(apply_after):
+        return False
+    if not pending.get("pending_id"):
+        # A pre-W6.7 record: give it an id so the conditional apply can bind.
+        pending = {**pending, "pending_id": "legacy"}
+        _settings_table(dynamodb_resource).update_item(
+            Key=_GLOBAL_KEY,
+            UpdateExpression="SET pending_reduction.pending_id = :pid",
+            ExpressionAttributeValues={":pid": "legacy"},
+        )
+    try:
+        _apply_pending(dynamodb_resource, pending)
+    except Exception as exc:
+        if _is_conditional_failure(exc):
+            return False  # confirmed or cancelled meanwhile
+        raise
+    _audit(
+        dynamodb_resource,
+        actor=PENDING_REDUCTION_SYSTEM_ACTOR,
+        action="retention_reduction_applied_after_delay",
+        target=GLOBAL_SETTING_ID,
+        target_type="retention_settings",
+        detail={**_pending_audit_detail(row, pending), "result_status": "APPLIED"},
+    )
+    return True
+
+
+def _is_conditional_failure(exc: Exception) -> bool:
+    response = getattr(exc, "response", None) or {}
+    return response.get("Error", {}).get("Code") == "ConditionalCheckFailedException"
 
 
 # ---------------------------------------------------------------------------
@@ -605,8 +820,47 @@ def _log_purge_plan(review_id: str, keys: list[str], dry_run: bool) -> None:
         logger.info("retention sweep: %s %s", prefix, key)
 
 
+# The audit row a sweep writes names the reviews it purged. A daily sweep
+# after a long outage could purge thousands; the row is capped well inside
+# DynamoDB's 400 KB item limit and says when it was truncated (the counts are
+# always exact). Mirrored in infra/lambda/purge_worker/handler.py.
+SWEEP_AUDIT_MAX_IDS = 1000
+
+# The audit `actor` for a DTS sweep nobody authenticated to run.
+DTS_SWEEP_ACTOR = "system:retention-sweep"
+
+
+def sweep_audit_detail(result: dict[str, Any]) -> dict[str, Any]:
+    """The audit `detail` for one sweep run: its id, mode, exact counts, and
+    the purged / failed review ids (capped). Identifiers and counts only --
+    never an object key (a key carries the owner's sub) and never substance.
+    Mirrored EXACTLY by infra/lambda/purge_worker/handler.py's
+    `_sweep_audit_detail`; tests/test_retention_sweep_w6.py checks both."""
+    deleted = list(result["deleted_reviews"])
+    failed = list(result["failed_reviews"])
+    return {
+        "sweep_id": result["sweep_id"],
+        "dry_run": bool(result["dry_run"]),
+        "eligible_count": len(result["eligible_reviews"]),
+        "deleted_count": len(deleted),
+        "failed_count": len(failed),
+        "object_count": int(result["object_count"]),
+        "skipped_active_count": len(result["skipped_active"]),
+        "skipped_hold_count": len(result["skipped_hold"]),
+        "skipped_not_yet_eligible_count": len(result["skipped_not_yet_eligible"]),
+        "purged_review_ids": deleted[:SWEEP_AUDIT_MAX_IDS],
+        "failed_review_ids": failed[:SWEEP_AUDIT_MAX_IDS],
+        "review_ids_truncated": (
+            len(deleted) > SWEEP_AUDIT_MAX_IDS or len(failed) > SWEEP_AUDIT_MAX_IDS
+        ),
+    }
+
+
 def run_purge_sweep_now(
-    s3_client: Any, dynamodb_resource: Any, dry_run: bool = False
+    s3_client: Any,
+    dynamodb_resource: Any,
+    dry_run: bool = False,
+    actor: str = DTS_SWEEP_ACTOR,
 ) -> dict[str, Any]:
     """Run an immediate purge sweep using each review's own snapshotted
     window (invariant 2), for parity-checking the preview against the real
@@ -633,8 +887,28 @@ def run_purge_sweep_now(
       failed_reviews    reviews where a targeted object SURVIVED the delete;
                         deliberately NOT in deleted_reviews, and their
                         substance fields are left intact for the next sweep
+      sweep_id          this run's id -- the `target` of the ONE audit row
+                        every run (dry runs included) writes, with its counts
+                        and purged review ids (`sweep_audit_detail`). That
+                        write is not best-effort: a sweep that cannot record
+                        itself raises after the fact rather than passing
+                        silently.
     """
+    if not os.environ.get("AUDIT_TABLE"):
+        # Refuse before deleting anything: a sweep must never run unrecorded.
+        raise RuntimeError("AUDIT_TABLE is not configured; refusing to sweep unaudited")
+    # W6.7: a parked reduction whose 72-hour delay has passed takes effect
+    # here, exactly as the purge worker Lambda applies it at the start of
+    # its sweep on AWS. Skipped on a dry run, which must change nothing.
+    # A failure here does not stop the sweep: this run purges on each
+    # review's own snapshotted window either way, and the next run retries.
+    if not dry_run:
+        try:
+            apply_ready_pending_reduction(dynamodb_resource)
+        except Exception:  # noqa: BLE001 -- logged by fact, not provider text
+            logger.warning("retention sweep: applying a pending reduction failed; will retry")
     reviews_table = _reviews_table(dynamodb_resource)
+    sweep_id = uuid.uuid4().hex
 
     uploads_bucket = os.environ.get("UPLOADS_BUCKET", "")
     outputs_bucket = os.environ.get("OUTPUTS_BUCKET", "")
@@ -671,6 +945,24 @@ def run_purge_sweep_now(
         if not _is_past_retention(review):
             skipped_not_yet_eligible.append(review_id)
             continue
+
+        # W6.6: the row above came from a `status-index` query, which is
+        # eventually consistent and was read before this candidate's turn. A
+        # hold placed since then must still win, so re-read the row strongly
+        # consistently immediately before acting on it.
+        current = reviews_table.get_item(
+            Key={"review_id": review_id}, ConsistentRead=True
+        ).get("Item")
+        if not current:
+            logger.warning("retention sweep: review %s vanished mid-sweep; skipped", review_id)
+            continue
+        if _is_legal_held(current):
+            skipped_hold.append(review_id)
+            continue
+        if current.get("status") not in TERMINAL_REVIEW_STATUSES:
+            skipped_active.append(review_id)
+            continue
+        review = current
 
         eligible.append(review_id)
         targets = _review_object_targets(review, s3_client, uploads_bucket, outputs_bucket)
@@ -764,7 +1056,8 @@ def run_purge_sweep_now(
         )
         deleted.append(review_id)
 
-    return {
+    result = {
+        "sweep_id": sweep_id,
         "dry_run": dry_run,
         "deleted_reviews": deleted,
         "eligible_reviews": eligible,
@@ -775,6 +1068,15 @@ def run_purge_sweep_now(
         "skipped_hold": skipped_hold,
         "skipped_not_yet_eligible": skipped_not_yet_eligible,
     }
+    _audit(
+        dynamodb_resource,
+        actor=actor,
+        action="retention_purge_sweep",
+        target=sweep_id,
+        target_type="retention_sweep",
+        detail=sweep_audit_detail(result),
+    )
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -782,40 +1084,139 @@ def run_purge_sweep_now(
 # ---------------------------------------------------------------------------
 
 
-def _tag_review_objects(
-    review: dict[str, Any],
-    s3_client: Any,
-    held: bool,
-) -> None:
-    """Mirror the review's legal-hold state onto its S3 objects via the
-    `contract-toaster:legal-hold` tag, matching the bucket-policy DENY condition in
-    infra/lib/nested/data-stack.ts (StringEquals on
-    's3:ExistingObjectTag/contract-toaster:legal-hold' = 'true').
+LEGAL_HOLD_TAG_KEY = "contract-toaster:legal-hold"
 
-    Takes the review ROW (not just its id) because targeting is derived from
-    the row's own recorded pointer -- see `_review_object_targets`. Issue #454:
-    this tagger previously listed `uploads/{review_id}/`, which never matched
-    the layout the API writes, so a held INPUT document never received the tag
-    and the storage-layer DENY backstop covered outputs only."""
-    uploads_bucket = os.environ.get("UPLOADS_BUCKET", "")
-    outputs_bucket = os.environ.get("OUTPUTS_BUCKET", "")
+# The 503 an admin sees when the storage layer refused a hold change. Fixed
+# copy: a provider error names ARNs, bucket keys and policy text, none of
+# which belongs in a response body (CLAUDE.md -> "Escaped text only").
+_HOLD_STORAGE_FAILED = (
+    "The legal hold could not be {verb} on this review's stored documents, so "
+    "nothing was changed. Try again; if it keeps failing, ask an operator to "
+    "check the service's storage permissions."
+)
+_HOLD_AUDIT_FAILED = (
+    "The legal hold change could not be recorded in the audit trail, so it was "
+    "undone. Try again; if it keeps failing, ask an operator to check the audit "
+    "table."
+)
 
-    for bucket, key in _review_object_targets(
-        review, s3_client, uploads_bucket, outputs_bucket
-    ):
-        if held:
-            s3_client.put_object_tagging(
-                Bucket=bucket,
-                Key=key,
-                Tagging={"TagSet": [{"Key": "contract-toaster:legal-hold", "Value": "true"}]},
-            )
-        else:
-            s3_client.delete_object_tagging(Bucket=bucket, Key=key)
+
+class _HoldTaggingError(Exception):
+    """Tagging stopped part-way. `done` is every (bucket, key) already
+    changed, so the caller can put them back."""
+
+    def __init__(self, done: list[tuple[str, str]]) -> None:
+        super().__init__("legal-hold tagging failed")
+        self.done = done
+
+
+def _hold_targets(review: dict[str, Any], s3_client: Any) -> list[tuple[str, str]]:
+    """Every (bucket, key) a hold on this review covers -- derived from the
+    row's own recorded pointers plus the review-scoped prefixes, exactly as
+    the sweep targets them (`_review_object_targets`, issue #454)."""
+    return _review_object_targets(
+        review,
+        s3_client,
+        os.environ.get("UPLOADS_BUCKET", ""),
+        os.environ.get("OUTPUTS_BUCKET", ""),
+    )
+
+
+def _apply_hold_tag(s3_client: Any, bucket: str, key: str, held: bool) -> None:
+    if held:
+        s3_client.put_object_tagging(
+            Bucket=bucket,
+            Key=key,
+            Tagging={"TagSet": [{"Key": LEGAL_HOLD_TAG_KEY, "Value": "true"}]},
+        )
+    else:
+        s3_client.delete_object_tagging(Bucket=bucket, Key=key)
+
+
+def _tag_targets(
+    s3_client: Any, targets: list[tuple[str, str]], held: bool
+) -> list[tuple[str, str]]:
+    """Mirror `held` onto every target via the `contract-toaster:legal-hold`
+    tag the bucket-policy DENY reads (infra/lib/nested/data-stack.ts,
+    `s3:ExistingObjectTag/contract-toaster:legal-hold` = 'true'). Raises
+    `_HoldTaggingError` carrying what was already changed."""
+    done: list[tuple[str, str]] = []
+    for bucket, key in targets:
+        try:
+            _apply_hold_tag(s3_client, bucket, key, held)
+        except Exception as exc:
+            raise _HoldTaggingError(done) from exc
+        done.append((bucket, key))
+    return done
+
+
+def _undo_tags(s3_client: Any, done: list[tuple[str, str]], held: bool, review_id: str) -> None:
+    """Best-effort rollback of `_tag_targets(..., held)`. A failure here is
+    logged by count only: the row still says what is true, and the storage
+    tag is a backstop, not the source of truth."""
+    failed = 0
+    for bucket, key in done:
+        try:
+            _apply_hold_tag(s3_client, bucket, key, not held)
+        except Exception:  # noqa: BLE001 -- rollback is best-effort
+            failed += 1
+    if failed:
+        logger.warning(
+            "LEGAL_HOLD: rollback left %d object tag(s) out of step for review %s",
+            failed,
+            review_id,
+        )
+
+
+def _tag_or_503(
+    s3_client: Any, targets: list[tuple[str, str]], held: bool, review_id: str
+) -> list[tuple[str, str]]:
+    try:
+        return _tag_targets(s3_client, targets, held)
+    except _HoldTaggingError as exc:
+        _undo_tags(s3_client, exc.done, held, review_id)
+        # Deliberately not `logger.exception`: the provider's message can quote
+        # a key, and a key names the review's owner.
+        logger.warning(
+            "LEGAL_HOLD: storage tagging failed for review %s; nothing changed",
+            review_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_HOLD_STORAGE_FAILED.format(verb="placed" if held else "released"),
+        ) from None
+
+
+
+def tag_if_held(review_id: str, dynamodb_resource: Any) -> dict[str, str]:
+    """Extra `put_object` / `copy_object` kwargs for an object written under
+    `review_id` (W6.6): `{"Tagging": "contract-toaster:legal-hold=true"}` while
+    the review is held, else `{}`.
+
+    A hold tags the objects that exist when it is placed; an output written
+    afterwards (a pipeline still finishing, a diagnostic artifact) would
+    otherwise land untagged, outside the bucket-policy backstop. The read is
+    strongly consistent so a hold placed a moment ago is seen. A failed
+    lookup never fails the write: the row's flag still protects the review
+    from every sweep."""
+    try:
+        row = (
+            _reviews_table(dynamodb_resource)
+            .get_item(Key={"review_id": review_id}, ConsistentRead=True)
+            .get("Item")
+            or {}
+        )
+    except Exception:  # noqa: BLE001 -- never fail a write over the lookup
+        logger.warning("LEGAL_HOLD: hold lookup failed for review %s at write time", review_id)
+        return {}
+    if _is_legal_held(row):
+        return {"Tagging": f"{LEGAL_HOLD_TAG_KEY}=true"}
+    return {}
 
 
 def _get_review_or_404(review_id: str, dynamodb_resource: Any) -> dict[str, Any]:
     reviews_table = _reviews_table(dynamodb_resource)
-    resp = reviews_table.get_item(Key={"review_id": review_id})
+    resp = reviews_table.get_item(Key={"review_id": review_id}, ConsistentRead=True)
     review = resp.get("Item")
     if not review:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review not found.")
@@ -831,17 +1232,25 @@ def set_legal_hold(
 ) -> dict[str, Any]:
     """POST /api/admin/retention/holds/{review_id}.
 
-    Sets the per-review `legal_hold` flag (RUNBOOK.md -> "Placing and
-    releasing a legal hold"), records who placed it and why, and mirrors
-    the hold to the storage layer by tagging the review's S3 objects
-    `contract-toaster:legal-hold=true` so the bucket-policy backstop denies deletion
-    even if application logic is bypassed (#61 storage-layer enforcement).
+    Places a per-review legal hold (RUNBOOK.md -> "Placing and releasing a
+    legal hold"), atomically and audited (W6.5). Order:
 
-    Raises HTTPException(403) if the caller is not an admin, 400 if `reason`
-    is empty, 404 if the review does not exist.
+      1. Tag every object the review owns `contract-toaster:legal-hold=true`
+         (the bucket-policy backstop). A failure untags what was tagged and
+         answers 503 -- nothing changed.
+      2. Conditional row update (the review must still exist). A failure
+         untags and answers 404 / 503.
+      3. A catch-up tagging pass for any object written between 1 and 2
+         (best-effort: the row is already held, and the sweep re-reads it).
+      4. The audit row. A failed write puts the row and the tags back and
+         answers 503: a hold change never survives unaudited.
+
+    Raises HTTPException(403) for a non-admin, 400 for a blank reason, 404
+    for an unknown review, 503 when storage or the audit trail refused.
     """
     require_admin(caller_user_row, "Admin privilege required to place a legal hold.")
 
+    reason = reason.strip() if isinstance(reason, str) else ""
     if not reason:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -850,81 +1259,196 @@ def set_legal_hold(
 
     review = _get_review_or_404(review_id, dynamodb_resource)
     actor = caller_user_row.get("cognito_sub", "")
+    was_held = _is_legal_held(review)
+
+    targets = _hold_targets(review, s3_client)
+    tagged = _tag_or_503(s3_client, targets, True, review_id)
 
     reviews_table = _reviews_table(dynamodb_resource)
-    reviews_table.update_item(
-        Key={"review_id": review_id},
-        UpdateExpression=(
-            "SET legal_hold = :held, legal_hold_reason = :reason, "
-            "legal_hold_set_by = :actor, legal_hold_set_at = :now"
-        ),
-        ExpressionAttributeValues={
-            ":held": True,
-            ":reason": reason,
-            ":actor": actor,
-            ":now": str(int(now_epoch())),
-        },
-    )
+    try:
+        reviews_table.update_item(
+            Key={"review_id": review_id},
+            UpdateExpression=(
+                "SET legal_hold = :held, legal_hold_reason = :reason, "
+                "legal_hold_set_by = :actor, legal_hold_set_at = :now"
+            ),
+            ConditionExpression="attribute_exists(review_id)",
+            ExpressionAttributeValues={
+                ":held": True,
+                ":reason": reason,
+                ":actor": actor,
+                ":now": str(int(now_epoch())),
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        if not was_held:
+            _undo_tags(s3_client, tagged, True, review_id)
+        if _is_conditional_failure(exc):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Review not found."
+            ) from None
+        logger.warning("LEGAL_HOLD: row update failed for review %s; tags undone", review_id)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_HOLD_STORAGE_FAILED.format(verb="placed"),
+        ) from None
 
-    _tag_review_objects(review, s3_client, held=True)
+    # Catch-up: anything written for this review after step 1 read its row
+    # as unheld. Every later write tags itself (`tag_if_held`).
+    try:
+        latest = _hold_targets(review, s3_client)
+        _tag_targets(s3_client, [t for t in latest if t not in targets], True)
+    except Exception:  # noqa: BLE001 -- the row is held; this is the backstop
+        logger.warning("LEGAL_HOLD: catch-up tagging pass failed for review %s", review_id)
 
-    _write_audit_entry(
-        dynamodb_resource,
-        actor=actor,
-        action="legal_hold_set",
-        target=review_id,
-        target_type="review",
-        detail={"legal_hold_reason": reason},
-    )
+    try:
+        _audit(
+            dynamodb_resource,
+            actor=actor,
+            action="legal_hold_set",
+            target=review_id,
+            target_type="review",
+            detail={"legal_hold_reason": reason},
+        )
+    except Exception:  # noqa: BLE001
+        if not was_held:
+            _revert_row(reviews_table, review)
+            _undo_tags(s3_client, tagged, True, review_id)
+        logger.warning("LEGAL_HOLD: audit write failed for review %s; change undone", review_id)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=_HOLD_AUDIT_FAILED
+        ) from None
 
     return {"review_id": review_id, "legal_hold": True, "legal_hold_reason": reason}
 
 
+_HOLD_ROW_FIELDS = (
+    "legal_hold",
+    "legal_hold_reason",
+    "legal_hold_set_by",
+    "legal_hold_set_at",
+    "legal_hold_released_by",
+    "legal_hold_released_at",
+    "legal_hold_release_reason",
+)
+
+
+def _revert_row(reviews_table: Any, before: dict[str, Any]) -> None:
+    """Put the hold fields back exactly as `before` had them (best-effort --
+    reached only when the audit write already failed)."""
+    sets, removes, values = [], [], {}
+    for i, field in enumerate(_HOLD_ROW_FIELDS):
+        if field in before:
+            sets.append(f"{field} = :v{i}")
+            values[f":v{i}"] = before[field]
+        else:
+            removes.append(field)
+    expression = ""
+    if sets:
+        expression += "SET " + ", ".join(sets)
+    if removes:
+        expression += (" " if expression else "") + "REMOVE " + ", ".join(removes)
+    kwargs: dict[str, Any] = {"Key": {"review_id": before["review_id"]}, "UpdateExpression": expression}
+    if values:
+        kwargs["ExpressionAttributeValues"] = values
+    try:
+        reviews_table.update_item(**kwargs)
+    except Exception:  # noqa: BLE001
+        logger.error(
+            "LEGAL_HOLD: could not revert hold fields for review %s after an audit failure",
+            before["review_id"],
+        )
+
+
 def release_legal_hold(
     review_id: str,
+    reason: str,
     caller_user_row: dict[str, Any],
     dynamodb_resource: Any,
     s3_client: Any,
 ) -> dict[str, Any]:
-    """DELETE /api/admin/retention/holds/{review_id}.
+    """DELETE /api/admin/retention/holds/{review_id}. Body: {"reason": str}.
 
-    Releases a legal hold: clears the review row's `legal_hold` flag and
-    removes the storage-layer `contract-toaster:legal-hold` tag. Per RUNBOOK.md, release
-    does not purge immediately -- the item simply becomes eligible under the
-    current window at the next worker run.
+    Releases a legal hold, atomically and audited (W6.5), in the same order
+    as `set_legal_hold`: untag -> conditional row update (`legal_hold =
+    true`, so a concurrent release cannot double-record) -> audit. Any
+    failure puts back what was already changed. The release `reason` is
+    required and is recorded on the row and in the audit row. Release does
+    not purge: the review becomes eligible under its own window at the next
+    sweep (RUNBOOK.md).
 
-    Raises HTTPException(403) if the caller is not an admin, 404 if the
-    review does not exist.
+    Raises HTTPException(403) for a non-admin, 400 for a blank reason, 404
+    for an unknown review, 409 when the review is not held, 503 when storage
+    or the audit trail refused.
     """
     require_admin(caller_user_row, "Admin privilege required to release a legal hold.")
 
+    reason = reason.strip() if isinstance(reason, str) else ""
+    if not reason:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A reason is required to release a legal hold.",
+        )
+
     review = _get_review_or_404(review_id, dynamodb_resource)
+    if not _is_legal_held(review):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This review has no active legal hold.",
+        )
     actor = caller_user_row.get("cognito_sub", "")
 
+    untagged = _tag_or_503(s3_client, _hold_targets(review, s3_client), False, review_id)
+
     reviews_table = _reviews_table(dynamodb_resource)
-    reviews_table.update_item(
-        Key={"review_id": review_id},
-        UpdateExpression=(
-            "SET legal_hold = :held, legal_hold_released_by = :actor, "
-            "legal_hold_released_at = :now"
-        ),
-        ExpressionAttributeValues={
-            ":held": False,
-            ":actor": actor,
-            ":now": str(int(now_epoch())),
-        },
-    )
+    try:
+        reviews_table.update_item(
+            Key={"review_id": review_id},
+            UpdateExpression=(
+                "SET legal_hold = :released, legal_hold_released_by = :actor, "
+                "legal_hold_released_at = :now, legal_hold_release_reason = :reason"
+            ),
+            ConditionExpression="legal_hold = :held",
+            ExpressionAttributeValues={
+                ":released": False,
+                ":held": True,
+                ":actor": actor,
+                ":now": str(int(now_epoch())),
+                ":reason": reason,
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        _undo_tags(s3_client, untagged, False, review_id)
+        if _is_conditional_failure(exc):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This review has no active legal hold.",
+            ) from None
+        logger.warning("LEGAL_HOLD: release row update failed for review %s", review_id)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_HOLD_STORAGE_FAILED.format(verb="released"),
+        ) from None
 
-    _tag_review_objects(review, s3_client, held=False)
-
-    _write_audit_entry(
-        dynamodb_resource,
-        actor=actor,
-        action="legal_hold_released",
-        target=review_id,
-        target_type="review",
-        detail={},
-    )
+    try:
+        _audit(
+            dynamodb_resource,
+            actor=actor,
+            action="legal_hold_released",
+            target=review_id,
+            target_type="review",
+            detail={
+                "legal_hold_release_reason": reason,
+                "legal_hold_reason": review.get("legal_hold_reason", ""),
+            },
+        )
+    except Exception:  # noqa: BLE001
+        _revert_row(reviews_table, review)
+        _undo_tags(s3_client, untagged, False, review_id)
+        logger.warning("LEGAL_HOLD: audit write failed for release of %s; undone", review_id)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=_HOLD_AUDIT_FAILED
+        ) from None
 
     return {"review_id": review_id, "legal_hold": False}
 
