@@ -1,3 +1,5 @@
+import { toUserMessage } from './userMessage';
+
 /**
  * The three-state load every admin screen's fetches are modelled with.
  *
@@ -30,7 +32,11 @@ export type LoadState<T> =
   | { status: 'ready'; data: T }
   | { status: 'failed'; message: string };
 
-/** The `failed` state for an error of unknown shape, with a fallback. */
+/**
+ * The `failed` state for an error of unknown shape, with a fallback. Only a
+ * `UserFacingError`'s message is shown; a network `TypeError`, a `json()`
+ * `SyntaxError` or any other raw error renders `fallback` (QA 2026-10-31 W9).
+ */
 export function failedLoad(err: unknown, fallback: string): { status: 'failed'; message: string } {
-  return { status: 'failed', message: err instanceof Error ? err.message : fallback };
+  return { status: 'failed', message: toUserMessage(err, fallback) };
 }

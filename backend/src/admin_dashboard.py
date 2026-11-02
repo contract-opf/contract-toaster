@@ -739,7 +739,7 @@ RELEASE_ACTIVITY_MONTHS_BACK = 12
 # ALLOWLIST for one release-activity row. `actor` is the admin identity that
 # performed the act: that is the entire point of an activation audit trail,
 # and this route is admin-only. Nothing document-derived is present — the
-# audit row itself carries none (`playbook_versions._write_audit_entry`:
+# audit row itself carries none (`audit_log.write_audit_entry`:
 # "Identifiers, statuses, and hashes only — never document substance").
 _RELEASE_ACTIVITY_FIELDS = (
     "event_id",
@@ -801,8 +801,10 @@ COST_OUTLIER_LEDGER_ROWS_MAX = 10_000
 # `floor` (scripts/floor_judge.py) and
 # `cover_note` (backend/src/review_routes.py). A historical fifth, written by
 # the address-repair pass issue #628 deleted, may still sit on old ledger
-# rows and is priced by the same fall-through below. Only the critic pass is a
-# critic-model invocation, so it alone is billed at the critic rate;
+# rows and is priced by the same fall-through below. The critic pass and the
+# Floor judge are critic-model invocations (`scripts/review_spine.py` runs the
+# judge on `critic_model_id`, ADR 0001; QA W8 item 2 -- it used to be priced
+# at the reviewer's rate), so they are billed at the critic rate;
 # everything else falls into the primary slot of
 # `reviews.compute_actual_usd_cents_from_usage`, which is the only other
 # rate role that function exposes. A pass whose name is new to this tuple
@@ -810,13 +812,13 @@ COST_OUTLIER_LEDGER_ROWS_MAX = 10_000
 # at zero — the failure mode this set exists to prevent, because a review
 # whose extra passes cost nothing is understated against the median and so
 # escapes the runaway/injection flag.
-_CRITIC_RATE_PASSES = ("critic",)
+_CRITIC_RATE_PASSES = ("critic", "floor")
 
 
 def _month_partitions(now: float, months_back: int) -> list[str]:
     """`YYYY-MM` audit partitions, newest first, walking back `months_back`
     months from `now` — the partition key format
-    `playbook_versions._write_audit_entry` writes
+    `audit_log.write_audit_entry` writes
     (`time.strftime("%Y-%m", time.gmtime(now))`)."""
     year, month = (int(p) for p in time.strftime("%Y-%m", time.gmtime(now)).split("-"))
     partitions: list[str] = []

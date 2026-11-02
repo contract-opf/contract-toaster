@@ -59,16 +59,18 @@
  * a spinner at once (issue #439).
  */
 
-import { Fragment, useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import {
   authorizedFetch,
   DOCUMENT_PURGED_COPY,
+  DOWNLOAD_ERROR_COPY,
   downloadFailureMessage,
   friendlyDownloadError,
   friendlyErrorMessage,
   readErrorDetail,
   triggerBrowserDownload,
 } from './api';
+import { UserFacingError, toUserMessage } from './userMessage';
 // Imported, never re-declared: the epoch-string→locale formatter is the same
 // one the Diagnostics table already uses (reviews rows store `created_at` as a
 // string of epoch seconds, and boto3 can hand back a number). A second copy
@@ -92,6 +94,7 @@ import { canonicalStatus, describeOutcome } from './outcome';
 import {
   DISPOSITION_CHOICES,
   DISPOSITIONABLE_STATUSES,
+  DISPOSITION_ERROR_COPY,
   describeDisposition,
   recordDisposition,
   type AttorneyDisposition,
@@ -483,16 +486,28 @@ export default function ReviewHistory(): React.ReactElement {
    * first-page load: a stale token from a longer previous listing would let
    * "Show more" splice rows from a list that no longer exists onto the end of
    * one that does.
+   *
+   * Every call takes a ticket from `historyRequestSeq` (QA 2026-10-31 W9).
+   * Only the newest request may write: a first page that answers after a
+   * later reload, or a "Show more" page that answers after the listing it was
+   * continuing has been reloaded, is dropped rather than replacing or being
+   * spliced onto the listing that superseded it.
    */
+  const historyRequestSeq = useRef(0);
   const loadHistory = useCallback(async (token?: string) => {
+    const ticket = ++historyRequestSeq.current;
+    const stale = (): boolean => ticket !== historyRequestSeq.current;
     try {
       // scope=mine: this is a personal surface, not a cross-user one.
       const query = token
         ? `/api/reviews?scope=mine&next_token=${encodeURIComponent(token)}`
         : '/api/reviews?scope=mine';
       const response = await jsonFetch(query);
+      if (stale()) {
+        return;
+      }
       if (!response.ok) {
-        throw new Error(
+        throw new UserFacingError(
           friendlyErrorMessage(
             `GET /api/reviews?scope=mine returned HTTP ${response.status}`,
             "We couldn't load your history. Please try again.",
@@ -503,6 +518,9 @@ export default function ReviewHistory(): React.ReactElement {
         reviews?: HistoryRow[];
         next_token?: string | null;
       };
+      if (stale()) {
+        return;
+      }
       const page = data.reviews ?? [];
       // Rendered in the order the server sent them (newest first). No
       // client-side sort: `created_at` is a string epoch, and sorting it here
@@ -516,25 +534,26 @@ export default function ReviewHistory(): React.ReactElement {
       );
       setNextToken(data.next_token ?? null);
     } catch (err) {
+      if (stale()) {
+        return;
+      }
       // A failed "Show more" must not destroy the rows already on screen: the
       // reader loses nothing they already had, and the message says what
       // failed. Only a failed FIRST page replaces the view with the error.
       if (token) {
         setMoreError(
-          err instanceof Error
-            ? err.message
-            : friendlyErrorMessage(err, "We couldn't load more of your history."),
+          toUserMessage(err, "We couldn't load more of your history."),
         );
         return;
       }
       setLoad({
         status: 'failed',
         message:
-          err instanceof Error
-            ? err.message
-            : friendlyErrorMessage(err, "We couldn't load your history. Please try again."),
+          toUserMessage(err, "We couldn't load your history. Please try again."),
       });
     } finally {
+      // Unconditional: a superseded "Show more" still ends, and the reload
+      // that superseded it dropped its cursor, so nothing is left loading.
       setLoadingMore(false);
     }
   }, []);
@@ -613,7 +632,7 @@ export default function ReviewHistory(): React.ReactElement {
     try {
       const response = await jsonFetch(`/api/reviews/${reviewId}`);
       if (!response.ok) {
-        throw new Error(
+        throw new UserFacingError(
           friendlyErrorMessage(
             `GET /api/reviews/${reviewId} returned HTTP ${response.status}`,
             "We couldn't load the instructions for this review.",
@@ -635,9 +654,7 @@ export default function ReviewHistory(): React.ReactElement {
         [reviewId]: {
           status: 'failed',
           message:
-            err instanceof Error
-              ? err.message
-              : friendlyErrorMessage(err, "We couldn't load the instructions for this review."),
+            toUserMessage(err, "We couldn't load the instructions for this review."),
         },
       }));
     }
@@ -697,7 +714,7 @@ export default function ReviewHistory(): React.ReactElement {
         // rather than a raw detail or a "Please try again" that would be
         // false for exactly this shape of failure.
         const errorDetail = await readErrorDetail(response);
-        throw new Error(
+        throw new UserFacingError(
           downloadFailureMessage(
             response.status,
             errorDetail ??
@@ -707,13 +724,15 @@ export default function ReviewHistory(): React.ReactElement {
       }
       const data = (await response.json()) as { url?: string };
       if (!data.url) {
-        throw new Error(friendlyDownloadError(`GET /api/reviews/${reviewId}/${kind} returned no url`));
+        throw new UserFacingError(
+          friendlyDownloadError(`GET /api/reviews/${reviewId}/${kind} returned no url`),
+        );
       }
       triggerBrowserDownload(data.url);
     } catch (err) {
       setActionMessage((current) => ({
         ...current,
-        [reviewId]: err instanceof Error ? err.message : friendlyDownloadError(err),
+        [reviewId]: toUserMessage(err, DOWNLOAD_ERROR_COPY),
       }));
     } finally {
       setBusy((current) => ({ ...current, [reviewId]: false }));
@@ -752,7 +771,7 @@ export default function ReviewHistory(): React.ReactElement {
       } catch (err) {
         setDispositionMessage((current) => ({
           ...current,
-          [reviewId]: err instanceof Error ? err.message : "We couldn't record that.",
+          [reviewId]: toUserMessage(err, DISPOSITION_ERROR_COPY),
         }));
       } finally {
         setDispositionSaving((current) => ({ ...current, [reviewId]: null }));
@@ -799,7 +818,7 @@ export default function ReviewHistory(): React.ReactElement {
         },
       }));
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toUserMessage(error, "We couldn't load that. Please try again.");
       setCoverNoteErrorMessage((current) => ({ ...current, [reviewId]: message }));
     } finally {
       setCoverNoteLoading((current) => ({ ...current, [reviewId]: false }));
@@ -875,15 +894,12 @@ export default function ReviewHistory(): React.ReactElement {
           <div
             className="ct-row ct-row--between ct-row--wrap"
             style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
               padding: '0.75rem 1rem',
               gap: '0.75rem',
-              borderBottom: '1px solid var(--ct-border-subtle, rgba(255, 255, 255, 0.08))',
+              borderBottom: '1px solid var(--ct-border)',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <div className="ct-row ct-row--wrap">
               <span style={{ fontSize: 'var(--ct-text-sm)', fontWeight: 600, color: 'var(--ct-text-muted)' }}>
                 Filter:
               </span>
@@ -901,9 +917,9 @@ export default function ReviewHistory(): React.ReactElement {
                     type="button"
                     data-testid={`history-filter-${filterKey}`}
                     style={{
-                      background: active ? 'var(--ct-accent, #646cff)' : 'var(--ct-bg-subtle, rgba(255,255,255,0.06))',
-                      color: active ? '#fff' : 'var(--ct-text, #fff)',
-                      border: active ? '1px solid var(--ct-accent, #646cff)' : '1px solid var(--ct-border-subtle, rgba(255,255,255,0.1))',
+                      background: active ? 'var(--ct-accent)' : 'var(--ct-neutral-bg)',
+                      color: active ? 'var(--ct-accent-contrast)' : 'var(--ct-text)',
+                      border: active ? '1px solid var(--ct-accent)' : '1px solid var(--ct-neutral-border)',
                       padding: '0.25rem 0.65rem',
                       borderRadius: '16px',
                       fontSize: 'var(--ct-text-sm)',
@@ -918,22 +934,14 @@ export default function ReviewHistory(): React.ReactElement {
               })}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <div className="ct-row ct-row--wrap" style={{ gap: '0.75rem' }}>
               <input
                 type="search"
+                className="ct-input"
                 placeholder="Search history…"
                 data-testid="history-search-input"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                style={{
-                  padding: '0.25rem 0.6rem',
-                  fontSize: 'var(--ct-text-sm)',
-                  borderRadius: '6px',
-                  background: 'var(--ct-bg, #1e1e1e)',
-                  border: '1px solid var(--ct-border, rgba(255,255,255,0.15))',
-                  color: 'inherit',
-                  width: '14rem',
-                }}
               />
               {/* The server pages at 25 and sends no total, so with a cursor
                   outstanding `load.data.length` is how many are LOADED, not
@@ -941,7 +949,6 @@ export default function ReviewHistory(): React.ReactElement {
                   history to a reviewer with 26. */}
               <span
                 className="ct-muted"
-                style={{ fontSize: 'var(--ct-text-sm)', whiteSpace: 'nowrap' }}
                 data-testid="history-count"
               >
                 {nextToken

@@ -3,6 +3,7 @@
   "githubOwner": "your-github-org",
   "githubRepo": "contract-toaster",
   "hostedDomain": "company.com",
+  "allowedEmailDomains": "company.com",
   "appDomain": "contract-toaster.company.com",
   "adminEmail": "gc@company.com",
   "alarmsEmail": "legal-eng@company.com",

@@ -19,7 +19,11 @@ threat model, the order is:
   4. Zip-bomb limits — entry-count cap and uncompressed-size / compression-
      ratio cap, computed from the ZIP central directory (declared sizes)
      without ever inflating entries. Enforced before any part of the archive
-     is decompressed, including [Content_Types].xml.
+     is decompressed, including [Content_Types].xml. From the same metadata,
+     an archive naming one part twice -- exactly, or up to case, since OPC
+     part names are case-insensitive -- is refused (`duplicate_zip_entry`,
+     `check_part_names`), and every later part-name test (`.xml`, `.rels`)
+     is case-insensitive.
   5. MIME verification — [Content_Types].xml must declare a WordprocessingML
      main document. The declared Content-Type and .docx extension are hints,
      never proof. This is the first step that decompresses a part, so it
@@ -473,6 +477,42 @@ def _check_zip_bomb_limits(zf: zipfile.ZipFile) -> None:
             )
 
 
+def check_part_names(zf: zipfile.ZipFile) -> None:
+    """Refuse an archive in which two entries name the same part (QA
+    remediation W7-5). Central-directory metadata only; nothing inflated.
+
+    A ZIP central directory may list one name twice. `zipfile.read(name)`
+    returns the LAST such entry, while another reader -- Word included -- is
+    free to take the FIRST, so every check here inspected one copy while a
+    consumer could open the other: a first `word/_rels/document.xml.rels`
+    carrying an external image, or a first `word/document.xml` declaring a
+    DOCTYPE, rode past a clean second copy. OPC part names are also
+    case-INSENSITIVE (ECMA-376 Part 2, 9.1.1.1), so `word/document.xml` and
+    `WORD/Document.xml` are the same part twice. Both shapes are refused
+    outright -- no legitimate writer emits either.
+
+    Public, and shared with `scripts/redline_generate.run_output_ooxml_scan`,
+    so a generated redline is held to the same rule as an upload."""
+    seen: set[str] = set()
+    for info in zf.infolist():
+        key = info.filename.casefold()
+        if key in seen:
+            raise HostileFileError(
+                reason_code="duplicate_zip_entry",
+                detail=(
+                    "Archive names the same part more than once (part names are "
+                    "compared case-insensitively). The upload was rejected."
+                ),
+            )
+        seen.add(key)
+
+
+def _has_suffix(name: str, suffix: str) -> bool:
+    """Case-insensitive part-name suffix test (W7-5): OPC part names are
+    case-insensitive, so `document.xml.RELS` is a relationships part."""
+    return name.casefold().endswith(suffix)
+
+
 # ---------------------------------------------------------------------------
 # Stage 3 — AV scan (fail closed)
 #
@@ -553,7 +593,7 @@ def _parse_xml_hardened(
 
 def _check_all_xml_parts_are_entity_safe(zf: zipfile.ZipFile) -> None:
     for info in zf.infolist():
-        if not info.filename.endswith(".xml") and not info.filename.endswith(".rels"):
+        if not _has_suffix(info.filename, ".xml") and not _has_suffix(info.filename, ".rels"):
             continue
         # Bound the amount we ever inflate for a single part while checking
         # entity-safety, independent of the earlier whole-archive ratio
@@ -590,7 +630,7 @@ def _check_no_macro_enabled_parts(zf: zipfile.ZipFile) -> None:
 
 
 def _iter_relationship_parts(zf: zipfile.ZipFile) -> list[str]:
-    return [name for name in zf.namelist() if name.endswith(".rels")]
+    return [name for name in zf.namelist() if _has_suffix(name, ".rels")]
 
 
 def _check_relationships(zf: zipfile.ZipFile) -> None:
@@ -727,7 +767,7 @@ def _owner_part_for_rels_part(rels_part: str) -> str:
         prefix, tail = "", rels_part[len("_rels/") :]
     else:
         prefix, tail = rels_part[:idx], rels_part[idx + len(_RELS_MARKER) :]
-    if not tail.endswith(".rels"):
+    if not _has_suffix(tail, ".rels"):
         return ""
     tail = tail[: -len(".rels")]
     return f"{prefix}/{tail}" if prefix else tail
@@ -1036,6 +1076,11 @@ def run_upload_gauntlet(
         # [Content_Types].xml is caught here, before the MIME check below
         # ever calls zf.read() on it.
         _check_zip_bomb_limits(zf)
+
+        # Also central-directory metadata only (W7-5): every check below
+        # reads a part by NAME, so two entries sharing one name (or one name
+        # up to case) would let a check and a consumer read different bytes.
+        check_part_names(zf)
 
         _check_content_types_is_wordprocessingml(zf)
 

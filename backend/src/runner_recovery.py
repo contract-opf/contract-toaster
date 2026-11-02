@@ -45,7 +45,7 @@ page of in-flight rows recovers all of them rather than the first megabyte.
 ## Audit posture
 
 Identifiers and counts only, never review substance — the same posture as
-`src/retention.py::_write_audit_entry` and ARCHITECTURE.md → "Audit posture".
+`src/audit_log.py::write_audit_entry` and ARCHITECTURE.md → "Audit posture".
 The log line carries a COUNT, never an id list and never a document detail.
 """
 
@@ -54,9 +54,9 @@ from __future__ import annotations
 import logging
 import os
 import time
-import uuid
 from typing import Any
 
+from src import audit_log
 from src import reviews as reviews_module
 
 logger = logging.getLogger(__name__)
@@ -76,48 +76,11 @@ def _reviews_table(dynamodb_resource: Any) -> Any:
     return dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
 
 
-def _write_audit_entry(
-    dynamodb_resource: Any,
-    *,
-    review_id: str,
-    detail: dict[str, Any],
-) -> None:
-    """Append one immutable audit row for a recovered review.
-
-    Best-effort and never raised through: this runs inside process startup,
-    and an unreachable (or unconfigured) audit table must not stop the API
-    from booting — the same posture as
-    `src/review_routes.py::_write_audit_row`, including its missing-table
-    early return. The warning log is the durable record when the write
-    itself fails.
-    """
-    table_name = os.environ.get("AUDIT_TABLE")
-    if not table_name:
-        return
-    now = time.time()
-    event_id = uuid.uuid4().hex
-    item: dict[str, Any] = {
-        "partition": time.strftime("%Y-%m", time.gmtime(now)),
-        "timestamp": f"{int(now)}#{event_id}",
-        "event_id": event_id,
-        "actor": RUNNER_RECOVERY_ACTOR,
-        "action": RUNNER_RESTARTED_AUDIT_ACTION,
-        "target": review_id,
-        "target_type": "review",
-        "outcome": "success",
-        # Issue #253: the attribute the audit table's `review_id-index` GSI
-        # is keyed by, so docs/audit-queries.md's "full history of one
-        # review" query returns this event too.
-        "review_id": review_id,
-        **detail,
-    }
-    try:
-        dynamodb_resource.Table(table_name).put_item(Item=item)
-    except Exception:  # audit is best-effort; never gate the boot on it
-        logger.warning(
-            "RUNNER_RECOVERY: failed to write the audit row for a recovered review",
-            exc_info=True,
-        )
+# The recovered review's audit row is written by `audit_log.write_audit_entry`
+# with `best_effort=True`: this runs inside process startup, and an
+# unreachable (or unconfigured) audit table must not stop the API from
+# booting. `target_type="review"` stamps `review_id` for the audit table's
+# `review_id-index` (issue #253).
 
 
 def _row_epoch(row: dict[str, Any]) -> int | None:
@@ -269,9 +232,13 @@ def recover_orphaned_reviews(
                 reviews_module.settle_reservation_for_cancel(
                     str(review_id), dynamodb_resource
                 )
-                _write_audit_entry(
+                audit_log.write_audit_entry(
                     dynamodb_resource,
-                    review_id=str(review_id),
+                    actor=RUNNER_RECOVERY_ACTOR,
+                    action=RUNNER_RESTARTED_AUDIT_ACTION,
+                    target=str(review_id),
+                    target_type="review",
+                    best_effort=True,
                     detail={
                         "reason": reviews_module.RUNNER_RESTARTED_REASON,
                         "previous_status": str(status_value),

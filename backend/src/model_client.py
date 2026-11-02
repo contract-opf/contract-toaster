@@ -454,6 +454,67 @@ def widen_output_budget(current: int, ceiling: int) -> int:
     return min(current + OUTPUT_BUDGET_WIDEN_STEP_TOKENS, int(ceiling))
 
 
+def openrouter_content_budget_ceiling(
+    model_id: str, policy: dict[str, Any] | None = None
+) -> int:
+    """The largest CONTENT budget one request for `model_id` may ask for
+    (QA W8 item 4): the model's declared output cap minus the reasoning
+    allowance `OpenRouterModelClient.invoke` adds on top of the content
+    budget.
+
+    `max_tokens` on the wire is `content + reasoning_allowance`, and it is
+    the `max_tokens` the provider holds against the model's declared cap.
+    Sizing the content budget against the bare cap let a long document ask
+    for `128,000 + 4,000 = 132,000` from a model that accepts 128,000 -- a
+    provider 400 on every document over ~44,800 estimated tokens. Both review
+    passes size and widen against THIS ceiling, so the content budget and
+    the reasoning allowance together never pass the cap; `invoke()` clamps
+    again as a backstop for any other caller.
+
+    Never below 1: a policy that pinned a reasoning allowance at or above
+    the cap is a misconfiguration, and a 1-token content budget fails loudly
+    as truncation rather than sending a request the provider must refuse.
+    An unreadable policy file reads as no allowance, the same fail-closed
+    posture `openrouter_model_max_output_tokens` takes for the cap itself.
+    """
+    cap = openrouter_model_max_output_tokens(model_id, policy)
+    try:
+        reasoning = openrouter_reasoning_max_tokens(model_id, policy) if model_id else 0
+    except (OSError, ValueError):
+        reasoning = 0
+    return max(1, cap - max(0, reasoning))
+
+
+# QA W8 item 1: the chars-per-token ratio a CANCELLED stream's billed usage
+# is estimated at when the provider never got to send its terminal usage
+# chunk. It is the calibrated input ratio the review passes already gate on
+# (`primary_review_pass.INPUT_CHARS_PER_TOKEN_ESTIMATE`, issue #144, ~7%
+# high) -- and it is applied to the output side too, where real prose runs
+# nearer 4 chars/token. Fewer chars per token means MORE tokens: the estimate
+# errs toward counting too much spend against the daily cap, never too little.
+CANCELLED_STREAM_CHARS_PER_TOKEN_ESTIMATE = 2.5
+
+
+def _estimate_tokens_from_chars(chars: int) -> int:
+    if chars <= 0:
+        return 0
+    return int(-(-chars // CANCELLED_STREAM_CHARS_PER_TOKEN_ESTIMATE))
+
+
+def reported_usage_from_failure(exc: BaseException | None) -> dict[str, int] | None:
+    """The provider-REPORTED usage `invoke()` attached to an exception it
+    raised (QA W8 item 1), for a review pass to ledger an attempt that was
+    billed but did not return -- `None` when the exception carries none, or
+    carries only an estimate (`usage_estimated`, a cancelled stream whose
+    usage chunk never arrived). An estimate is counted against the daily cap
+    by the client's own `cumulative_usage`, but it is never written into the
+    ledger's `actual_*` columns, which mean "the provider said so"."""
+    if exc is None or getattr(exc, "usage_estimated", False):
+        return None
+    usage = getattr(exc, "usage", None)
+    return usage if isinstance(usage, dict) else None
+
+
 def _resolved_admin_model_id(
     admin_model_id: str | None, role: str, policy: dict[str, Any] | None = None
 ) -> str | None:
@@ -714,7 +775,12 @@ class ModelInvocationRecord:
     # cannot report usage at all (an offline fake with no `last_usage`
     # attribute) or the attempt's invoke() raised before returning anything
     # to measure usage from -- so a persisted-cost query never double-counts
-    # a failed attempt's spend as if it were a prior attempt's. This is
+    # a failed attempt's spend as if it were a prior attempt's. QA W8 item 1
+    # narrowed "raised": a truncated or empty-content 200 raises WITH the
+    # provider-reported usage attached (`ModelInvocationError.usage`), and
+    # that attempt's own figure is recorded here; only a raise that carries
+    # no reported usage (a transport fault, a cancelled stream's estimate)
+    # still records None. This is
     # narrower than "genuinely zero tokens vs. not measured": a REAL
     # OpenRouter response that omits or malforms its `usage` block is still
     # recorded as 0, not None -- `parse_openrouter_usage` (this module,
@@ -1295,9 +1361,22 @@ class ModelInvocationError(RuntimeError):
     frontend turns the token into prose. No raw `HTTP <n>` ever reaches
     user-facing copy (issue #425)."""
 
-    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        usage: dict[str, int] | None = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        # QA W8 item 1: the provider-reported usage of the attempt that
+        # raised this, when that attempt reached the provider and was billed
+        # (a truncated or empty-content 200). `None` for every failure that
+        # carries no usage -- a transport fault, a non-200 status. The review
+        # passes ledger it when `invoke()` raised, so a billed failure is
+        # priced instead of being recorded as unmeasured.
+        self.usage = usage
 
 
 class ModelContextLengthExceededError(ModelInvocationError):
@@ -1493,9 +1572,15 @@ class _CancelledMidStream(Exception):
     the original exception is re-raised untouched, because it is the
     caller's control-flow signal, not a transport failure."""
 
-    def __init__(self, original: BaseException) -> None:
+    def __init__(
+        self, original: BaseException, partial: "_StreamedCompletion | None" = None  # noqa: UP037
+    ) -> None:
         super().__init__("cancelled mid-stream")
         self.original = original
+        # QA W8 item 1: what the stream had accumulated when the stop
+        # landed, so `invoke()` can still count the tokens the provider
+        # billed for the part of the generation that did happen.
+        self.partial = partial
 
 
 @dataclass
@@ -1539,7 +1624,7 @@ def _accumulate_openrouter_stream(
             try:
                 cancel_checkpoint()
             except BaseException as exc:  # re-raised verbatim by invoke()
-                raise _CancelledMidStream(exc) from exc
+                raise _CancelledMidStream(exc, acc) from exc
 
         if isinstance(raw_line, bytes):
             raw_line = raw_line.decode("utf-8", errors="replace")
@@ -1694,7 +1779,13 @@ class OpenRouterModelClient:
     `BedrockModelClient.invoke` Protocol) is unaffected.
 
     `cumulative_usage` (issue #415) is the RUNNING total across every
-    successful `invoke()` on this instance -- same `{"input_tokens": int,
+    BILLED `invoke()` attempt on this instance -- a successful return, and
+    (QA W8 item 1) a truncated or empty-content 200 and a stream the caller
+    cancelled part-way, which raise but were still billed (the cancelled
+    case is estimated when the provider sent no usage; see
+    `_count_cancelled_stream`). `usage_by_model` splits the same totals by
+    model id so settlement can price each model at its own rate (QA W8
+    item 2). Same `{"input_tokens": int,
     "output_tokens": int}` shape as `last_usage` (so it drops straight into
     `compute_actual_usd_cents_from_usage`), but ACCUMULATED rather than
     overwritten. One client instance already spans the primary and critic
@@ -1764,11 +1855,84 @@ class OpenRouterModelClient:
         # paragraph. Never None (unlike last_usage) so a settlement caller
         # can always sum it.
         self.cumulative_usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
+        # QA W8 item 2: the same running totals, split by the model id each
+        # call was made against -- one client spans the primary, critic and
+        # Floor calls of a review, and those can run on models with very
+        # different rates. Settlement (`pipeline_runner.
+        # _actual_cents_from_client`) prices each model's tokens at that
+        # model's rate instead of pricing the grand total at the reviewer's.
+        self.usage_by_model: dict[str, dict[str, int]] = {}
         # Issue #514 -- response-side provenance from the most recent
         # successful call, reset per call (never sticky: attributing one
         # generation's ids to the next call is worse than recording nothing).
         self.last_served_model: str | None = None
         self.last_generation_id: str | None = None
+
+    def _accumulate_usage(self, model_id: str, usage: dict[str, int]) -> None:
+        """Add one billed attempt's usage to `cumulative_usage` and to
+        `usage_by_model[model_id]` -- the two running totals settlement reads.
+        Called for EVERY attempt the provider billed: a successful return,
+        and (QA W8 item 1) a truncated, empty or cancelled one, which used
+        to raise before this ran and so were priced at $0. `reasoning_tokens`
+        is deliberately not accumulated (see the class docstring)."""
+        per_model = self.usage_by_model.setdefault(
+            model_id, {"input_tokens": 0, "output_tokens": 0}
+        )
+        for total in (self.cumulative_usage, per_model):
+            total["input_tokens"] += int(usage.get("input_tokens", 0) or 0)
+            total["output_tokens"] += int(usage.get("output_tokens", 0) or 0)
+            # Issue #154: the prompt-cache counts accumulate too, so
+            # settlement prices cache writes and reads at their own rates.
+            for cache_key in ("cache_creation_input_tokens", "cache_read_input_tokens"):
+                if cache_key in usage:
+                    total[cache_key] = total.get(cache_key, 0) + int(usage[cache_key] or 0)
+
+    def _billed_usage(self, model_id: str, streamed: "_StreamedCompletion") -> dict[str, int]:  # noqa: UP037
+        """Parse a completed stream's usage chunk and count it -- the
+        accounting half of a 200 response, done BEFORE `invoke()` decides
+        whether to return the content or raise on it."""
+        usage = parse_openrouter_usage({"usage": streamed.usage})
+        self._accumulate_usage(model_id, usage)
+        return usage
+
+    def _count_cancelled_stream(
+        self, model_id: str, payload: dict[str, Any], cancelled: "_CancelledMidStream"  # noqa: UP037
+    ) -> None:
+        """Count a stream the caller stopped part-way (QA W8 item 1) and
+        attach that usage to the caller's own exception as `usage`.
+
+        Reported usage is used when the provider got as far as sending it.
+        Otherwise it is ESTIMATED: the whole request's messages as input (the
+        provider bills the prompt in full once it starts generating) and
+        everything that streamed back as output, both at
+        `CANCELLED_STREAM_CHARS_PER_TOKEN_ESTIMATE`, and the exception is
+        flagged `usage_estimated=True` so no ledger records the figure as
+        provider-reported. Never raises: this runs on the way out of a
+        cancellation, which must reach the caller untouched."""
+        try:
+            partial = cancelled.partial
+            if partial is not None and isinstance(partial.usage, dict):
+                usage = parse_openrouter_usage({"usage": partial.usage})
+                estimated = False
+            else:
+                sent_chars = len(json.dumps(payload.get("messages") or [], ensure_ascii=False))
+                received_chars = (
+                    len(partial.content) + len(partial.tool_arguments) if partial is not None else 0
+                )
+                usage = {
+                    "input_tokens": _estimate_tokens_from_chars(sent_chars),
+                    "output_tokens": _estimate_tokens_from_chars(received_chars),
+                }
+                estimated = True
+            self._accumulate_usage(model_id, usage)
+        except Exception:  # accounting must never mask the cancellation
+            logger.warning("Could not count the usage of a cancelled stream.", exc_info=True)
+            return
+        try:
+            cancelled.original.usage = usage  # type: ignore[attr-defined]
+            cancelled.original.usage_estimated = estimated  # type: ignore[attr-defined]
+        except Exception:  # noqa: BLE001, S110 - an exception type that refuses attributes
+            pass
 
     def capabilities(self, model_id: str) -> dict[str, bool]:
         """Capability descriptor (issue #562): reads
@@ -1894,6 +2058,16 @@ class OpenRouterModelClient:
         # `openrouter_reasoning_max_tokens` and
         # `ModelInvocationRecord.reasoning_tokens`).
         reasoning_allowance = openrouter_reasoning_max_tokens(model_id, policy)
+        # QA W8 item 4: `max_tokens` (content + reasoning) never exceeds the
+        # model's declared output cap. The review passes already size their
+        # content budget against `openrouter_content_budget_ceiling`
+        # (cap - reasoning); this clamp is the backstop for every other
+        # caller -- a request over the cap is a provider 400, not a longer
+        # answer. The content budget gives way, never the reasoning
+        # allowance, which is what keeps the content from being starved.
+        declared_output_cap = openrouter_model_max_output_tokens(model_id, policy)
+        content_budget = max(1, min(int(max_output_tokens), declared_output_cap - reasoning_allowance))
+        max_tokens = min(content_budget + reasoning_allowance, declared_output_cap)
 
         # Issue #568: capability-gated pass-through-or-flatten for a
         # possibly-list-shaped `user_prompt` -- see `_prepare_message_
@@ -1919,7 +2093,7 @@ class OpenRouterModelClient:
                 {"role": "system", "content": system_content},
                 {"role": "user", "content": user_content},
             ],
-            "max_tokens": max_output_tokens + reasoning_allowance,
+            "max_tokens": max_tokens,
             # Issue #677: when the policy pins a NON-ZERO allowance, ask the
             # provider for that much thinking EXPLICITLY. Without this the
             # allowance only widens `max_tokens` and the provider still chooses
@@ -2048,6 +2222,14 @@ class OpenRouterModelClient:
                 # re-raised verbatim so it is never mistaken for (and retried
                 # as) a dropped connection. `from None` keeps the internal
                 # wrapper out of the traceback.
+                #
+                # QA W8 item 1: the provider bills the prompt and every token
+                # generated before the stop, so that spend is counted first.
+                # A stop almost always lands before the terminal usage chunk,
+                # so the usage is usually ESTIMATED from what was sent and
+                # what had streamed back -- on the high side, see
+                # `CANCELLED_STREAM_CHARS_PER_TOKEN_ESTIMATE`.
+                self._count_cancelled_stream(model_id, payload, cancelled)
                 raise cancelled.original from None
             except ModelInvocationError:
                 # A malformed streamed chunk is a deterministic rejection, the
@@ -2101,11 +2283,19 @@ class OpenRouterModelClient:
                 # below so a truncated-and-therefore-empty response is
                 # recorded as the more specific, more actionable truncation
                 # cause rather than a generic empty answer.
+                # QA W8 item 1: a truncated or empty 200 was still billed --
+                # count its usage BEFORE deciding to raise on it. These two
+                # raises used to come first, so every truncated attempt (and
+                # the truncation retry exists precisely to follow one) was
+                # priced at $0 against the daily cap. The usage rides on the
+                # exception so the review pass can ledger it too.
+                billed_usage = self._billed_usage(model_id, streamed)
                 if finish_reason == "length":
                     raise ModelOutputTruncatedError(
                         "OpenRouter truncated the response before it finished "
                         f"(finish_reason={finish_reason!r}, HTTP {status}).",
                         status_code=status,
+                        usage=billed_usage,
                     )
 
                 # Issue #527: fail closed on a null/empty `content` instead of
@@ -2117,6 +2307,7 @@ class OpenRouterModelClient:
                     raise ModelEmptyContentError(
                         f"OpenRouter returned an empty response body (HTTP {status}).",
                         status_code=status,
+                        usage=billed_usage,
                     )
 
                 # Real usage capture (issue #268) -- best-effort: a provider
@@ -2127,22 +2318,10 @@ class OpenRouterModelClient:
                 # rather than inventing a "streamed responses have no usage"
                 # state: the usage-only terminal chunk is re-wrapped into the
                 # body shape the same parser has always read.
-                self.last_usage = parse_openrouter_usage({"usage": streamed.usage})
-                # Issue #415: accumulate onto the running instance total --
-                # see the class docstring's `cumulative_usage` paragraph.
-                # Additive, never overwritten, so a retry that eventually
-                # succeeds still counts every attempt that genuinely reached
-                # the provider and got billed, not just the last one.
-                self.cumulative_usage["input_tokens"] += self.last_usage["input_tokens"]
-                self.cumulative_usage["output_tokens"] += self.last_usage["output_tokens"]
-                # Issue #154: the prompt-cache counts accumulate too, so
-                # settlement prices cache writes and reads at their own rates
-                # -- see the class docstring's `cumulative_usage` paragraph.
-                for cache_key in ("cache_creation_input_tokens", "cache_read_input_tokens"):
-                    if cache_key in self.last_usage:
-                        self.cumulative_usage[cache_key] = (
-                            self.cumulative_usage.get(cache_key, 0) + self.last_usage[cache_key]
-                        )
+                # Already counted onto `cumulative_usage` /
+                # `usage_by_model` above (issue #415: additive, never
+                # overwritten, so every billed attempt counts).
+                self.last_usage = billed_usage
                 # Issue #514: what the provider says it SERVED, next to what
                 # we asked for. Assigned unconditionally (both keys are None
                 # when absent) so a provider that reports ids on one call and

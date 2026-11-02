@@ -57,8 +57,10 @@ from fastapi import HTTPException, status
 logger = logging.getLogger(__name__)
 
 try:  # production runs `src.main`; tests put backend/src on sys.path
+    from src import audit_log
     from src.authz import is_admin
 except ImportError:  # pragma: no cover
+    import audit_log  # type: ignore[no-redef]
     from authz import is_admin  # type: ignore[no-redef]
 
 
@@ -194,10 +196,6 @@ PATCHABLE_FIELDS = {"is_admin", "status"}
 
 def _users_table(dynamodb_resource: Any):
     return dynamodb_resource.Table(os.environ["USERS_TABLE"])
-
-
-def _audit_table(dynamodb_resource: Any):
-    return dynamodb_resource.Table(os.environ["AUDIT_TABLE"])
 
 
 def _sync_status_table(dynamodb_resource: Any):
@@ -485,14 +483,14 @@ def update_user(
     after.update(updates)
     after["updated_at"] = int(now)
 
-    _write_audit_entry(
-        dynamodb_resource=dynamodb_resource,
+    audit_log.write_audit_entry(
+        dynamodb_resource,
         actor=caller_sub,
         action="user_lifecycle_update",
         target=target_sub,
-        before=before,
-        after=after,
-        now_epoch=now,
+        target_type="user",
+        detail=_lifecycle_audit_detail(before, after),
+        now=now,
         event_id=event_id,
     )
 
@@ -505,45 +503,17 @@ def update_user(
     return public_user_view(after)
 
 
-def _write_audit_entry(
-    dynamodb_resource: Any,
-    actor: str,
-    action: str,
-    target: str,
-    before: dict[str, Any],
-    after: dict[str, Any],
-    now_epoch: float,
-    event_id: str | None = None,
-) -> None:
-    """Append an immutable audit row for a user admin-flag/status change.
-
-    Follows the `audit` table field dictionary in ARCHITECTURE.md ->
-    "Storage" / "Audit posture": actor, action, target, before/after —
-    identifiers and lifecycle values only, never document substance (this
-    module never touches document content, so there is nothing substantive
-    to accidentally leak here).
-    """
-    table = _audit_table(dynamodb_resource)
-    event_id = event_id or uuid.uuid4().hex
-    partition = time.strftime("%Y-%m", time.gmtime(now_epoch))
-    timestamp = f"{int(now_epoch)}#{event_id}"
-
-    table.put_item(
-        Item={
-            "partition": partition,
-            "timestamp": timestamp,
-            "event_id": event_id,
-            "actor": actor,
-            "action": action,
-            "target": target,
-            "target_type": "user",
-            "before_status": before.get("status"),
-            "after_status": after.get("status"),
-            "before_is_admin": before.get("is_admin", False),
-            "after_is_admin": after.get("is_admin", False),
-            "outcome": "success",
-        },
-    )
+def _lifecycle_audit_detail(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
+    """The before/after fields of a user admin-flag/status audit row --
+    lifecycle values only, never document substance (ARCHITECTURE.md ->
+    "Storage" / "Audit posture"). The row itself is written by
+    `audit_log.write_audit_entry`, the one audit writer."""
+    return {
+        "before_status": before.get("status"),
+        "after_status": after.get("status"),
+        "before_is_admin": before.get("is_admin", False),
+        "after_is_admin": after.get("is_admin", False),
+    }
 
 
 def get_sync_status(

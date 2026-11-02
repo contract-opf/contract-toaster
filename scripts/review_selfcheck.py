@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """The closing self-check: re-read the FINISHED REDLINE against what bound it.
 
-`opf_prompt.BINDING_INTRO` ends every Binding block with a promise to the
-model: "Every entry here is re-read against your finished redline by the
-closing self-check." This module is that re-read, and until it existed the
-promise was prose. The only thing checking whether the output honoured the
-rules was the model that wrote it.
+`opf_prompt.BINDING_INTRO` used to end every Binding block with a promise
+to the model: "Every entry here is re-read against your finished redline by
+the closing self-check." This module is that re-read. Because it is not
+wired (below), QA W8 item 7 (2026-10-31) REMOVED that sentence from the
+prompt: the Binding block now promises nothing this module would have to
+keep. Wiring this module is the moment to restore it.
 
 ## NOT YET WIRED — read this before assuming it runs
 
@@ -16,11 +17,13 @@ of the OPF knowledge path (`scripts/opf_prompt.py`, `scripts/review_knowledge
 pipeline -- `scripts/primary_review_pass.py` says so explicitly at its Floor-
 block comment ("explicitly not composed through this module").
 
-So the `BINDING_INTRO` promise above is currently latent, not broken: the
-block that makes it is not reached by a live review either. Wiring the two
-together is a single deliberate step, and it must be done as a pair -- wiring
-the prompt path without this module would start making the model a promise
-nothing keeps.
+This paragraph used to say the `BINDING_INTRO` promise was "latent, not
+broken" because the Binding block was not reached by a live review either.
+That stopped being true: the OPF path composes the Binding block into every
+OPF review (`review_spine.run_review` -> `opf_prompt`), so the model WAS
+being promised a re-read that never ran. The sentence is gone from the
+prompt (above). Wiring this module and restoring the sentence is still a
+single deliberate step, done as a pair.
 
 The wiring itself (threading a `ReviewKnowledge` through `run_review` into
 both model passes, plus the registry/reviews-side plumbing) lives unmerged on
