@@ -38,7 +38,7 @@ on:
 jobs:
   cost-model-lint:
     name: Cost-model invariants (token caps / reservation / unit economics)
-    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.CI_RUNS_ON || 'ubuntu-latest' }}
 
     steps:
       - name: Checkout

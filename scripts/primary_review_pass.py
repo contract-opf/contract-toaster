@@ -4540,7 +4540,11 @@ def run_primary_pass(
     # as its own local because the truncation retry widens against it, which
     # is why this is two calls rather than one wrapper; and because nothing
     # can pass a budget in, no attempt can ask for more than the cap.
-    output_budget_ceiling = _model_client.openrouter_model_max_output_tokens(model_id)
+    #
+    # QA W8 item 4: the ceiling is the model's declared cap MINUS the
+    # reasoning allowance `invoke()` adds on top of the content budget, so
+    # content + reasoning never asks the provider for more than the cap.
+    output_budget_ceiling = _model_client.openrouter_content_budget_ceiling(model_id)
     attempt_max_output_tokens = _model_client.output_budget_for_document(
         estimate_tokens(doc_text), output_budget_ceiling
     )
@@ -4554,6 +4558,10 @@ def run_primary_pass(
             cancel_checkpoint()
         outcome = "failure"
         raw_response = None
+        # QA W8 item 1: the exception THIS attempt's invoke() raised, if any
+        # -- a truncated or empty response carries the usage the provider
+        # billed for it, which the ledger write in `finally` records.
+        attempt_failure: BaseException | None = None
         context_length_rejected = False
         replacement_text_failures: list[str] = []
         # Issue #643: THIS attempt's structured schema rejections, when it
@@ -4726,7 +4734,8 @@ def run_primary_pass(
             last_error = parsed_or_error
             correction = parsed_or_error
             outcome = "retry" if attempt < attempts_allowed else "failure"
-        except _model_client.ModelOutputTruncatedError:
+        except _model_client.ModelOutputTruncatedError as truncation_error:
+            attempt_failure = truncation_error
             # Issue #527 follow-up: `finish_reason == "length"` used to
             # propagate straight out of this pass and out of run_review,
             # killing the whole review on ONE truncated response and throwing
@@ -4772,6 +4781,11 @@ def run_primary_pass(
             # get its answer wrong, it ran out of room. Telling it "your
             # previous response was rejected" would invite it to shorten its
             # legal judgment, which is the one thing this retry must not buy.
+            # QA W8 item 7: and a correction an EARLIER attempt earned (a
+            # schema or transcript rejection) is cleared too -- the retry
+            # re-sends the base prompt with more room, not a stale complaint
+            # about an answer this attempt never gave.
+            correction = None
             attempt_max_output_tokens = widened
             continue
         except _model_client.ModelContextLengthExceededError:
@@ -4790,6 +4804,12 @@ def run_primary_pass(
             # rejection on attempt 2+ would otherwise be ledgered under
             # whatever attempt 1 failed with instead of its own cause.
             last_error = "context_length_exceeded: prompt exceeded the model's context window"
+        except BaseException as failure:
+            # QA W8 item 1: remembered for the ledger write below, then
+            # re-raised untouched (an empty response, a cancellation, a
+            # transport fault -- none of them is this loop's to handle).
+            attempt_failure = failure
+            raise
         finally:
             # Issue #414: real usage is only trustworthy when THIS attempt's
             # invoke() actually returned -- `raw_response is not None` is
@@ -4801,8 +4821,16 @@ def run_primary_pass(
             # offline fake without issue #268's `last_usage` attribute
             # legitimately lacks it, and a ledger write must never be the
             # thing that raises.
+            #
+            # QA W8 item 1: an attempt that RAISED can still have been billed
+            # (a truncated or empty 200). Its usage then rides on the
+            # exception itself -- never on `last_usage` -- so it is this
+            # attempt's own figure, and the attempt is priced instead of
+            # being recorded as unmeasured.
             actual_usage = (
-                getattr(model_client, "last_usage", None) if raw_response is not None else None
+                getattr(model_client, "last_usage", None)
+                if raw_response is not None
+                else _model_client.reported_usage_from_failure(attempt_failure)
             )
             # LEDGER every attempt -- success, retry, or terminal failure
             # alike -- via this finally path (ARCHITECTURE.md step 15 /

@@ -42,7 +42,7 @@ on:
 jobs:
   prompt-manifest-lint:
     name: Prompt-manifest invariants (per-pass blocks / critic input / size cap)
-    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.CI_RUNS_ON || 'ubuntu-latest' }}
 
     steps:
       - name: Checkout

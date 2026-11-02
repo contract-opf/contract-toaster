@@ -105,7 +105,7 @@ identifiers, version, and length (`backend/src/main.py`'s save route logs
 `playbook_id`/`version`/`len(text)`, never `text` itself), and the audit
 row this module appends on every save carries the same identifiers-only
 shape every other admin-write audit row in this codebase does (see
-`playbook_versions._write_audit_entry`) -- never document substance.
+`audit_log.write_audit_entry`) -- never document substance.
 
 Environment variables:
   PLAYBOOK_INSTRUCTIONS_TABLE  — this module's table (PK: playbook_id,
@@ -117,11 +117,15 @@ Environment variables:
 
 import os
 import time
-import uuid
 from hashlib import sha256
 from typing import Any
 
 from boto3.dynamodb.conditions import Key
+
+try:  # production runs `src.main`; tests put backend/src on sys.path
+    from src import audit_log
+except ImportError:  # pragma: no cover
+    import audit_log  # type: ignore[no-redef]
 
 # "A page of prose, not a document" (issue #482).
 MAX_INSTRUCTIONS_TEXT_CHARS = 10_000
@@ -160,10 +164,6 @@ def _instructions_table(dynamodb_resource: Any):
     return dynamodb_resource.Table(os.environ["PLAYBOOK_INSTRUCTIONS_TABLE"])
 
 
-def _audit_table(dynamodb_resource: Any):
-    return dynamodb_resource.Table(os.environ["AUDIT_TABLE"])
-
-
 def now_epoch() -> float:
     return time.time()
 
@@ -176,34 +176,6 @@ def hash_instructions_text(text: str) -> str:
     the text that produced it without reaching into this module's
     internals."""
     return "sha256:" + sha256(text.encode("utf-8")).hexdigest()
-
-
-def _write_audit_entry(
-    dynamodb_resource: Any,
-    actor: str,
-    detail: dict[str, Any],
-    now_epoch_value: float | None = None,
-) -> None:
-    """Append an immutable audit row for a standing-instructions save.
-    Identifiers, version, and length only -- never the instructions text
-    itself. Same shape as `playbook_versions._write_audit_entry`."""
-    table = _audit_table(dynamodb_resource)
-    now = now_epoch_value if now_epoch_value is not None else now_epoch()
-    event_id = uuid.uuid4().hex
-    partition = time.strftime("%Y-%m", time.gmtime(now))
-    timestamp = f"{int(now)}#{event_id}"
-
-    item: dict[str, Any] = {
-        "partition": partition,
-        "timestamp": timestamp,
-        "event_id": event_id,
-        "actor": actor,
-        "action": "playbook_instructions_save",
-        "target_type": "playbook_instructions",
-        "outcome": "success",
-    }
-    item.update(detail)
-    table.put_item(Item=item)
 
 
 def get_current_instructions(
@@ -312,16 +284,18 @@ def save_instructions(
             current_version=int(latest["version"]) if latest else current_version
         ) from exc
 
-    _write_audit_entry(
+    audit_log.write_audit_entry(
         dynamodb_resource=dynamodb_resource,
         actor=saved_by,
+        action="playbook_instructions_save",
+        target_type="playbook_instructions",
         detail={
             "target": f"{playbook_id}#{next_version}",
             "playbook_id": playbook_id,
             "version": next_version,
             "text_length": len(text),
         },
-        now_epoch_value=now,
+        now=now,
     )
 
     return item

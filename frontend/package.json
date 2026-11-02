@@ -17,6 +17,7 @@
     "audit:contrast": "node scripts/contrast-audit.mjs",
     "audit:focus": "node scripts/focus-audit.mjs",
     "audit:layout": "node scripts/layout-audit.mjs",
+    "audit:css-refs": "node scripts/css-refs-audit.mjs",
     "audit:bundle": "node scripts/bundle-budget.mjs",
     "lint": "eslint .",
     "lint:baseline": "node scripts/eslint-baseline.mjs",

@@ -29,7 +29,6 @@
 #                             or org references live in git). If the packages
 #                             are private, the host also needs a GHCR pull
 #                             credential.
-#   DEMO_TOKEN_SECRET       - session-signing secret for demo password auth.
 #   OPENROUTER_API_KEY      - OPTIONAL fallback. MODEL_PROVIDER=openrouter runs
 #                             the REAL review chain and there is NO mock
 #                             fallback: with no key reachable, every review
@@ -57,10 +56,15 @@
 
 x-aws-emulator-env: &aws-emulator-env
   AWS_REGION: us-east-1
-  # MinIO/DDB-Local accept any non-empty credentials; these must match MinIO's
-  # root user/password below.
-  AWS_ACCESS_KEY_ID: local
-  AWS_SECRET_ACCESS_KEY: localsecret
+  # These must match MinIO's root user/password below (DynamoDB-Local, in
+  # -sharedDb mode, accepts any credentials). They are Coolify magic variables:
+  # Coolify generates a random value for each on first save and keeps it in the
+  # service's environment, so nobody types or sees them. NEVER put literal
+  # values here. MinIO is published on its own domain so presigned downloads
+  # work, and a default pair from this public file would open every stored
+  # contract to anyone who read it. A host other than Coolify must set both.
+  AWS_ACCESS_KEY_ID: ${SERVICE_USER_MINIO}
+  AWS_SECRET_ACCESS_KEY: ${SERVICE_PASSWORD_64_MINIO}
   S3_ENDPOINT_URL: http://minio:9000
   DYNAMODB_ENDPOINT_URL: http://dynamodb-local:8000
 
@@ -109,8 +113,19 @@ services:
     image: ghcr.io/${GHCR_OWNER}/contract-toaster-dts-minio:RELEASE.2025-04-08T15-41-24Z
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
-      MINIO_ROOT_USER: local
-      MINIO_ROOT_PASSWORD: localsecret
+      # The same generated pair as x-aws-emulator-env above (see there).
+      MINIO_ROOT_USER: ${SERVICE_USER_MINIO}
+      MINIO_ROOT_PASSWORD: ${SERVICE_PASSWORD_64_MINIO}
+    # Healthchecks: Coolify shows them, and deploy/dts/autopull/ waits for
+    # "healthy" before it records a rollout (and rolls back if it never comes).
+    # Each probe uses a tool the image already has: python3 in the backend,
+    # busybox wget in the alpine-based frontend and MinIO images.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 15s
     restart: unless-stopped
     volumes:
       - minio-data:/data
@@ -141,6 +156,9 @@ services:
       # cadence there). Set PURGE_SWEEP_ENABLED=0 to turn it off without
       # editing code.
       PURGE_SWEEP_INTERVAL_SECONDS: "${PURGE_SWEEP_INTERVAL_SECONDS:-3600}"
+      # Optional GC alarm on a retroactive retention reduction (QA W6.8): an
+      # Uptime Kuma push URL; empty sends nothing. See deploy/dts/README.md.
+      RETENTION_ALERT_URL: "${RETENTION_ALERT_URL:-}"
       MODEL_PROVIDER: openrouter
       AUTH_MODE: password
       # Issue #469: TRUST_PROXY_HEADERS is deliberately left UNSET here
@@ -172,7 +190,13 @@ services:
       # Downloads are presigned for a browser-reachable host, not the internal
       # `minio` DNS name. Set this to the minio service's public domain.
       S3_PUBLIC_ENDPOINT_URL: ${S3_PUBLIC_ENDPOINT_URL}
-      DEMO_TOKEN_SECRET: ${DEMO_TOKEN_SECRET:?set DEMO_TOKEN_SECRET}
+      # Signs every sign-in session. A Coolify magic variable, like the MinIO
+      # pair above: Coolify generates a random 64-character value on first
+      # save, so no operator types one and no usable value lives in this
+      # public file. The backend refuses to boot on an unset, short or
+      # placeholder value (backend/src/startup_checks.py). A host other than
+      # Coolify must set it (`openssl rand -hex 32`).
+      DEMO_TOKEN_SECRET: ${SERVICE_PASSWORD_64_DEMOTOKEN}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       # Issue #418 built this, issue #673 turned it on: the OpenRouter
       # request carries the review object as a forced tool call instead of
@@ -185,12 +209,24 @@ services:
     depends_on:
       bootstrap:
         condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=4)"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 40s
     restart: unless-stopped
 
   frontend:
     image: ghcr.io/${GHCR_OWNER}/contract-toaster-dts-frontend:latest
     depends_on:
       - backend
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 15s
     restart: unless-stopped
 
 volumes:

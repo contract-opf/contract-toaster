@@ -51,13 +51,14 @@ Clearing it in the UI reverts the instance to `OPENROUTER_API_KEY`.
 
 ```bash
 cp deploy/dts/.env.example deploy/dts/.env
-# edit deploy/dts/.env: set DEMO_TOKEN_SECRET (e.g. `openssl rand -hex 32`)
+# edit deploy/dts/.env: set DEMO_TOKEN_SECRET to the output of `openssl rand -hex 32`
 # optionally set OPENROUTER_API_KEY, or leave it blank and use the admin tab
 
 docker compose -f deploy/dts/docker-compose.yml --env-file deploy/dts/.env up --build
 ```
 
-- SPA: <http://localhost:8081> (sign in with **admin/admin** or **user/user**)
+- SPA: <http://localhost:8081> (sign in with **admin/admin** or **user/user**
+  on a fresh deployment; see [Demo users](#demo-users-seeded-once))
 - API: <http://localhost:8080>
 - MinIO console: <http://localhost:9001> (local / localsecret)
 
@@ -81,15 +82,89 @@ need `S3_PUBLIC_ENDPOINT_URL` set to that host's externally-reachable address
 instead (e.g. behind an nginx path-route or a real DNS name) — not needed for
 the local Phase 1 quickstart this README covers.
 
+### MinIO on a public domain: credentials and an edge rule
+
+In `docker-compose.coolify.yml`, MinIO sits on its own public domain, because
+the browser follows presigned download URLs straight to it. Two consequences:
+
+**Its login must be secret.** The local compose uses `local` / `localsecret`
+(fine on a laptop). The Coolify compose names Coolify magic variables
+instead, `${SERVICE_USER_MINIO}` and `${SERVICE_PASSWORD_64_MINIO}`. Coolify
+generates them on first save, and MinIO's root login and the backend's
+`AWS_*` pair both read them, so they always match. Changing the pair on an
+existing deployment keeps every stored object. Links presigned before the
+restart stop working, and new ones work. On any other host, set both
+variables yourself. `tests/test_dts_minio_credentials.py` fails if a literal
+value comes back.
+
+**Only presigned downloads need the public domain.** The backend reaches MinIO
+on the internal network, and presigns only `GetObject`. Its links carry
+`Signature=` and `Expires=` (or `X-Amz-Signature=` and `X-Amz-Expires=` with
+SigV4). If the domain is behind Cloudflare, a custom WAF rule (action:
+**Block**) can refuse everything else. That covers uploads, deletes, listings,
+admin calls and any request signed with a header:
+
+```
+(http.host eq "<minio-domain>" and not (
+  http.request.method in {"GET" "HEAD"}
+  and http.request.uri.query contains "Signature="
+  and http.request.uri.query contains "Expires="
+  and not ends_with(http.request.uri.path, "/")
+))
+```
+
+This is defence in depth, not a replacement for the secret login. Someone
+holding the login could still presign a GET for themselves.
+
+## The session secret (`DEMO_TOKEN_SECRET`)
+
+`DEMO_TOKEN_SECRET` signs every sign-in session. With `AUTH_MODE` set to
+`password` or `both` (both compose files set `password`), the backend refuses
+to start if it is unset, shorter than 32 bytes, a known placeholder (such as
+the value `.env.example` used to ship), or one repeated character. The error
+says which, never the value.
+
+- **Local compose:** set it in `deploy/dts/.env`. `.env.example` ships it
+  blank; generate one with `openssl rand -hex 32`.
+- **Coolify compose:** it is the Coolify magic variable
+  `${SERVICE_PASSWORD_64_DEMOTOKEN}`, generated on first save like the MinIO
+  pair above. Nobody types or sees it. On any other host, set it yourself.
+
+**Rotation:** a deployment that kept the placeholder will now refuse to boot.
+That is intended. Set a generated secret (`openssl rand -hex 32`, or let
+Coolify generate it) and redeploy. Changing the secret signs everyone out;
+they sign in again.
+
+Sessions can also be ended without touching the secret. Each user row carries
+a token version, checked on every request: changing your own password,
+signing out, or deleting a user (and re-creating the username) ends that
+user's earlier sessions. Signing out ends the user's sessions on every
+device, not just the current browser.
+
 ## What the bootstrap does
 
 `bootstrap.py` (a one-shot compose service the backend waits on) creates the
 DynamoDB tables (+ the `reviews.owner_sub-index`, `reviews.status-index` and
 `reviews.playbook_hash-index` GSIs) and the uploads/outputs
 buckets, seeds any registry-declared mock-pipeline redline fixture into MinIO,
-seeds the demo users, and installs + activates the playbook the image ships
-with — **Synthetic NDA Sample**, the only contract type a fresh deployment
-serves.
+seeds the demo users (first bootstrap only, below), and installs + activates
+the playbook the image ships with — **Synthetic NDA Sample**, the only
+contract type a fresh deployment serves.
+
+### Demo users, seeded once
+
+The bootstrap runs on every rollout, but it seeds the demo users `admin/admin`
+and `user/user` only on a deployment's **first** bootstrap. It records a
+`bootstrap:seeded` row in `AUTH_SETTINGS_TABLE` afterwards and never seeds
+again. A deployment that already has any user when this runs for the first
+time is marked without seeding. The admin-toggleable auth-mode row is written
+only when absent, so a redeploy no longer resets an admin's sign-in choice.
+
+Both demo accounts must change their password before they can do anything
+else (issue #586). **On a public deployment, remove them:** sign in as
+`admin`, change its password, add your own admin on the *Users* tab, sign
+in as that admin, and delete `admin` and `user` there. They do not come back
+on the next rollout.
 
 It seeds no other playbook row. Issue #515 removed a hardcoded, tenant-named
 orphan row that every fresh deployment used to write: the catalog is
@@ -112,6 +187,7 @@ exactly as they are everywhere else.
 |---|---|---|
 | `PURGE_SWEEP_INTERVAL_SECONDS` | `3600` | How often to sweep. Retention windows are measured in days, so an hour is fine enough that "purged on schedule" is true to within a rounding error; sweeping more often just re-scans the table. |
 | `PURGE_SWEEP_ENABLED` | `1` | Set to `0` to stop the cadence without editing code. |
+| `RETENTION_ALERT_URL` | *(empty)* | Optional. The General Counsel alarm for a retroactive retention reduction (data-handling.md purge invariant 5). Set it to an Uptime Kuma *Push* monitor URL, as for `AUTOPULL_HEARTBEAT_URL`; each time an admin parks a reduction the backend sends one `status=down&msg=Retention reduction requested: ...` push, so the monitor goes red and notifies whoever it notifies (point it at Legal). Ids, window values and the apply-at time only -- never the reason. Empty sends nothing; the backend still writes the `RETENTION_REDUCTION_REQUESTED` log line. A failed push never fails the request. Use a separate push monitor from the autopull heartbeat: the autopull's next healthy run would turn a shared monitor green again. |
 
 It does **not** run on the AWS target, where
 `infra/lambda/purge_worker/handler.py` owns the cadence — starting both would
@@ -143,6 +219,18 @@ the failure this check exists to make loud (issue #654: `USER_PREFERENCES_TABLE`
 was missing from the live compose, the container started anyway, and
 `GET /api/me/preferences` 500'd on every request while the Review tab just
 showed `Internal (unavailable)` — indistinguishable from an unbuilt feature).
+
+## Spend, concurrency and sign-in variables
+
+Three settings the compose files leave at their defaults. Set them in the
+backend service's environment (`.env` locally, Coolify's environment
+variables there) when the default does not fit.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DAILY_SPEND_CAP_USD_CENTS` | `2000` ($20/day) | The daily spend ceiling every review reserves against before it starts. An admin can override it without a restart on the **Settings** tab (`POST /api/admin/spend-cap`); clearing that override falls back to this value. Each review reserves its worst case, so at the default only about one review is in flight at a time (RUNBOOK.md, "Adjusting the daily spend ceiling"). |
+| `PIPELINE_MAX_CONCURRENCY` | `5` | How many reviews the in-process runner works on at once; more wait in its queue. `GET /api/admin/health` reports occupancy against it. The spend reservation usually binds first. |
+| `ALLOWED_EMAIL_DOMAINS` | unset | Comma-separated email domains a **Cognito** sign-in may come from (the email and Google `hd` claims are both checked). Not used for password sign-in, so this target does not need it unless `AUTH_MODE` is `sso` or `both`; unset there, every Cognito request is refused with `503`. On AWS it is required; the CDK stack sets it from the `allowedEmailDomains` context and refuses to synthesize without it. |
 
 ## Our own legal entities (`ENTITY_ROSTER_TABLE`, issue #678)
 
@@ -254,10 +342,103 @@ release notes for format changes before upgrading a volume that holds data.
 still publishes it, both on Docker Hub and on
 `public.ecr.aws/aws-dynamodb-local/aws-dynamodb-local`, so it stays as it is.
 
+## Automatic roll-forward from the box
+
+`.github/workflows/dts-image-publish.yml` publishes the backend and frontend
+images on every green `main`: only when the `CI pipeline` run it follows
+succeeded for a `push` to this repository's `main` (or on a manual dispatch).
+Its `deploy` job then calls Coolify's API from a
+GitHub-hosted runner. If the Coolify host is behind Cloudflare with **Bot
+Fight Mode** on, that call never arrives: Cloudflare answers with a challenge
+page (HTTP 403, "Just a moment..."). Neither an Access service token nor a WAF
+skip rule gets past it on the free plan.
+
+`autopull/` reverses the direction. A systemd timer on the box runs
+`coolify-autopull` every five minutes. Each run:
+
+1. Pulls the watched `:latest` images with the box's existing GHCR login.
+2. Checks that the images agree on `org.opencontainers.image.revision`. If
+   they don't, the publish run is half-way through, so it waits for the next
+   run.
+3. When the digests have changed since the last rollout, and
+   `AUTOPULL_GITHUB_REPO` is set, asks the GitHub compare API whether the new
+   revision is on that repository's `main` (`identical` or `behind`). If it is
+   not, or the API cannot be reached, it **refuses**: it re-tags the watched
+   refs back to the digests last rolled out, does not restart, and exits 1
+   (so the heartbeat reports `down`). The next run asks again.
+4. Then POSTs Coolify's
+   `/api/v1/services/<uuid>/restart?latest=true` on `127.0.0.1:8000`.
+5. Waits (`AUTOPULL_VERIFY_SECONDS`, default 420) until the service's backend
+   and frontend containers run the new revision and report `healthy` (the
+   compose healthchecks). Only then does it record the rollout.
+6. If they never get there, **rolls back**: it re-tags the watched refs to the
+   digests last rolled out, which are still in the box's image store, and
+   restarts with `latest=false`, so Coolify recreates the containers from them
+   without pulling. The bad digests go in `deployed.bad`. Later runs hold at the
+   previous revision until a newer image is published.
+
+Nothing inbound is needed, and Cloudflare stays as it is. The first run only
+records the current digests; it never restarts. A refused restart is retried
+on the next run.
+
+**Install (once, as root on the Coolify host):**
+
+```bash
+git clone --depth 1 https://github.com/<owner>/contract-toaster /tmp/ct
+install -m 0755 /tmp/ct/deploy/dts/autopull/coolify-autopull.sh /usr/local/bin/coolify-autopull
+install -m 0644 /tmp/ct/deploy/dts/autopull/coolify-autopull.service /tmp/ct/deploy/dts/autopull/coolify-autopull.timer /etc/systemd/system/
+install -m 0600 /tmp/ct/deploy/dts/autopull/coolify-autopull.env.example /etc/coolify-autopull.env
+# edit /etc/coolify-autopull.env: the two image refs, the service UUID, an API token,
+# and AUTOPULL_GITHUB_REPO (<owner>/<repo>; left as the placeholder, every rollout is refused)
+systemctl daemon-reload
+systemctl start coolify-autopull.service   # first run: records digests, no restart
+journalctl -u coolify-autopull -n 5         # expect "initialised at revision …"
+systemctl enable --now coolify-autopull.timer
+```
+
+Then set the repository variable `DTS_DEPLOY_MODE=pull`. The workflow's
+`deploy` job then skips instead of failing at the edge on every run.
+
+**Operate it:**
+
+- `journalctl -u coolify-autopull` shows each rollout ("rolled forward to
+  <sha>"), each deferral, and each refusal.
+- `systemctl list-timers coolify-autopull.timer` shows the next run.
+- To force a rollout of what is already published, run
+  `echo stale > /var/lib/coolify-autopull/deployed` and then
+  `systemctl start coolify-autopull.service`. Deleting the file instead only
+  re-initialises it, without a restart.
+- After a rollback the journal says `holding at the previous revision`. Fix
+  forward on `main`, and the next image rolls out on its own. To retry the
+  same image, delete `/var/lib/coolify-autopull/deployed.bad`.
+- **Roll back by hand** to any published commit: in the Coolify compose, change
+  the backend and frontend `:latest` to `:<short-sha>` (every publish also
+  pushes that tag), then click Restart. Put `:latest` back to resume auto-pull.
+- **Alerting.** Set `AUTOPULL_HEARTBEAT_URL` to an Uptime Kuma *Push* monitor's
+  URL (heartbeat interval about 15 minutes). Every run reports `up` or `down`
+  with its last log line, so a failed rollout, a rollback and a stopped timer
+  all raise an alert. A run with nothing to roll out still checks that the
+  backend and frontend containers are running and healthy, so the same
+  monitor is the service's liveness check. An HTTP monitor from outside would
+  only see the edge's sign-in page.
+
+**Upgrade the script** the same way you installed it: re-run the three
+`install` lines from a fresh checkout. Leave the env file and the state files
+as they are, except to add `AUTOPULL_GITHUB_REPO=<owner>/<repo>` to an env file
+written before that setting existed; without it the revision-on-`main` check
+is skipped.
+
+**Coolify API access.** The script authenticates with a bearer token. If
+Coolify's API is limited to listed IPs (Settings → API), allow the address
+Coolify sees for a request from the host itself: the Docker bridge gateway,
+usually `172.17.0.1`, or the `coolify` network's gateway. Otherwise the restart
+is refused with a 403, which the journal shows.
+
+`tests/test_dts_autopull.py` runs the script against fake `docker` and `curl`
+binaries.
+
 ## Not yet included (follow-ups)
 
-- **Phase 2** real pipeline wiring + OpenRouter pricing branch in the spend
-  model.
 - **`Strict-Transport-Security` is yours to set at the TLS hop.**
   `nginx.conf` serves the SPA's security headers (CSP, `nosniff`,
   `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy` —

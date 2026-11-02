@@ -241,9 +241,14 @@ BINDING_INTRO = (
     "direction.\n"
     "A Floor invariant phrased in terms of \"the counterparty\" is DIRECTIONAL: the "
     "counterparty is the other party to this agreement, never us, and a term that "
-    "runs in our favour does not violate such a rule.\n"
-    "Every entry here is re-read against your finished redline by the closing self-check."
+    "runs in our favour does not violate such a rule."
 )
+# QA W8 item 7: this intro used to close with "Every entry here is re-read
+# against your finished redline by the closing self-check." No live review
+# runs that self-check (`scripts/review_selfcheck.py` is built, tested and
+# NOT wired into `review_spine.run_review`), so the sentence was a promise to
+# the model that nothing kept. It is removed rather than left latent; when the
+# self-check is wired, the promise can come back in the same change.
 
 GUIDANCE_INTRO = (
     "WEIGHTED GUIDANCE (approved review policy, `should` rules).\n"
@@ -1303,8 +1308,9 @@ def _binding_block(
     (see BINDING_INTRO: a Floor invariant is unwaivable; a policy `must` in
     tension is FLAGGED for an attorney, never silently overridden in either
     direction -- shipping both under the old intro instructed the model to do
-    the one thing playbooks/policy.schema.json forbids). The closing self-check
-    and the G2 attribution manifest need it because they cite entries apart.
+    the one thing playbooks/policy.schema.json forbids). The (not yet wired)
+    closing self-check and the G2 attribution manifest need it because they
+    cite entries apart.
 
     Policy `text` is rendered VERBATIM. `tests/test_policy_document.py` enforces
     that attorney-override determinations live IN a rule's text -- search it for

@@ -404,6 +404,24 @@ if [ -f pyproject.toml ] && grep -q '^\[tool\.ruff\]' pyproject.toml; then
     echo "CHECK: FAIL - mypy reported errors outside the mypy-baseline.txt modules." >&2
     exit 1
   fi
+
+  # DOCS STAGE (QA 2026-10-31, W11). CLAUDE.md has always described this gate
+  # as running docs-lint; until now only CI's docs-lint workflow did, and
+  # `docs_sync.py audit` ran nowhere at all. Both take about a second, so they
+  # sit here with the other fast pre-steps rather than in the suite below.
+  # tests/test_docs_lint_links.py fails if either call is removed or moved
+  # below the suite.
+  echo "CHECK: docs-lint (stale terms, ledger, links and anchors) …"
+  if ! python3 scripts/docs-lint.py; then
+    echo "CHECK: FAIL - scripts/docs-lint.py reported a finding." >&2
+    exit 1
+  fi
+
+  echo "CHECK: docs index (docs_sync audit) …"
+  if ! python3 tools/docs_sync.py audit; then
+    echo "CHECK: FAIL - docs/INDEX.md is out of step; see AGENTS.md for each finding code." >&2
+    exit 1
+  fi
 else
   echo "CHECK: lint pre-step SKIPPED - no [tool.ruff] in a root pyproject.toml, so this is not the contract-toaster tree."
 fi
