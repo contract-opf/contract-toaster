@@ -84,6 +84,13 @@ export interface AppStackProps extends cdk.NestedStackProps {
    * Defaults to a placeholder for local synth.
    */
   readonly cognitoAppClientId?: string;
+  /**
+   * Comma-separated email domains a Cognito sign-in may come from, from the
+   * required `allowedEmailDomains` CDK context (validated in
+   * contract-toaster-stack.ts). Injected as ALLOWED_EMAIL_DOMAINS; unset, the
+   * backend refuses every Cognito-authenticated request with 503.
+   */
+  readonly allowedEmailDomains: string;
 }
 
 /**
@@ -693,6 +700,12 @@ export class AppStack extends cdk.NestedStack {
       {
         name: 'COGNITO_APP_CLIENT_ID',
         value: cognitoAppClientId,
+      },
+      {
+        // backend/src/auth.py: the email / Google `hd` allowlist for Cognito
+        // sign-ins. Fail-closed (503) when absent, so it is required context.
+        name: 'ALLOWED_EMAIL_DOMAINS',
+        value: props.allowedEmailDomains,
       },
       {
         name: 'AWS_REGION',

@@ -51,7 +51,7 @@ The first deploy of an environment requires steps that won't be needed again.
     cdk bootstrap aws://<account-id>/us-east-1
     ```
 
-5. **Set stack parameters.** Copy `infra/cdk.context.example.json` to `infra/cdk.context.json` and fill in `githubOwner`, `alarmsEmail`, `appDomain`, `adminEmail` (the GC's `@company.com` address), and `hostedDomain` — see `infra/README.md` "Deploy identity context" for what each controls. `infra/cdk.context.json` is **git-ignored**; it holds this deployment's real tenant values and is never committed (issue #409).
+5. **Set stack parameters.** Copy `infra/cdk.context.example.json` to `infra/cdk.context.json` and fill in `githubOwner`, `alarmsEmail`, `appDomain`, `adminEmail` (the GC's `@company.com` address), `hostedDomain`, and `allowedEmailDomains` (the email domains Cognito sign-ins may come from) — see `infra/README.md` "Deploy identity context" for what each controls. `infra/cdk.context.json` is **git-ignored**; it holds this deployment's real tenant values and is never committed (issue #409).
 
 6. **First deploy.** Provision infrastructure first, then promote an image (the two are separate concerns now — infra is CDK, the running image is a pinned digest):
     ```bash
@@ -186,7 +186,9 @@ cdk deploy --context imageDigest=sha256:<digest> --context env=dev
 cdk deploy --context imageDigest=sha256:<digest> --context env=prod
 ```
 
-Promotion verifies the image signature before App Runner is repointed; an unsigned or tampered digest is refused. Confirm the authenticated `/version` endpoint (or App Runner deployment metadata) reports the digest you promoted. Production is only ever mutated by an explicit promotion of a named digest — nothing auto-mutates it.
+Promotion verifies the image signature before App Runner is repointed; an unsigned or tampered digest is refused.
+
+**Promoting to prod.** The GitHub Actions `ci-pipeline.yml` promote job refuses `promote=prod` (its STEP G, before it takes AWS credentials). CI builds and signs into `contract-toaster-api-dev` only, while prod's App Runner service pulls from `contract-toaster-api-prod` in the prod account, and the workflow has no role that can copy an image and its cosign signature across accounts — promoting anyway would audit and pin a digest prod cannot pull. Until a cross-account copy role exists, an operator holding credentials for both accounts copies the image *and* its signature with `cosign copy <dev-registry>/contract-toaster-api-dev@sha256:<digest> <prod-registry>/contract-toaster-api-prod@sha256:<digest>` (the digest is unchanged by the copy), then runs the prod account's CodeBuild promote project with `IMAGE_DIGEST=sha256:<digest>` — it verifies the signature *in the prod repository*, writes the audit row and updates the SSM parameter — and finally `cdk deploy --context env=prod --context imageDigest=sha256:<digest>`. Promoting to dev through the workflow is unaffected. Confirm the authenticated `/version` endpoint (or App Runner deployment metadata) reports the digest you promoted. Production is only ever mutated by an explicit promotion of a named digest — nothing auto-mutates it.
 
 For infrastructure changes (`infra/`):
 
@@ -472,6 +474,41 @@ investigations and their parameters; with one it runs that investigation
 (key/index access only, `limit` clamped). There is **no Audit screen and no
 CSV export** in the admin UI yet (**PLANNED**); call the route directly, or
 query the DynamoDB table with the catalogue's queries.
+
+### Audit table key change
+
+The audit table's partition key is `partition` (the `YYYY-MM` month bucket)
+and its sort key `timestamp` (`"{epoch}#{event_id}"`) — the shape every
+writer puts and the DTS table has always had. AWS stacks synthesized before
+this change declared the partition key as `pk`, so on those deployments
+**every backend audit write failed** (DynamoDB rejects an item missing the
+table's key attribute) and the table holds only the CI promotion rows, which
+were written in the old `pk` shape.
+
+A key change is a table replacement, and CloudFormation will not replace a
+custom-named table in place, so the CDK gives the table a new logical ID
+(`AuditLogTable`). The old resource leaves the stack under its `RETAIN`
+policy — it is not deleted — and the new one is created under the same name,
+which only succeeds once the old table is gone. On an environment deployed
+before the change:
+
+1. **Back it up.** `aws dynamodb create-backup --table-name contract-toaster-audit-<env> --backup-name audit-pk-shape-<date>`.
+   Record the backup ARN on the change ticket; this backup is the only
+   copy of the old promotion rows. (PITR does not survive table deletion
+   beyond its own 35-day window; the on-demand backup does.)
+2. **Delete the old table** with an operator role. The immutability
+   policy denies `UpdateItem`/`DeleteItem` to every principal, not
+   `DeleteTable`; treat this as a break-glass-grade action and record it on
+   the ticket.
+3. **Deploy** (`cdk deploy`). The new table, its GSIs and its stream are
+   created; the stream ARN changes, so anything consuming
+   `AuditTableStreamArn` picks up the new output on the same deploy.
+4. **Verify** with an audited admin action, then `GET /api/audit` — the row
+   must come back.
+
+The old rows are not migrated: they are promotion records in a shape the
+audit query API does not read. Restore the backup to a side table if one is
+ever needed. A fresh environment needs none of this.
 
 ### Changing document retention
 
