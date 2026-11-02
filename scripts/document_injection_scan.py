@@ -78,14 +78,28 @@ The lexical rules are not duplicated: `_scan_text` from `opf_injection_scan` is
 the single implementation, called here against document paragraphs. One rule
 set, one place to update, and a rule added for playbook ingestion protects
 uploaded contracts for free.
+
+## It reads what the model reads (QA remediation W7-3)
+
+The rules used to run over regexes of the raw `word/document.xml`, and four
+encodings the XML parser undoes walked straight past them: a character
+reference (`&#73;gnore`), WordprocessingML bound to a namespace prefix other
+than `w:`, a phrase split across runs, and text hidden through a STYLE
+rather than a direct `w:vanish`. The scan now reads
+`extraction_normalization_stage.scan_paragraphs` -- the extractor's own
+decoded, namespace-aware walk, each run carrying its EFFECTIVE hidden flag
+(direct formatting -> character style -> paragraph style -> document
+defaults) -- and the lexical rules match a comparison form with format and
+invisible characters removed and common Cyrillic/Greek lookalikes folded
+onto Latin (`scripts/confusables.py`). Findings keep their exact shape:
+`{rule_id, locator}`, nothing else.
 """
 
 from __future__ import annotations
 
-import io
 import re
 import sys
-import zipfile
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -93,6 +107,9 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+import confusables  # noqa: E402
+import extraction_normalization_stage  # noqa: E402
+import normalize_input  # noqa: E402
 import opf_injection_scan  # noqa: E402
 
 # Re-exported so callers name rules through one module rather than reaching
@@ -116,41 +133,63 @@ _NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 # something a drafter does by accident.
 _MIN_READABLE_HALF_POINTS = 8
 
-_PARAGRAPH_RE = re.compile(r"<w:p[ >].*?</w:p>", re.S)
-_TEXT_RE = re.compile(r"<w:t[^>]*>(.*?)</w:t>", re.S)
-_VANISH_RE = re.compile(r"<w:vanish\b(?![^>]*w:val=\"(?:0|false)\")")
-_SZ_RE = re.compile(r'<w:sz\b[^>]*w:val="(\d+)"')
+# A zero-width or otherwise invisible character sitting BETWEEN two word
+# characters -- the smuggling shape, where a trigger phrase is split so a
+# human reads one thing and the model another. Trailing/leading runs of the
+# same characters are Word artifacts and are deliberately not matched; see
+# the module docstring. W7-2 widened the class with the other invisible
+# characters `normalize_input.SUSPICIOUS_CONTROL_RANGES` now refuses
+# (combining grapheme joiner, the Hangul fillers, the Mongolian vowel
+# separator, the word joiner and invisible operators, variation selectors).
+_INTERLEAVED_ZERO_WIDTH_RE = re.compile(
+    "\\w[\u200b-\u200d\ufeff\u034f\u115f\u1160\u180e\u2060-\u2064\u3164"
+    "\ufe00-\ufe0f\uffa0\U000e0100-\U000e01ef]+\\w"
+)
+# Direction overrides and isolates have no benign use in contract prose, and
+# neither does the Unicode TAG block (W7-2), an invisible twin of ASCII that
+# spells out whole instructions -- so these stay unconditional.
+_DIRECTION_OVERRIDE_RE = re.compile("[\u202a-\u202e\u2066-\u2069\U000e0000-\U000e007f]")
 
-# A zero-width character sitting BETWEEN two word characters -- the smuggling
-# shape, where a trigger phrase is split so a human reads one thing and the
-# model another. Trailing/leading runs of the same characters are Word
-# artifacts and are deliberately not matched; see the module docstring.
-_INTERLEAVED_ZERO_WIDTH_RE = re.compile(r"\w[\u200b-\u200d\ufeff]\w")
-# Direction overrides have no benign use in contract prose, so these stay
-# unconditional.
-_DIRECTION_OVERRIDE_RE = re.compile("[\u202a-\u202e]")
+
+def _comparison_text(text: str) -> str:
+    """What the lexical rules match against (W7-3): NFKC (fullwidth and
+    compatibility forms onto their ordinary letters), every format character
+    (category `Cf`: zero-width, soft hyphen, tags, bidi controls) and every
+    character `normalize_input.SUSPICIOUS_CONTROL_RANGES` lists removed so
+    none can split a trigger phrase, and the confusables skeleton
+    (`scripts/confusables.py`) so one Cyrillic or Greek lookalike cannot
+    either. A COMPARISON form only -- never stored, never echoed."""
+    text = unicodedata.normalize("NFKC", text)
+    text = "".join(
+        ch
+        for ch in text
+        if unicodedata.category(ch) != "Cf" and not normalize_input.find_suspicious_control_characters(ch)
+    )
+    return confusables.skeleton(text)
 
 
-def _paragraph_text(paragraph_xml: str) -> str:
-    return "".join(_TEXT_RE.findall(paragraph_xml)).strip()
-
-
-def _structural_rules(paragraph_xml: str) -> list[str]:
+def _structural_rules(paragraph: dict[str, Any]) -> list[str]:
     """The rules that depend on how a paragraph LOOKS, not what it says.
 
-    Deliberately checked against the paragraph's raw XML rather than a parsed
-    style model: run properties can sit on the paragraph mark or on individual
-    runs, and a scan that only understood one of those would miss the other.
-    A tripwire is allowed to be coarse; it is not allowed to be evadable by
-    moving an attribute one level up.
+    Read off the parsed paragraph, namespace-aware (W7-3), not the raw XML:
+    a run is hidden when its EFFECTIVE `w:vanish` is on -- direct
+    formatting, its character style, its paragraph's style or the document
+    defaults (`extraction_normalization_stage.VanishStyles`) -- which is the
+    same decision that keeps its text from the model. A `w:vanish` on the
+    paragraph MARK (`w:pPr/w:rPr`) still counts on its own, and so does any
+    `w:sz` under 4pt anywhere in the paragraph: a tripwire is allowed to be
+    coarse; it is not allowed to be evadable by moving an attribute one
+    level up.
     """
     hits: list[str] = []
-    if _VANISH_RE.search(paragraph_xml):
+    element = paragraph["element"]
+    mark_hidden = extraction_normalization_stage._vanish_value(element.find(f"{_NS}pPr/{_NS}rPr"))
+    if mark_hidden or any(hidden for _text, hidden in paragraph["runs"]):
         hits.append(RULE_HIDDEN_TEXT)
 
-    for raw in _SZ_RE.findall(paragraph_xml):
+    for size in element.iter(f"{_NS}sz"):
         try:
-            if int(raw) < _MIN_READABLE_HALF_POINTS:
+            if int(size.get(f"{_NS}val") or "") < _MIN_READABLE_HALF_POINTS:
                 hits.append(RULE_UNREADABLE_TEXT)
                 break
         except ValueError:
@@ -163,8 +202,9 @@ def _is_smuggled_invisible(text: str) -> bool:
 
     Zero-width characters count only when INTERLEAVED inside a word; a run of
     them padding the end of a heading is what Word actually produces and was
-    measured on 9 of the 24 real corpus documents. Direction overrides count
-    unconditionally -- they have no benign use in contract prose.
+    measured on 9 of the 24 real corpus documents. Direction overrides and
+    isolates, and TAG characters, count unconditionally -- they have no
+    benign use in contract prose.
     """
     return bool(
         _INTERLEAVED_ZERO_WIDTH_RE.search(text) or _DIRECTION_OVERRIDE_RE.search(text)
@@ -179,35 +219,45 @@ def scan_document(docx_bytes: bytes) -> list[dict[str, Any]]:
     emitted at most once per rule per paragraph, so a paragraph that repeats an
     override phrase five times is one finding, not five.
 
+    The rules run over `extraction_normalization_stage.scan_paragraphs` --
+    the extractor's own decoded, namespace-aware view of each paragraph,
+    hidden runs included and flagged -- never over the raw XML (W7-3). The
+    raw-XML regexes this replaced were walked past by a character reference
+    (`&#73;gnore`), by binding WordprocessingML to a prefix other than `w:`,
+    by splitting a phrase across runs, and by hiding text through a style.
+
     Returns `[]` for anything that cannot be read. The hostile-file gauntlet
     refuses bad packages; this is advisory and must never be a second way for a
     review to fail.
     """
     try:
-        with zipfile.ZipFile(io.BytesIO(docx_bytes)) as archive:
-            xml = archive.read("word/document.xml").decode("utf-8", errors="replace")
+        paragraphs = extraction_normalization_stage.scan_paragraphs(docx_bytes)
     except Exception:  # noqa: BLE001 - advisory: degrade, never raise
         return []
 
     findings: list[dict[str, Any]] = []
-    for index, paragraph_xml in enumerate(_PARAGRAPH_RE.findall(xml), start=1):
+    for index, paragraph in enumerate(paragraphs, start=1):
         locator = f"paragraph {index}"
-        rules = _structural_rules(paragraph_xml)
-        text = _paragraph_text(paragraph_xml)
+        rules = _structural_rules(paragraph)
+        # Every run, hidden ones included: a hidden payload is flagged for
+        # being hidden AND for what it says.
+        text = "".join(run_text for run_text, _hidden in paragraph["runs"]).strip()
         if text:
             # The lexical rules are the playbook scanner's, called rather than
             # copied: one rule set, one place to update, and a rule added there
             # protects uploaded contracts for free.
             #
-            # `invisible-text` is the one exception, re-decided here: the
-            # playbook scanner flags ANY zero-width character, which is right
-            # for a playbook (nobody pastes Word artifacts into one) and wrong
-            # for a .docx, where Word leaves them in real headings. See the
-            # module docstring for the measurement.
-            for rule_id in opf_injection_scan._scan_text(text):
-                if rule_id == RULE_INVISIBLE_TEXT and not _is_smuggled_invisible(text):
-                    continue
-                rules.append(rule_id)
+            # `invisible-text` is the one exception, re-decided here on the
+            # UNFOLDED text (the fold removes exactly the characters it looks
+            # for): the playbook scanner flags ANY zero-width character, which
+            # is right for a playbook (nobody pastes Word artifacts into one)
+            # and wrong for a .docx, where Word leaves them in real headings.
+            # See the module docstring for the measurement.
+            for rule_id in opf_injection_scan._scan_text(_comparison_text(text)):
+                if rule_id != RULE_INVISIBLE_TEXT:
+                    rules.append(rule_id)
+            if _is_smuggled_invisible(text):
+                rules.append(RULE_INVISIBLE_TEXT)
         for rule_id in dict.fromkeys(rules):
             findings.append({"rule_id": rule_id, "locator": locator})
     return findings

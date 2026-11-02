@@ -125,6 +125,11 @@ class TestTheInProcessRunner(TerminalWriteTestBase):
     """`pipeline_runner._write_real_terminal` -- the Compose/DTS path."""
 
     def _write(self, status_value: str, review_id: str = REVIEW_ID) -> None:
+        # QA W8 item 5: the in-process runner claims the row (PENDING -> RUNNING)
+        # before anything else, and its terminal write is conditional on the row
+        # still being RUNNING -- so the row is claimed here exactly as
+        # `run_real_pipeline` claims it.
+        pipeline_runner._mark_running(review_id, self.ddb)
         pipeline_runner._write_real_terminal(
             review_id,
             {"status": status_value, "decision": "REQUEST_CHANGE", "summary": "s"},
@@ -220,6 +225,11 @@ class TestTheTwoWritersAgree(TerminalWriteTestBase):
         aws_path = "00000000-0000-4000-a000-0000000000a2"
         self._pending_row(in_process)
         self._pending_row(aws_path)
+        # QA W8 item 5: the in-process runner claims the row (PENDING -> RUNNING)
+        # before anything else, and its terminal write is conditional on the row
+        # still being RUNNING -- so the row is claimed here exactly as
+        # `run_real_pipeline` claims it.
+        pipeline_runner._mark_running(in_process, self.ddb)
         pipeline_runner._write_real_terminal(
             in_process, {"status": "OK", "decision": "ACCEPT"}, None, self.ddb
         )

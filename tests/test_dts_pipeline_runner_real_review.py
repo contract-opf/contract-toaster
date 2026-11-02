@@ -354,6 +354,10 @@ class FakeReviewsTable:
         cur_status = self.item.get("status")
         if ConditionExpression == "#s = :pending" and cur_status != values.get(":pending"):
             raise _conditional()
+        # QA W8 item 5: the real pipeline's terminal and progress writes are
+        # conditional on the row still being RUNNING.
+        if ConditionExpression == "#s = :running" and cur_status != values.get(":running"):
+            raise _conditional()
         if (
             ConditionExpression == "attribute_not_exists(#s) OR #s <> :error"
             and cur_status == values.get(":error")

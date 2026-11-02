@@ -96,6 +96,7 @@ import {
   readErrorDetail,
   triggerBrowserDownload,
 } from './api';
+import { UserFacingError, responseError, toUserMessage } from './userMessage';
 // The shared outcome→(label, variant) map (issue #470) — see outcome.ts's
 // module docstring. `explainFailure`/`REASON_EXPLANATIONS` below stay
 // separate: those explain WHY a failure happened (stage + reason token),
@@ -142,11 +143,11 @@ import {
 // vocabulary it is typed against. The console renders the choices and their
 // labels itself (issue #726), so only the transport and the type are needed
 // here; History still imports the copy constants for its per-row control.
-import { recordDisposition, type AttorneyDisposition } from './disposition';
+import { DISPOSITION_ERROR_COPY, recordDisposition, type AttorneyDisposition } from './disposition';
 // "Butter it" (issue #499) — the shared cover-note client + copy, so this
 // panel and History's expanded row can never drift on wording or on how a
 // failure is turned into copy. See coverNote.ts's module docstring.
-import { butterIt } from './coverNote';
+import { COVER_NOTE_ERROR_COPY, butterIt } from './coverNote';
 // toastedOn: the same epoch-seconds -> "YYYY-MM-DD  HH:MM UTC" formatter the
 // receipt uses for its own date line (issue #492's meta line reuses it for
 // `updated_at` rather than duplicating the formatting).
@@ -745,6 +746,18 @@ export function classifyPollFailure(status: number, ageMs: number): PollFailureO
   return { kind: 'transient' };
 }
 
+const SUBMIT_ERROR_COPY = "We couldn't submit your file for review. Please try again.";
+
+// The one 5xx refusal on `POST /api/reviews` a reviewer can act on: the
+// documented 503 `reviews.NO_ACTIVE_PLAYBOOK_DETAIL` (issue #41/#194 — the
+// chosen playbook was deactivated after the catalog loaded). Matched exactly
+// and answered with the app's own sentence; every other 503 detail on this
+// route is server configuration and gets SUBMIT_ERROR_COPY (QA 2026-10-31 W9).
+const SUBMIT_KNOWN_REFUSALS: Readonly<Record<string, string>> = {
+  'no active playbook':
+    'This contract type has no active playbook right now. Choose another, or ask an admin to activate one.',
+};
+
 const STILL_CHECKING_COPY = "Still checking on your review's status — reconnecting…";
 
 // A run of server errors is not a reconnect. On 2026-10-28 every status poll
@@ -767,7 +780,7 @@ export const SERVER_ERROR_COPY =
 // frontend/src/api.ts's `friendlyErrorMessage`) or asserting a specific
 // cause that is not always true.
 const POLL_GAVE_UP_COPY =
-  "This review's status can no longer be checked here. Reload to start a new review, or check History.";
+  "This review's status can no longer be checked here, so it is no longer being followed. Check History for how it finished, or start a new review.";
 
 // Completion-handoff announcements (issue #448). Rendered into a persistent
 // polite live region, so assistive tech is already watching it when the review
@@ -1469,6 +1482,17 @@ function findMatchingPlaybook(
 export default function ReviewSubmission(): React.ReactElement {
   const [file, setFile] = useState<File | null>(null);
   const [reviewId, setReviewId] = useState<string | null>(null);
+  /**
+   * The review on screen as of the latest render (QA 2026-10-31 W9). A
+   * handler that awaits — "Butter it", disposition, cancel — captures
+   * `reviewId` before its request and compares it with this after, so a
+   * response for review A that lands once B (or nothing) is on screen is
+   * dropped instead of painting A's draft, A's disposition or A's "stopping"
+   * onto B. The same discipline `autoSaveOutput` keeps through
+   * `handedOffReviewRef`.
+   */
+  const reviewIdRef = useRef<string | null>(null);
+  reviewIdRef.current = reviewId;
   const [detail, setDetail] = useState<ReviewDetail | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   /**
@@ -1494,6 +1518,17 @@ export default function ReviewSubmission(): React.ReactElement {
    * mutually exclusive — the give-up clears `pollError` as it sets this.
    */
   const [pollStopped, setPollStopped] = useState<string | null>(null);
+  /**
+   * QA 2026-10-31 W9, the "lost" state. Once the poll has given up on the
+   * review on screen, nothing will ever move it again, so it is no longer
+   * treated as in flight: `phase` is `lost` (no ticking, no elapsed clock),
+   * `reviewInFlight` is false (Run again and the lever are not refused), and
+   * the projection hands the console an idle status (intake shown, Stop
+   * hidden). The review id stays, so "Copy review ID" and History still have
+   * something to find it by; `pollStopped` carries the fixed sentence saying
+   * why it can no longer be followed.
+   */
+  const reviewLost = pollStopped !== null && reviewId !== null;
   /**
    * "Check now" (issue #726). The poller already retries on capped
    * exponential backoff, so this is not a second polling implementation — it
@@ -1870,23 +1905,42 @@ export default function ReviewSubmission(): React.ReactElement {
 
   // Issue #523 / Review Tab Defaults: auto-save footnote preference in the
   // background and persist to localStorage whenever the control moves.
-  const saveNotesModePreference = useCallback(async (modeToSave: NotesMode): Promise<void> => {
+  //
+  // Sequenced (QA 2026-10-31 W9). Two quick changes used to send two PUTs in
+  // parallel, so the server could store whichever ARRIVED last rather than the
+  // reviewer's last choice, and a failure of the superseded one raised an
+  // alert about a value nobody holds any more. Now each PUT waits for the one
+  // before it (`notesModeSaveChain`), so they reach the server in the order
+  // they were chosen, and only the newest save (`notesModeSaveSeq`) may report
+  // a failure or clear one.
+  const notesModeSaveChain = useRef<Promise<void>>(Promise.resolve());
+  const notesModeSaveSeq = useRef(0);
+  const saveNotesModePreference = useCallback((modeToSave: NotesMode): Promise<void> => {
+    const ticket = ++notesModeSaveSeq.current;
     setNotesModeSaveError(null);
-    try {
-      const response = await authorizedFetch('/api/me/preferences', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preferences: { notes_mode: modeToSave } }),
-      });
-      if (!response.ok) {
-        const detail = await readErrorDetail(response);
-        throw new Error(detail ?? 'preferences save rejected');
+    const put = async (): Promise<void> => {
+      try {
+        const response = await authorizedFetch('/api/me/preferences', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ preferences: { notes_mode: modeToSave } }),
+        });
+        if (!response.ok) {
+          throw new Error(`PUT /api/me/preferences returned HTTP ${response.status}`);
+        }
+      } catch (err) {
+        const message = friendlyErrorMessage(
+          err,
+          "We couldn't save that as your default just now.",
+        );
+        if (ticket === notesModeSaveSeq.current) {
+          setNotesModeSaveError(message);
+        }
       }
-    } catch (err) {
-      setNotesModeSaveError(
-        friendlyErrorMessage(err, "We couldn't save that as your default just now."),
-      );
-    }
+    };
+    const next = notesModeSaveChain.current.then(put);
+    notesModeSaveChain.current = next;
+    return next;
   }, []);
 
   const handleNotesModeChange = useCallback(
@@ -2035,7 +2089,9 @@ export default function ReviewSubmission(): React.ReactElement {
    * `working` is `submitting || reviewId !== null` — the two states that mean
    * a submission has started. Once it has, the playbook of an in-flight or
    * completed review is not this effect's to change (issue #730, Out of
-   * scope), and the id already went to the server with the POST.
+   * scope), and the id already went to the server with the POST. A `lost`
+   * review (see `reviewLost`) is the exception: nothing is being followed, the
+   * intake is back, and a document chosen now is the next submission's.
    *
    * No storage of its own: an automatic choice reaches `writeLastPlaybookId`
    * through the SAME `playbookId` effect every other change does (issue
@@ -2064,7 +2120,7 @@ export default function ReviewSubmission(): React.ReactElement {
       currentFileKey,
       responseFileKey: preflightResponseFor.current ?? '',
       userOverride: playbookSelection === 'user',
-      working: submitting || reviewId !== null,
+      working: submitting || (reviewId !== null && !reviewLost),
       playbooks,
     });
     // No usable recommendation resolved: keep the current selection, and with
@@ -2075,7 +2131,7 @@ export default function ReviewSubmission(): React.ReactElement {
     autoPlaybookAppliedFor.current = currentFileKey;
     setPlaybookSelection('automatic');
     setPlaybookId(chosen);
-  }, [preflight, playbookId, playbooks, playbookSelection, submitting, reviewId]);
+  }, [preflight, playbookId, playbooks, playbookSelection, submitting, reviewId, reviewLost]);
 
   const stopPolling = useCallback(() => {
     if (pollTimer.current !== null) {
@@ -2171,7 +2227,13 @@ export default function ReviewSubmission(): React.ReactElement {
         const rows = Array.isArray(data.reviews)
           ? (data.reviews as Array<{ review_id: string; status: string }>)
           : [];
-        const running = rows.find((row) => NON_TERMINAL_STATUSES.has(row.status));
+        // The NEWEST row only, as the comment above promises (QA 2026-10-31
+        // W9). `find` over the whole page used to attach to an older row that
+        // was still running even when the reviewer's latest review had
+        // already finished — showing a review they had moved on from as the
+        // one in flight.
+        const newest = rows[0];
+        const running = newest && NON_TERMINAL_STATUSES.has(newest.status) ? newest : undefined;
         if (!cancelled && running) {
           setReviewId((current) => current ?? running.review_id);
         }
@@ -2223,10 +2285,17 @@ export default function ReviewSubmission(): React.ReactElement {
       if (!reviewId) {
         return;
       }
+      // See `reviewIdRef`: the answer belongs to THIS review, and is dropped
+      // if another one is on screen by the time it lands.
+      const requestedReviewId = reviewId;
+      const stillOnScreen = (): boolean => reviewIdRef.current === requestedReviewId;
       setDispositionSaving(outcome);
       setDispositionError(null);
       try {
-        const result = await recordDisposition(reviewId, outcome, note);
+        const result = await recordDisposition(requestedReviewId, outcome, note);
+        if (!stillOnScreen()) {
+          return;
+        }
         setDetail((current) =>
           current
             ? {
@@ -2236,11 +2305,13 @@ export default function ReviewSubmission(): React.ReactElement {
             : current,
         );
       } catch (err) {
-        setDispositionError(
-          err instanceof Error ? err.message : "We couldn't record that. Please try again.",
-        );
+        if (stillOnScreen()) {
+          setDispositionError(toUserMessage(err, DISPOSITION_ERROR_COPY));
+        }
       } finally {
-        setDispositionSaving(null);
+        if (stillOnScreen()) {
+          setDispositionSaving(null);
+        }
       }
     },
     [reviewId, dispositionNote],
@@ -2277,12 +2348,21 @@ export default function ReviewSubmission(): React.ReactElement {
       if (!reviewId) {
         return;
       }
+      // QA 2026-10-31 top item #15: the draft is review A's. If B (or no
+      // review) is on screen by the time it arrives, it is dropped — never
+      // shown, never copyable — and B's own controls are left alone. See
+      // `reviewIdRef`.
+      const requestedReviewId = reviewId;
+      const stillOnScreen = (): boolean => reviewIdRef.current === requestedReviewId;
       setCoverNoteLoading(true);
       setCoverNoteFailed(false);
       setCoverNoteErrorMessage(null);
       setCoverNoteCopied(false);
       try {
-        const outcome = await butterIt(reviewId, { regenerate });
+        const outcome = await butterIt(requestedReviewId, { regenerate });
+        if (!stillOnScreen()) {
+          return;
+        }
         if (!outcome.ok) {
           setCoverNoteFailed(true);
           return;
@@ -2300,9 +2380,13 @@ export default function ReviewSubmission(): React.ReactElement {
           setCoverNoteLastRealCostCents(outcome.lastGenerationCostUsdCents);
         }
       } catch (error) {
-        setCoverNoteErrorMessage(error instanceof Error ? error.message : String(error));
+        if (stillOnScreen()) {
+          setCoverNoteErrorMessage(toUserMessage(error, COVER_NOTE_ERROR_COPY));
+        }
       } finally {
-        setCoverNoteLoading(false);
+        if (stillOnScreen()) {
+          setCoverNoteLoading(false);
+        }
       }
     },
     [reviewId],
@@ -2382,12 +2466,19 @@ export default function ReviewSubmission(): React.ReactElement {
     if (!reviewId) {
       return;
     }
+    // See `reviewIdRef`: a stop answered for A must not mark B "stopping",
+    // nor tell B's reviewer that A could not be stopped.
+    const requestedReviewId = reviewId;
+    const stillOnScreen = (): boolean => reviewIdRef.current === requestedReviewId;
     setCancelPending(true);
     setCancelError(null);
     try {
-      const response = await authorizedFetch(`/api/reviews/${reviewId}/cancel`, {
+      const response = await authorizedFetch(`/api/reviews/${requestedReviewId}/cancel`, {
         method: 'POST',
       });
+      if (!stillOnScreen()) {
+        return;
+      }
       // 409 means it reached a terminal status first. That is not an error
       // worth alarming anyone about — the next poll is about to render the
       // real outcome — so say what happened and let the poll do the rest.
@@ -2396,19 +2487,42 @@ export default function ReviewSubmission(): React.ReactElement {
         return;
       }
       if (!response.ok) {
-        throw new Error(`POST /api/reviews/${reviewId}/cancel returned HTTP ${response.status}`);
+        throw new Error(
+          `POST /api/reviews/${requestedReviewId}/cancel returned HTTP ${response.status}`,
+        );
       }
       // Reflect the request immediately rather than waiting up to a full poll
       // interval to acknowledge a button press.
       setDetail((current) => (current ? { ...current, cancel_requested: true } : current));
     } catch (err) {
-      setCancelError(
-        friendlyErrorMessage(err, "We couldn't stop this review. It is still running."),
-      );
+      if (stillOnScreen()) {
+        setCancelError(
+          friendlyErrorMessage(err, "We couldn't stop this review. It is still running."),
+        );
+      }
     } finally {
-      setCancelPending(false);
+      if (stillOnScreen()) {
+        setCancelPending(false);
+      }
     }
   }, [reviewId]);
+
+  /**
+   * Every per-review error channel and in-flight flag that `submitReview` and
+   * `resetForRetry` did not already clear (QA 2026-10-31 W9, control
+   * inventory "Retry clears detail, review id, file, errors"). Both callers
+   * take the current review off the screen, so nothing these hold can still
+   * be about the review that follows.
+   */
+  const clearReviewChannels = useCallback(() => {
+    setCancelError(null);
+    setCancelPending(false);
+    setDispositionError(null);
+    setDispositionSaving(null);
+    setPollError(null);
+    setPollStopped(null);
+    setCoverNoteLoading(false);
+  }, []);
 
   // Poll GET /api/reviews/{review_id} on an interval while the review is
   // non-terminal (PENDING/RUNNING); stop once a terminal status arrives.
@@ -2583,6 +2697,7 @@ export default function ReviewSubmission(): React.ReactElement {
       stopPolling();
       setDetail(null);
       setReviewId(null);
+      reviewIdRef.current = null;
       setSubmittedGuidance(null);
       setSubmittedResumed(false);
       // Issue #735 (review finding): the captured estimate is frozen at submit
@@ -2623,6 +2738,13 @@ export default function ReviewSubmission(): React.ReactElement {
       // the reviewer had even clicked "Butter it" for it.
       setCoverNoteErrorMessage(null);
       setCoverNoteCopied(false);
+      // QA 2026-10-31 W9: the rest of the previous review's channels. A stale
+      // "Couldn't stop that one", "Still checking" or "Review unavailable"
+      // describes a review this submit has just taken off the screen, and an
+      // in-flight flag left by a press on that review would hold one of the
+      // new review's keys disabled — that press's answer is dropped
+      // (`reviewIdRef`), so nothing else would ever clear it.
+      clearReviewChannels();
 
       // Issue #53: the upload gets a size-scaled budget and is abandoned
       // when it runs out, so a stalled body can no longer pin `submitting`
@@ -2664,6 +2786,7 @@ export default function ReviewSubmission(): React.ReactElement {
         // that failed priced nothing, so there is nothing to capture for it.
         setSubmittedEstimateCents(reviewCostUsdCents);
         setReviewId(submittedId);
+        reviewIdRef.current = submittedId;
         // Issue #58: the ONLY place this key is ever written -- a review id
         // that the server has confirmed exists and belongs to this caller.
         // The mount probe above reads it back after a reload. From the
@@ -2738,13 +2861,17 @@ export default function ReviewSubmission(): React.ReactElement {
         ]);
 
         if (!response.ok) {
-          const detail = await readErrorDetail(response);
-          throw new Error(
-            detail ??
-              friendlyErrorMessage(
-                `POST /api/reviews returned HTTP ${response.status}`,
-                "We couldn't submit your file for review. Please try again.",
-              ),
+          // QA 2026-10-31 W9: the route's own refusals (a malformed or
+          // oversized document, the daily cap) are written for the reviewer
+          // and pass through; anything else — a 503's "UPLOADS_BUCKET not
+          // configured." above all — is server configuration and renders the
+          // fixed sentence. See `DETAIL_ALLOWED_STATUSES`.
+          throw await responseError(
+            response,
+            `POST /api/reviews returned HTTP ${response.status}`,
+            SUBMIT_ERROR_COPY,
+            undefined,
+            SUBMIT_KNOWN_REFUSALS,
           );
         }
 
@@ -2781,11 +2908,7 @@ export default function ReviewSubmission(): React.ReactElement {
             setSubmitOutcomeUnknown(true);
           }
         } else {
-          setSubmitError(
-            err instanceof Error
-              ? err.message
-              : friendlyErrorMessage(err, "We couldn't submit your file for review. Please try again."),
-          );
+          setSubmitError(toUserMessage(err, SUBMIT_ERROR_COPY));
         }
       } finally {
         clearTimeout(stallTimer);
@@ -2814,6 +2937,7 @@ export default function ReviewSubmission(): React.ReactElement {
       reviewCostUsdCents,
       stopPolling,
       toasterGuidance,
+      clearReviewChannels,
     ],
   );
 
@@ -2843,14 +2967,23 @@ export default function ReviewSubmission(): React.ReactElement {
       // instead of rendering readErrorDetail's string verbatim (issue #466);
       // the raw detail still reaches the console.
       const errorDetail = await readErrorDetail(response);
-      throw new Error(
+      throw new UserFacingError(
         downloadFailureMessage(
           response.status,
           errorDetail ?? `GET /api/reviews/${reviewId}/output returned HTTP ${response.status}`,
         ),
       );
     }
-    const data = (await response.json()) as OutputResponse;
+    const data = (await response.json()) as Partial<OutputResponse>;
+    // QA 2026-10-31 W9: a 200 without a usable `url` is a failed download,
+    // not an anchor pointed at "/undefined". Same friendly copy and the same
+    // console-only detail as every other download failure, and the same
+    // check `downloadInputDocument` below already made.
+    if (typeof data.url !== 'string' || !data.url) {
+      throw new UserFacingError(
+        friendlyDownloadError(`GET /api/reviews/${reviewId}/output returned no url`),
+      );
+    }
     return data.url;
   }, [reviewId]);
 
@@ -2866,7 +2999,7 @@ export default function ReviewSubmission(): React.ReactElement {
       // never navigates away (issue #271 item 5).
       triggerBrowserDownload(await fetchOutputUrl());
     } catch (err) {
-      setDownloadError(err instanceof Error ? err.message : friendlyDownloadError(err));
+      setDownloadError(toUserMessage(err, DOWNLOAD_ERROR_COPY));
     } finally {
       setDownloading(false);
     }
@@ -2895,7 +3028,7 @@ export default function ReviewSubmission(): React.ReactElement {
       }
       if (!response.ok) {
         const errorDetail = await readErrorDetail(response);
-        throw new Error(
+        throw new UserFacingError(
           downloadFailureMessage(
             response.status,
             errorDetail ?? `GET /api/reviews/${reviewId}/input returned HTTP ${response.status}`,
@@ -2904,13 +3037,13 @@ export default function ReviewSubmission(): React.ReactElement {
       }
       const data = (await response.json()) as { url?: string };
       if (!data.url) {
-        throw new Error(
+        throw new UserFacingError(
           friendlyDownloadError(`GET /api/reviews/${reviewId}/input returned no url`),
         );
       }
       triggerBrowserDownload(data.url);
     } catch (err) {
-      setDownloadError(err instanceof Error ? err.message : friendlyDownloadError(err));
+      setDownloadError(toUserMessage(err, DOWNLOAD_ERROR_COPY));
     }
   }, [reviewId]);
 
@@ -2931,6 +3064,7 @@ export default function ReviewSubmission(): React.ReactElement {
     stopPolling();
     setDetail(null);
     setReviewId(null);
+    reviewIdRef.current = null;
     setFile(null);
     setSubmitError(null);
     setSubmitOutcomeUnknown(false);
@@ -2947,7 +3081,10 @@ export default function ReviewSubmission(): React.ReactElement {
     handedOffReviewRef.current = null;
     setPrefilledFromReview(false);
     setPrefillError(null);
-  }, [stopPolling]);
+    // QA 2026-10-31 W9: cancel, disposition and poll errors too — the
+    // inventory's "Retry clears … errors" was true of only three of them.
+    clearReviewChannels();
+  }, [stopPolling, clearReviewChannels]);
 
   // -------------------------------------------------------------------------
   // "Run again" (issue #70; 2026-09-05 diagnostic finding G11, action B11)
@@ -2990,7 +3127,12 @@ export default function ReviewSubmission(): React.ReactElement {
    */
   const reviewInFlight =
     submitting ||
-    (reviewId !== null && (!detail || NON_TERMINAL_STATUSES.has(detail.status)));
+    (reviewId !== null && !reviewLost && (!detail || NON_TERMINAL_STATUSES.has(detail.status)));
+  // The same answer for code that has awaited since its render (QA 2026-10-31
+  // W9): `prefillFromReview` re-reads it after its detail fetch, because a
+  // review can start while that fetch is out.
+  const reviewInFlightRef = useRef(reviewInFlight);
+  reviewInFlightRef.current = reviewInFlight;
 
   const prefillFromReview = useCallback(
     async (sourceReviewId: string): Promise<void> => {
@@ -3023,6 +3165,14 @@ export default function ReviewSubmission(): React.ReactElement {
         return;
       }
       if (ticket !== prefillTicketRef.current) return;
+      // Asked again AFTER the read (QA 2026-10-31 W9). The check above ran
+      // before the await; a submission that started while the read was out
+      // would otherwise be detached by the `resetForRetry()` below while it
+      // keeps running — and billing — server-side.
+      if (reviewInFlightRef.current) {
+        setPrefillError(PREFILL_BUSY_COPY);
+        return;
+      }
 
       // Only now is the screen cleared. Doing this after the read, rather than
       // before it, is what lets the failure path above leave a burnt review
@@ -3136,7 +3286,12 @@ export default function ReviewSubmission(): React.ReactElement {
   // other terminal status.
   const phase: ToasterPhase = !reviewId
     ? 'idle'
-    : !detail || NON_TERMINAL_STATUSES.has(detail.status)
+    : // Before the status checks: a lost review's last-known detail is
+      // still RUNNING, and reading it would keep the clock and the tick
+      // going for a review nobody can follow any more. See `reviewLost`.
+      reviewLost
+      ? 'lost'
+      : !detail || NON_TERMINAL_STATUSES.has(detail.status)
       ? 'working'
       : detail.status === 'DONE'
         ? 'done'
@@ -3312,7 +3467,7 @@ export default function ReviewSubmission(): React.ReactElement {
       }
 
       if (event.key === 'Escape') {
-        if (!isInputFocused && file && phase === 'idle' && !submitting) {
+        if (!isInputFocused && file && (phase === 'idle' || phase === 'lost') && !submitting) {
           event.preventDefault();
           setFile(null);
           return;
@@ -3743,6 +3898,7 @@ export default function ReviewSubmission(): React.ReactElement {
     submitOutcomeUnknown,
     pollError,
     pollStopped,
+    reviewLost,
     downloadError,
     catalogError,
     notesModeSaveError,

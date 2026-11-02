@@ -56,7 +56,7 @@ From `~/Documents/dev/contract-toaster-public` on a clean `main` that matches
 
 ```
 Workflow({
-  scriptPath: "/Users/<user>/.claude/skills/workflow-loop/assets/workflow-loop.js",
+  scriptPath: "<home>/.claude/skills/workflow-loop/assets/workflow-loop.js",
   args: {
     repo: "contract-opf/contract-toaster", label: "afk", branch: "main",
     checkCommand: "bash scripts/check-frontend.sh && bash scripts/check.sh",
@@ -88,13 +88,18 @@ by every usage reset.
 
 Bot Fight Mode stays ON for the zone, so the GitHub deploy leg of
 `dts-image-publish.yml` always fails at the edge (expected, not a
-regression). Images still publish on every green `main`. After each landing:
+regression). Images still publish on every green `main`.
 
-```bash
-bash /tmp/scratch/-Users-user-Documents-dev-contract-toaster-public/910c593d-c65e-416a-92ec-05c953bec404/scratchpad/roll-forward.sh
-```
+**Superseded once installed (2026-10-29):** `deploy/dts/autopull/` runs on
+the box and rolls Coolify forward from GHCR itself, with no call through
+Cloudflare. Install steps:
+[deploy/dts/README.md](../../deploy/dts/README.md#automatic-roll-forward-from-the-box).
+With it installed and `DTS_DEPLOY_MODE=pull` set, the manual step below is no
+longer needed. Until then, after each landing, run the `roll-forward.sh`
+script that the 2026-09-10 session left in its own temporary scratchpad
+directory.
 
-That scratchpad path is session-specific and may be gone. The script is
+That scratchpad is session-specific and may be gone. The script is
 small; its logic: newest completed `dts-image-publish.yml` run with both
 build jobs green → if its SHA differs from the last rolled one, POST
 

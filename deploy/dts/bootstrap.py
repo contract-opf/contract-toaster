@@ -355,27 +355,33 @@ def seed_fixture() -> None:
 
 def seed_users_and_playbook() -> None:
     ddb = _ddb_resource()
-    demo_auth.seed_demo_users(ddb)
-    print("  seeded demo users (admin/admin, user/user)")
+    # This runs on EVERY rollout. Demo users are seeded on the first one only
+    # (QA 2026-10-31, report #4): a `bootstrap:seeded` marker row records it,
+    # and a deployment that already has users is marked without seeding, so
+    # an admin who deleted admin/admin does not get it back on the next
+    # deploy. See demo_auth.seed_demo_users_once.
+    outcome = demo_auth.seed_demo_users_once(ddb)
+    if outcome == "seeded":
+        print("  seeded demo users (admin/admin, user/user) -- first bootstrap only")
+    elif outcome == "existing_users":
+        print("  users already present; marked as seeded, no demo users added")
+    else:
+        print("  demo users were seeded on an earlier bootstrap; not re-seeding")
 
     # Enable password sign-in in the ADMIN-TOGGLEABLE auth-mode row that
     # demo_auth.login_with_password gates on. This is distinct from the
     # deployment-level AUTH_MODE env (which get_current_user's verifier
-    # dispatch uses): without seeding this DynamoDB row, login_with_password
-    # defaults to sso-only and rejects password sign-in. Seed it to the
-    # deployment's AUTH_MODE (password/both); default to password for Docker Compose.
-    settings_table = os.environ.get("AUTH_SETTINGS_TABLE")
+    # dispatch uses): without this DynamoDB row, login_with_password
+    # defaults to sso-only and rejects password sign-in. It starts at the
+    # deployment's AUTH_MODE (password/both; password for Docker Compose),
+    # and is written ONLY when absent -- an admin's later choice survives
+    # every redeploy.
     deploy_mode = config.auth_mode()
     login_mode = deploy_mode if deploy_mode in ("password", "both") else "password"
-    if settings_table:
-        ddb.Table(settings_table).put_item(
-            Item={
-                "setting_id": demo_auth.AUTH_MODE_SETTING_ID,
-                "auth_mode": login_mode,
-                "updated_at": str(int(time.time())),
-            }
-        )
+    if demo_auth.ensure_auth_mode_row(ddb, login_mode):
         print(f"  set auth-mode setting to '{login_mode}' (password login enabled)")
+    else:
+        print("  auth-mode setting already present; left as the admin set it")
 
     # Issue #515: the hardcoded tenant-named playbook row that used to be
     # seeded here is GONE, with no replacement.

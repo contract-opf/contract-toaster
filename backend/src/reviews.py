@@ -784,11 +784,24 @@ def compute_worst_case_reservation_usd_cents(dynamodb_resource: Any = None) -> i
     Issue #628: the bounded address-repair pass issue #569 added a
     conditional third model call for is gone (its module, its flag, and the
     quote addressing it repaired were all deleted), so the reservation is
-    once again exactly `attempts_per_pass * (primary + critic)` — the same
+    once again `attempts_per_pass * (primary + critic)` — the same
     figure a deployment that never turned that flag on always reserved.
     Both Lambda mirrors of this function (infra/lambda/persist/handler.py,
     infra/lambda/orphan_reconciler/handler.py) dropped the same term in the
     same commit, so reserve and settle cannot disagree.
+
+    QA W8 item 3 — THIS IS NOT A REVIEW'S WHOLE RESERVATION. It omits the
+    OPF Floor judge, a model call per judged invariant (plus one retry),
+    each re-sending the whole document at the critic model's rates. The
+    figure here is taken at submission, before the document is extracted or
+    the playbook resolved, so the judge cannot be priced yet; the pipeline
+    adds `judged_invariants x 2 x (document + prompt overhead)` input and the
+    judge's full `max_tokens` output, at the critic rate, through
+    `reserve_floor_spend` before its first model call, and `settle_spend`
+    reverses that recorded top-up alongside this figure. What this function
+    returns is therefore the submission-time PART, which is also why it stays
+    playbook-independent: settlement recomputes it and must get the same
+    number back.
     """
     attempts_per_pass = 1 + MAX_RETRIES_PER_PASS + MAX_TRUNCATION_RETRIES_PER_PASS
     primary_input_rate, primary_output_rate, critic_input_rate, critic_output_rate = (
@@ -1311,12 +1324,118 @@ def _record_spend_reservation(
     return submission
 
 
+def compute_floor_reservation_usd_cents(
+    input_tokens: int, output_tokens: int, dynamodb_resource: Any = None
+) -> int:
+    """The Floor judge's worst-case cost in cents (QA W8 item 3), priced at
+    the CRITIC model's rates -- the judge runs on the critic model
+    (`scripts/review_spine.py`, ADR 0001). `input_tokens` / `output_tokens`
+    are the totals over every possible judge attempt
+    (`floor_judge.worst_case_judge_usage`). Rounded UP: a reservation that
+    rounds down under-reserves."""
+    _primary_in, _primary_out, critic_input_rate, critic_output_rate = _active_provider_rates(
+        dynamodb_resource
+    )
+    usd = max(0, int(input_tokens)) * (critic_input_rate / 1_000_000) + max(
+        0, int(output_tokens)
+    ) * (critic_output_rate / 1_000_000)
+    return math.ceil(round(usd * 100, 6))
+
+
+# The submission-row attribute that records a review's Floor-judge top-up
+# reservation (QA W8 item 3), so settlement reverses exactly what was added.
+FLOOR_RESERVED_USD_CENTS_FIELD = "floor_reserved_usd_cents"
+
+
+def reserve_floor_spend(
+    review_id: str,
+    input_tokens: int,
+    output_tokens: int,
+    dynamodb_resource: Any,
+    now_epoch: float | None = None,
+) -> int:
+    """Add the Floor judge's worst case to the day's reservation (QA W8
+    item 3) and record it on the review's submission row. Returns the cents
+    added (0 when there is nothing to top up).
+
+    The submission-time reservation (`compute_worst_case_reservation_usd_
+    cents`) cannot include the judge: it is taken before the document is
+    extracted or the playbook resolved, and the judge's cost is the number
+    of judged invariants times two attempts times the WHOLE document. So the
+    pipeline adds it here, once the run knows both, before any model call.
+
+    Unconditional -- not checked against the cap. The cap gates STARTS
+    (ARCHITECTURE.md -> "What that reservation is not"); this review was
+    admitted, and its Floor spend is part of what it will cost. Adding it
+    makes the day's counter honest for every submission that follows,
+    instead of discovering the spend only at settlement. Refusing here would
+    turn a deployment's cap into a per-review veto on the Floor itself.
+
+    Ordered so a failure can only OVER-reserve: the day's counter is raised
+    first and the submission row stamped second, so a crash between the two
+    leaves money reserved that settlement will not reverse (released at the
+    UTC rollover) rather than a reversal of money never reserved. A review
+    with no submission row or no reservation (a direct pipeline run, a
+    reservation already released) has nothing to top up.
+    """
+    submissions = dynamodb_resource.Table(os.environ["REVIEW_SUBMISSIONS_TABLE"])
+    submission = _find_submission_row_for_review(submissions, review_id)
+    if not submission or not submission.get("spend_reservation_id"):
+        return 0
+    if submission.get("reservation_released"):
+        return 0
+    cents = compute_floor_reservation_usd_cents(input_tokens, output_tokens, dynamodb_resource)
+    if cents <= 0:
+        return 0
+    now_epoch = time.time() if now_epoch is None else now_epoch
+    spend_date = time.strftime("%Y-%m-%d", time.gmtime(now_epoch))
+    dynamodb_resource.Table(os.environ["DAILY_SPEND_TABLE"]).update_item(
+        Key={"spend_date": spend_date},
+        UpdateExpression=(
+            "SET reserved_usd_cents = if_not_exists(reserved_usd_cents, :zero) + :amount"
+        ),
+        ExpressionAttributeValues={":zero": 0, ":amount": cents},
+    )
+    field = FLOOR_RESERVED_USD_CENTS_FIELD
+    submissions.update_item(
+        Key={"idempotency_key": submission["idempotency_key"]},
+        UpdateExpression=(
+            "SET " + field + " = if_not_exists(" + field + ", :zero) + :amount, "
+            "updated_at = :now"
+        ),
+        ExpressionAttributeValues={
+            ":zero": 0,
+            ":amount": cents,
+            ":now": str(int(time.time())),
+        },
+    )
+    return cents
+
+
+def floor_reserved_usd_cents(submission: dict[str, Any] | None) -> int:
+    """The Floor-judge top-up recorded on a submission row, 0 when none."""
+    try:
+        return max(0, int((submission or {}).get(FLOOR_RESERVED_USD_CENTS_FIELD) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def floor_top_up_settle_kwargs(submission: dict[str, Any] | None) -> dict[str, int]:
+    """`settle_spend` keyword arguments that reverse a submission's recorded
+    Floor-judge top-up -- empty when it has none, so every review without a
+    Floor settles through exactly the call it always made."""
+    cents = floor_reserved_usd_cents(submission)
+    return {"additional_reserved_usd_cents": cents} if cents else {}
+
+
 def settle_spend(
     review_id: str,
     reservation_id: str,
     actual_usd_cents: int,
     dynamodb_resource: Any,
     now_epoch: float | None = None,
+    *,
+    additional_reserved_usd_cents: int = 0,
 ) -> None:
     """Reconcile the reservation against ledgered actual spend.
 
@@ -1341,6 +1460,10 @@ def settle_spend(
     now_epoch = time.time() if now_epoch is None else now_epoch
     spend_date = time.strftime("%Y-%m-%d", time.gmtime(now_epoch))
     reservation_amount_cents = compute_worst_case_reservation_usd_cents(dynamodb_resource)
+    # QA W8 item 3: plus whatever the run added on top for its Floor judge
+    # (`reserve_floor_spend`, recorded on the submission row) -- reversed
+    # exactly as recorded, never recomputed.
+    reservation_amount_cents += max(0, int(additional_reserved_usd_cents or 0))
     # Reverse the worst-case reservation, apply the actual settled cost.
     delta = actual_usd_cents - reservation_amount_cents
     table.update_item(
@@ -3655,6 +3778,15 @@ def stop_running_execution(
     return True
 
 
+# QA W8 item 2: the ledgered `pass_name`s whose tokens were spent on the
+# CRITIC model and are priced at its rate -- the critic pass, and the Floor
+# judge (`scripts/review_spine.py` runs it on `critic_model_id`, ADR 0001).
+# Mirrored (not imported -- `admin_dashboard` imports this module) by
+# `admin_dashboard._CRITIC_RATE_PASSES`; tests/test_spend_accounting_w8.py
+# holds the two equal.
+_CRITIC_RATE_PASS_NAMES = ("critic", "floor")
+
+
 def _actual_cents_from_ledger(review_id: str, dynamodb_resource: Any) -> int:
     """Real settled cost (cents) for `review_id`, priced from the #414
     model-invocation ledger (`MODEL_INVOCATIONS_TABLE`) -- issue #121.
@@ -3684,11 +3816,13 @@ def _actual_cents_from_ledger(review_id: str, dynamodb_resource: Any) -> int:
     ModelInvocationRecord`). A best-effort settlement read must never raise
     and must never fail closed to something OTHER than the historical 0.
 
-    `pass_name == "critic"` prices at the critic rate slot; every other
-    ledgered pass name (`"primary"`, `"floor"`, `"cover_note"`) prices at the
-    primary slot -- the same split `admin_dashboard._CRITIC_RATE_PASSES` uses
-    for the identical ledger, duplicated here (not imported) because
-    `admin_dashboard` itself imports this module. `"cover_note"`
+    `pass_name` `"critic"` and `"floor"` price at the critic rate slot
+    (`_CRITIC_RATE_PASS_NAMES`: the Floor judge runs on the critic model,
+    QA W8 item 2); every other ledgered pass name (`"primary"`,
+    `"cover_note"`) prices at the primary slot -- the same split
+    `admin_dashboard._CRITIC_RATE_PASSES` uses for the identical ledger,
+    duplicated here (not imported) because `admin_dashboard` itself imports
+    this module. `"cover_note"`
     (`review_routes.post_review_cover_note`, which writes into this same
     table under this same `review_id` partition key and settles its own cost
     separately through `record_cover_note_spend`) is enumerated for
@@ -3725,7 +3859,7 @@ def _actual_cents_from_ledger(review_id: str, dynamodb_resource: Any) -> int:
         if actual_in is None and actual_out is None:
             continue
         measured = True
-        bucket = critic_usage if row.get("pass_name") == "critic" else primary_usage
+        bucket = critic_usage if row.get("pass_name") in _CRITIC_RATE_PASS_NAMES else primary_usage
         bucket["input_tokens"] += int(actual_in or 0)
         bucket["output_tokens"] += int(actual_out or 0)
         # Issue #154: the row's prompt-cache columns ride along so
@@ -3778,7 +3912,13 @@ def settle_reservation_for_cancel(review_id: str, dynamodb_resource: Any) -> Non
     if submission.get("reservation_released"):
         return
     actual_usd_cents = _actual_cents_from_ledger(review_id, dynamodb_resource)
-    settle_spend(review_id, submission["spend_reservation_id"], actual_usd_cents, dynamodb_resource)
+    settle_spend(
+        review_id,
+        submission["spend_reservation_id"],
+        actual_usd_cents,
+        dynamodb_resource,
+        **floor_top_up_settle_kwargs(submission),
+    )
     submissions.update_item(
         Key={"idempotency_key": submission["idempotency_key"]},
         UpdateExpression="SET reservation_released = :true, updated_at = :now",

@@ -19,7 +19,8 @@
  * fallback ever reaches the DOM.
  */
 import { useState } from 'react';
-import { authorizedFetch, friendlyErrorMessage, readErrorDetail } from './api';
+import { authorizedFetch } from './api';
+import { AUTH_DETAIL_STATUSES, responseError, toUserMessage } from './userMessage';
 import { CtBanner, CtButton, CtCard, CtField } from './ui/react';
 
 const CHANGE_PASSWORD_FALLBACK = "We couldn't change your password. Please try again.";
@@ -63,20 +64,18 @@ export default function ChangePassword({
         body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
       });
       if (!response.ok) {
-        const detail = await readErrorDetail(response);
-        throw new Error(
-          detail ??
-            friendlyErrorMessage(
-              `POST /api/me/password returned HTTP ${response.status}`,
-              CHANGE_PASSWORD_FALLBACK,
-            ),
+        throw await responseError(
+          response,
+          `POST /api/me/password returned HTTP ${response.status}`,
+          CHANGE_PASSWORD_FALLBACK,
+          AUTH_DETAIL_STATUSES,
         );
       }
       resetFields();
       setSuccess(true);
       onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : friendlyErrorMessage(err, CHANGE_PASSWORD_FALLBACK));
+      setError(toUserMessage(err, CHANGE_PASSWORD_FALLBACK));
     } finally {
       setSubmitting(false);
     }

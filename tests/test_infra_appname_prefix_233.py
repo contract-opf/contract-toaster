@@ -77,6 +77,7 @@ CUSTOM_CONTEXT = [
     "--context", "appDomain=acme.example",
     "--context", f"hostedDomain={CUSTOM_HOSTED_DOMAIN}",
     "--context", f"adminEmail={CUSTOM_ADMIN_EMAIL}",
+    "--context", f"allowedEmailDomains={CUSTOM_HOSTED_DOMAIN}",
 ]
 
 
@@ -227,7 +228,9 @@ def check_b_default_context_preserves_current_names() -> list[str]:
         f"stderr (last 800): {no_context_result.stderr[-800:]}",
     )
     combined_output = no_context_result.stdout + no_context_result.stderr
-    for missing_key in ("githubOwner", "alarmsEmail", "appDomain", "adminEmail", "hostedDomain"):
+    for missing_key in (
+        "githubOwner", "alarmsEmail", "appDomain", "adminEmail", "hostedDomain", "allowedEmailDomains",
+    ):
         failures += _assert(
             missing_key in combined_output,
             f"missing-context error message names '{missing_key}'",

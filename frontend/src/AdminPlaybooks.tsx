@@ -231,7 +231,8 @@ import {
   type PlaybookCatalogEntry,
   type PlaybookCatalogStatus,
 } from './playbooksStore';
-import { authorizedFetch, friendlyErrorMessage, readErrorDetail, triggerBrowserDownload } from './api';
+import { authorizedFetch, friendlyErrorMessage, triggerBrowserDownload } from './api';
+import { UserFacingError, responseError, toUserMessage } from './userMessage';
 import { linkifyText } from './linkify';
 import { deriveVersionIdentifier, readOpfIdentity } from './opfIdentity';
 import AdminInstructions from './AdminInstructions';
@@ -509,7 +510,7 @@ export default function AdminPlaybooks(): React.ReactElement | null {
         return;
       }
       if (!response.ok) {
-        throw new Error(
+        throw new UserFacingError(
           friendlyErrorMessage(
             `GET playbook versions returned HTTP ${response.status}`,
             "We couldn't load that playbook's version history. Please try again.",
@@ -664,15 +665,12 @@ export default function AdminPlaybooks(): React.ReactElement | null {
           return;
         }
         if (!response.ok) {
-          const detail = await readErrorDetail(response);
-          throw new Error(
-            detail ?? friendlyErrorMessage(options.technical, options.fallback),
-          );
+          throw await responseError(response, options.technical, options.fallback);
         }
         options.onSuccess?.();
       } catch (err) {
         setActionError(
-          err instanceof Error ? err.message : friendlyErrorMessage(err, options.fallback),
+          toUserMessage(err, options.fallback),
         );
       } finally {
         setPendingAction(null);
@@ -718,31 +716,31 @@ export default function AdminPlaybooks(): React.ReactElement | null {
           return;
         }
         if (response.status === 410) {
-          throw new Error('This playbook version is no longer available in storage.');
+          throw new UserFacingError('This playbook version is no longer available in storage.');
         }
         if (!response.ok) {
-          const detail = await readErrorDetail(response);
-          throw new Error(
-            detail ??
-              friendlyErrorMessage(
-                `GET playbook version download ${playbookId}/${version}`,
-                "We couldn't download that playbook version. Please try again.",
-              ),
+          throw await responseError(
+            response,
+            `GET playbook version download ${playbookId}/${version}`,
+            "We couldn't download that playbook version. Please try again.",
           );
         }
         const data = (await response.json()) as { url?: string };
         if (!data.url) {
-          throw new Error('Download URL missing from response.');
+          throw new UserFacingError(
+            friendlyErrorMessage(
+              `GET playbook version download ${playbookId}/${version} returned no url`,
+              "We couldn't download that playbook version. Please try again.",
+            ),
+          );
         }
         triggerBrowserDownload(data.url);
       } catch (err) {
         setActionError(
-          err instanceof Error
-            ? err.message
-            : friendlyErrorMessage(
-                err,
-                "We couldn't download that playbook version. Please try again.",
-              ),
+          toUserMessage(
+            err,
+            "We couldn't download that playbook version. Please try again.",
+          ),
         );
       } finally {
         setPendingAction(null);
@@ -798,13 +796,10 @@ export default function AdminPlaybooks(): React.ReactElement | null {
           return;
         }
         if (!approvalResponse.ok) {
-          const detail = await readErrorDetail(approvalResponse);
-          throw new Error(
-            detail ??
-              friendlyErrorMessage(
-                `POST legal-approval ${playbookId}/${version}`,
-                "We couldn't record approval for that version. Please try again.",
-              ),
+          throw await responseError(
+            approvalResponse,
+            `POST legal-approval ${playbookId}/${version}`,
+            "We couldn't record approval for that version. Please try again.",
           );
         }
 
@@ -814,14 +809,14 @@ export default function AdminPlaybooks(): React.ReactElement | null {
           return;
         }
         if (!activateResponse.ok) {
-          const detail = await readErrorDetail(activateResponse);
-          const refusal =
-            detail ??
-            friendlyErrorMessage(
+          const refusal = (
+            await responseError(
+              activateResponse,
               `POST activate ${playbookId}/${version}`,
               "We couldn't activate that version.",
-            );
-          throw new Error(
+            )
+          ).message;
+          throw new UserFacingError(
             `${refusal} The approval was recorded and stands, but this version is not live — ` +
               'activate it from its row once that is resolved.',
           );
@@ -829,12 +824,10 @@ export default function AdminPlaybooks(): React.ReactElement | null {
         refreshAfterVersionChange(playbookId);
       } catch (err) {
         setActionError(
-          err instanceof Error
-            ? err.message
-            : friendlyErrorMessage(
-                err,
-                "We couldn't approve and activate that version. Please try again.",
-              ),
+          toUserMessage(
+            err,
+            "We couldn't approve and activate that version. Please try again.",
+          ),
         );
         // Re-read even on failure: a half-completed sequence must show the
         // approval it really did record, not the pre-click state.
@@ -963,13 +956,10 @@ export default function AdminPlaybooks(): React.ReactElement | null {
           return;
         }
         if (!response.ok) {
-          const detail = await readErrorDetail(response);
-          throw new Error(
-            detail ??
-              friendlyErrorMessage(
-                `POST upload ${targetId}/${version}`,
-                "We couldn't upload that version. Please try again.",
-              ),
+          throw await responseError(
+            response,
+            `POST upload ${targetId}/${version}`,
+            "We couldn't upload that version. Please try again.",
           );
         }
 
@@ -987,13 +977,10 @@ export default function AdminPlaybooks(): React.ReactElement | null {
             return;
           }
           if (!notesResponse.ok) {
-            const detail = await readErrorDetail(notesResponse);
-            throw new Error(
-              detail ??
-                friendlyErrorMessage(
-                  `PATCH notes ${targetId}/${version}`,
-                  'The version was uploaded, but its note could not be saved. Edit it from the version history below.',
-                ),
+            throw await responseError(
+              notesResponse,
+              `PATCH notes ${targetId}/${version}`,
+              'The version was uploaded, but its note could not be saved. Edit it from the version history below.',
             );
           }
         }
@@ -1013,9 +1000,7 @@ export default function AdminPlaybooks(): React.ReactElement | null {
         showHistoryFor(targetId);
       } catch (err) {
         setUploadError(
-          err instanceof Error
-            ? err.message
-            : friendlyErrorMessage(err, "We couldn't upload that version. Please try again."),
+          toUserMessage(err, "We couldn't upload that version. Please try again."),
         );
       } finally {
         setUploading(false);
@@ -1120,13 +1105,10 @@ export default function AdminPlaybooks(): React.ReactElement | null {
           return;
         }
         if (!response.ok) {
-          const detail = await readErrorDetail(response);
-          throw new Error(
-            detail ??
-              friendlyErrorMessage(
-                'POST /api/admin/playbooks',
-                "We couldn't upload that playbook. Please try again.",
-              ),
+          throw await responseError(
+            response,
+            'POST /api/admin/playbooks',
+            "We couldn't upload that playbook. Please try again.",
           );
         }
         const created = (await response.json()) as { playbook_id: string; version: string };
@@ -1144,13 +1126,10 @@ export default function AdminPlaybooks(): React.ReactElement | null {
             return;
           }
           if (!notesResponse.ok) {
-            const detail = await readErrorDetail(notesResponse);
-            throw new Error(
-              detail ??
-                friendlyErrorMessage(
-                  `PATCH notes ${created.playbook_id}/${created.version}`,
-                  'The playbook was uploaded, but its note could not be saved. Edit it from the version history below.',
-                ),
+            throw await responseError(
+              notesResponse,
+              `PATCH notes ${created.playbook_id}/${created.version}`,
+              'The playbook was uploaded, but its note could not be saved. Edit it from the version history below.',
             );
           }
         }
@@ -1169,9 +1148,7 @@ export default function AdminPlaybooks(): React.ReactElement | null {
         showHistoryFor(created.playbook_id);
       } catch (err) {
         setCreateError(
-          err instanceof Error
-            ? err.message
-            : friendlyErrorMessage(err, "We couldn't upload that playbook. Please try again."),
+          toUserMessage(err, "We couldn't upload that playbook. Please try again."),
         );
       } finally {
         setCreating(false);
@@ -1243,37 +1220,26 @@ export default function AdminPlaybooks(): React.ReactElement | null {
       ) : playbooks === null ? null : (
         <CtCard data-testid="admin-playbooks-table-panel">
           <div
-            className="ct-row ct-row--between"
+            className="ct-row ct-row--between ct-row--wrap"
             style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
               padding: '0.75rem 1rem',
               gap: '0.75rem',
-              borderBottom: '1px solid var(--ct-border-subtle, rgba(255, 255, 255, 0.08))',
+              borderBottom: '1px solid var(--ct-border)',
             }}
           >
             <span style={{ fontSize: 'var(--ct-text-sm)', fontWeight: 600, color: 'var(--ct-text-muted)' }}>
               Catalog
             </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <div className="ct-row ct-row--wrap" style={{ gap: '0.75rem' }}>
               <input
                 type="search"
+                className="ct-input"
                 placeholder="Filter playbooks…"
                 data-testid="playbooks-search-input"
                 value={playbookSearchQuery}
                 onChange={(e) => setPlaybookSearchQuery(e.target.value)}
-                style={{
-                  padding: '0.25rem 0.6rem',
-                  fontSize: 'var(--ct-text-sm)',
-                  borderRadius: '6px',
-                  background: 'var(--ct-bg, #1e1e1e)',
-                  border: '1px solid var(--ct-border, rgba(255,255,255,0.15))',
-                  color: 'inherit',
-                  width: '14rem',
-                }}
               />
-              <span className="ct-muted" style={{ fontSize: 'var(--ct-text-sm)', whiteSpace: 'nowrap' }}>
+              <span className="ct-muted">
                 Showing {filteredPlaybooks.length} of {playbooks.length}
               </span>
             </div>
@@ -1377,12 +1343,17 @@ export default function AdminPlaybooks(): React.ReactElement | null {
                             the same visual weight as Rename. The routine
                             actions now sit together in their own band, and the
                             destructive one sits in a separate band that
-                            `.ct-row-actions` pushes to the end and separates
-                            with a rule (see app.css). Grouping, not just
-                            ordering: "third in a stack" is exactly what this
-                            replaces. */}
+                            `.ct-row-actions__danger` pushes to the end
+                            (`margin-inline-start: auto`) and separates with an
+                            inline-start rule (see app.css). When the cell is
+                            too narrow and the bands wrap, the rule is what
+                            still marks Remove as different. Grouping, not
+                            just ordering: "third in a stack" is exactly what
+                            this replaces. (A 2x2 grid that put Remove in the
+                            fourth cell beside Rename briefly replaced this;
+                            QA 2026-10-31 decision D5 restored the bands.) */}
                         <div
-                          className="ct-row-actions ct-actions-grid-2x2"
+                          className="ct-row-actions"
                           role="group"
                           data-testid={`playbook-row-actions-${entry.playbook_id}`}
                           aria-label={`Actions for ${entry.display_name}`}
@@ -1577,8 +1548,8 @@ export default function AdminPlaybooks(): React.ReactElement | null {
                     marginBottom: '1rem',
                     padding: '0.75rem',
                     borderRadius: '6px',
-                    background: 'var(--ct-bg-subtle, rgba(255, 255, 255, 0.03))',
-                    border: '1px solid var(--ct-border-subtle, rgba(255, 255, 255, 0.08))',
+                    background: 'var(--ct-surface-sunken)',
+                    border: '1px solid var(--ct-border)',
                   }}
                 >
                   <div
@@ -1694,13 +1665,12 @@ export default function AdminPlaybooks(): React.ReactElement | null {
                           <div
                             style={{
                               display: 'grid',
-                              gridTemplateColumns: 'repeat(2, 1fr)',
+                              gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
                               gap: '0.75rem',
                               padding: '0.75rem',
                               borderRadius: '4px',
-                              background: 'var(--ct-bg-card, rgba(0,0,0,0.2))',
-                              border:
-                                '1px solid var(--ct-border-subtle, rgba(255,255,255,0.06))',
+                              background: 'var(--ct-surface-raised)',
+                              border: '1px solid var(--ct-border)',
                               fontSize: 'var(--ct-text-sm)',
                             }}
                           >
@@ -1742,8 +1712,7 @@ export default function AdminPlaybooks(): React.ReactElement | null {
                               style={{
                                 gridColumn: '1 / -1',
                                 paddingTop: '0.4rem',
-                                borderTop:
-                                  '1px solid var(--ct-border-subtle, rgba(255,255,255,0.06))',
+                                borderTop: '1px solid var(--ct-border)',
                               }}
                             >
                               <CtChip variant={sameHash ? 'ok' : 'warn'}>

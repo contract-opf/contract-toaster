@@ -61,10 +61,14 @@ Endpoints:
   POST /api/admin/retention                     — admin: request a retention change,
                                                     dual-controlled for retroactive
                                                     reductions per #13/#61 (#94).
+  POST /api/admin/retention/pending/{id}/confirm — admin: a DIFFERENT admin confirms a
+                                                   parked reduction (W6.7).
+  POST /api/admin/retention/pending/{id}/cancel  — admin: withdraw a parked reduction (W6.7).
   POST /api/admin/retention/preview              — admin: pre-sweep purge preview (#94).
   GET  /api/admin/retention/holds                — admin: legal-hold list view (#94).
   POST /api/admin/retention/holds/{review_id}    — admin: place a legal hold (#94).
-  DELETE /api/admin/retention/holds/{review_id}  — admin: release a legal hold (#94).
+  DELETE /api/admin/retention/holds/{review_id}  — admin: release a legal hold (#94);
+                                                   body {"reason": str} required (W6.5).
 
   GET  /api/admin/diagnostics/recent-failures  — admin: why recent reviews
                       failed (#443) — a bounded, newest-first list of recent
@@ -401,16 +405,19 @@ from src.bundle_authoring import validate_pen_rules_document
 from src.corpus import deterministic_embed, run_ingestion_request
 from src.download import generate_presigned_playbook_download_url
 from src.demo_auth import (
+    DEMO_SESSION_COOKIE_NAME,
     add_user,
     change_own_password,
+    change_own_password_and_reissue,
     clear_demo_session_cookie,
     client_ip_from_request,
     default_credentials_warning,
     enforce_default_credentials_rotation,
+    enforce_session_version,
     get_auth_mode_settings,
-    issue_demo_token,
-    login_with_password,
+    password_sign_in,
     remove_user,
+    revoke_demo_session,
     set_auth_mode,
     set_demo_session_cookie,
 )
@@ -469,6 +476,8 @@ from src.reviews import (
 from src.upload_validation import MAX_UPLOAD_SIZE_BYTES
 from src.retention import (
     RETENTION_WINDOW_FOREVER,
+    cancel_pending_reduction,
+    confirm_pending_reduction,
     get_retention_settings,
     list_legal_holds,
     preview_purge_sweep,
@@ -526,8 +535,14 @@ def get_active_user_row(
     (demo_auth.DEFAULT_CREDENTIALS_ENFORCEMENT_EXEMPT_PATHS) a caller needs
     to see and clear that warning. No-op for any row where
     `default_credentials_warning` is False (every SSO caller, and any
-    password caller who has already rotated)."""
+    password caller who has already rotated).
+
+    A demo session token is also checked against the row's current token
+    version (`demo_auth.enforce_session_version`), on the row just read: a
+    token from before a password change, a sign-out, or a delete-and-recreate
+    of the same username is refused with 401. Cognito tokens are untouched."""
     caller_row = require_active_user(current_user.get("sub", ""), dynamodb_resource)
+    enforce_session_version(current_user, caller_row)
     enforce_default_credentials_rotation(caller_row, request.url.path)
     return caller_row
 
@@ -550,6 +565,11 @@ async def _lifespan(_app: FastAPI):
     not serve, and the only symptom was a Review tab that looked like an
     unbuilt feature. See `src/startup_checks.py` for why the required set is
     derived from source rather than listed by hand.
+
+    `verify_demo_token_secret` runs second, also at the top level: when
+    AUTH_MODE wires password sign-in, an unset, short, placeholder or
+    single-character DEMO_TOKEN_SECRET exits the boot (QA 2026-10-31, report
+    #3) rather than signing sessions anyone could forge.
 
     `ensure_entity_roster_table` (issue #59, audit finding F9) runs next and
     for the same reason: the entity-roster table is provisioned ONCE here
@@ -597,6 +617,7 @@ async def _lifespan(_app: FastAPI):
     is never built.
     """
     startup_checks.verify_required_env()
+    startup_checks.verify_demo_token_secret()
     startup_checks.ensure_entity_roster_table(get_dynamodb_resource())
     process_started_at = int(time.time())
     if config.deploy_target() == "dts":
@@ -805,12 +826,23 @@ async def post_me_password(
     password stops working on the caller's next login) and one
     `password_changed` audit row is appended -- identifiers only, never a
     plaintext password or the hash itself.
+
+    Every session issued before the change ends (the row's token version
+    moves with the hash). On a deployment that wires password sign-in the
+    response carries a fresh session cookie, so the caller who changed the
+    password stays signed in while every other session does not.
     """
+    current_password = body.get("current_password", "")
+    new_password = body.get("new_password", "")
+    if config.auth_mode() in ("password", "both"):
+        result, token = change_own_password_and_reissue(
+            current_password, new_password, caller_row, dynamodb_resource
+        )
+        response = JSONResponse(content=result)
+        set_demo_session_cookie(response, token)
+        return response
     result = change_own_password(
-        body.get("current_password", ""),
-        body.get("new_password", ""),
-        caller_row,
-        dynamodb_resource,
+        current_password, new_password, caller_row, dynamodb_resource
     )
     return JSONResponse(content=result)
 
@@ -1182,25 +1214,40 @@ async def post_auth_login(
     unknown user or wrong password, 403 if the matched row's lifecycle
     status is not active.
     """
-    result = login_with_password(
+    result, token = password_sign_in(
         body["username"],
         body["password"],
         dynamodb_resource,
         client_ip=client_ip_from_request(request),
     )
-    token = issue_demo_token(result)
     response = JSONResponse(content=result)
     set_demo_session_cookie(response, token)
     return response
 
 
 @app.post("/api/auth/logout", include_in_schema=True)
-async def post_auth_logout() -> JSONResponse:
+async def post_auth_logout(
+    request: Request,
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
+) -> JSONResponse:
     """Unauthenticated: clears the password-mode session cookie (issue
     #468). Safe to call with no session present (e.g. double sign-out, an
     already-expired cookie) — always 200. Cognito/Amplify sign-out is a
     separate client-side flow (Authenticator's own signOut) and is
-    unaffected by this route."""
+    unaffected by this route.
+
+    When the request carries a demo session that still verifies and is
+    current, the user's token version is incremented, so that token -- and
+    every other session of the same user -- stops working server-side
+    rather than only leaving this browser's cookie jar
+    (`demo_auth.revoke_demo_session`). A stale or invalid token changes
+    nothing."""
+    token = request.cookies.get(DEMO_SESSION_COOKIE_NAME)
+    if not token:
+        scheme, _, credentials = request.headers.get("authorization", "").partition(" ")
+        if scheme.lower() == "bearer":
+            token = credentials.strip() or None
+    revoke_demo_session(token, dynamodb_resource)
     response = JSONResponse(content={"signed_out": True})
     clear_demo_session_cookie(response)
     return response
@@ -1226,13 +1273,28 @@ async def post_admin_retention(
 ) -> JSONResponse:
     """Admin: request a retention-window change (issue #94).
 
-    Body: {"retention_window_days": int | "forever", "second_admin_confirmation": {"actor": str} | null}
-    Forward-looking changes apply immediately, single-admin. Retroactive
-    reductions require a second, different admin's confirmation or enter a
-    72-hour pending-delay state (#13/#61's dual-control gate). Raises HTTP
-    403 for a non-admin caller, 400 for a window outside [0, 1095] days and
-    not the `"forever"` / indefinite-preservation sentinel (issue #34).
+    Body: {"retention_window_days": int | "forever", "reason": str}
+    Forward-looking changes apply immediately, single-admin. A retroactive
+    reduction never applies from this request (W6.7): it is parked as a
+    pending record (`reason` required) that a DIFFERENT admin confirms via
+    POST /api/admin/retention/pending/{pending_id}/confirm, any admin
+    cancels, or the purge sweep applies after 72 hours. Raises HTTP 403 for
+    a non-admin caller, 400 for a window outside [0, 1095] days and not the
+    `"forever"` sentinel (issue #34), for a reduction without a reason, or
+    for a body still carrying the retired `second_admin_confirmation`
+    field; 409 when a reduction is already pending.
     """
+    if body.get("second_admin_confirmation") is not None:
+        # The free-text "second admin" was self-attested (QA report #7).
+        # Refused rather than ignored, so an old client cannot believe it
+        # dual-controlled anything.
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "second_admin_confirmation is no longer accepted. A reduction is "
+                "confirmed by a different admin from the pending-reductions list."
+            ),
+        )
     raw_window = body["retention_window_days"]
     # "forever" must pass through untouched -- int() on it raises ValueError
     # before request_retention_change's own validation ever runs.
@@ -1241,7 +1303,38 @@ async def post_admin_retention(
         window_days,
         caller_row,
         dynamodb_resource,
-        second_admin_confirmation=body.get("second_admin_confirmation"),
+        reason=body.get("reason", ""),
+    )
+    return JSONResponse(content=result)
+
+
+@app.post("/api/admin/retention/pending/{pending_id}/confirm", include_in_schema=True)
+async def post_admin_retention_pending_confirm(
+    pending_id: str = Path(...),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
+) -> JSONResponse:
+    """Admin: confirm a parked retention reduction (W6.7). The confirmer is
+    the authenticated caller -- an admin (strict `is_admin is True`) who is
+    not the requester. Raises HTTP 403 for a non-admin or for the requester,
+    404 for an unknown or no-longer-pending id."""
+    result = confirm_pending_reduction(pending_id, caller_row, dynamodb_resource)
+    return JSONResponse(content=result)
+
+
+@app.post("/api/admin/retention/pending/{pending_id}/cancel", include_in_schema=True)
+async def post_admin_retention_pending_cancel(
+    pending_id: str = Path(...),
+    body: dict[str, Any] | None = Body(None),  # noqa: B008
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
+) -> JSONResponse:
+    """Admin: withdraw a parked retention reduction (W6.7). Body:
+    {"reason": str} (optional). Any admin may cancel, including the
+    requester. Raises HTTP 403 for a non-admin, 404 for an unknown or
+    no-longer-pending id."""
+    result = cancel_pending_reduction(
+        pending_id, caller_row, dynamodb_resource, reason=(body or {}).get("reason", "")
     )
     return JSONResponse(content=result)
 
@@ -1301,14 +1394,21 @@ async def post_admin_retention_hold(
 @app.delete("/api/admin/retention/holds/{review_id}", include_in_schema=True)
 async def delete_admin_retention_hold(
     review_id: str = Path(...),
+    body: dict[str, Any] | None = Body(None),  # noqa: B008
     caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
     dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
     s3_client: Any = Depends(get_s3_client),  # noqa: B008
 ) -> JSONResponse:
     """Admin: release a legal hold on a review, mirrored to the storage
-    layer (issue #94 / #61). Raises HTTP 403 for a non-admin caller, 404 for
-    an unknown review."""
-    result = release_legal_hold(review_id, caller_row, dynamodb_resource, s3_client)
+    layer (issue #94 / #61). Body: {"reason": str} -- required (W6.5), and
+    recorded on the row and in the audit row. Raises HTTP 403 for a
+    non-admin caller, 400 for a missing or blank reason, 404 for an unknown
+    review, 409 when the review is not held, 503 when storage or the audit
+    trail refused (nothing is changed)."""
+    reason = (body or {}).get("reason", "")
+    if not isinstance(reason, str):
+        reason = ""
+    result = release_legal_hold(review_id, reason, caller_row, dynamodb_resource, s3_client)
     return JSONResponse(content=result)
 
 

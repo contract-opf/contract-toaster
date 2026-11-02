@@ -180,6 +180,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type AdminPanelRefreshProps } from './adminRefresh';
 import { failedLoad, type LoadState } from './loadState';
 import { authorizedFetch, friendlyErrorMessage } from './api';
+import { UserFacingError, responseError, toUserMessage } from './userMessage';
 import { type ModelKeySettings } from './AdminModel';
 import {
   backendStamp,
@@ -521,8 +522,10 @@ function sessionSecretRow(): SecretRow {
       'invalidates every session at once: everyone signed in — including whoever rotates it — ' +
       'is signed out immediately and has to sign in again. That is why it is rotated where ' +
       'the deployment is configured (the backend service’s own environment: block, then ' +
-      'restart the stack) and never from inside the running app, where a momentary failure to ' +
-      'read it would sign everybody out for no reason.',
+      'restart the stack; on a Coolify deployment it is the Coolify-generated ' +
+      'SERVICE_PASSWORD_64_DEMOTOKEN value, changed in the service’s environment variables there) and ' +
+      'never from inside the running app, where a momentary failure to read it would sign ' +
+      'everybody out for no reason.',
   };
 }
 
@@ -822,7 +825,7 @@ export default function AdminSettings({
         return;
       }
       if (!response.ok) {
-        throw new Error(
+        throw new UserFacingError(
           friendlyErrorMessage(
             `GET /api/me/preferences returned HTTP ${response.status}`,
             "We couldn't load this deployment's settings. Please try again.",
@@ -848,7 +851,7 @@ export default function AdminSettings({
         return;
       }
       if (!response.ok) {
-        throw new Error(
+        throw new UserFacingError(
           friendlyErrorMessage(
             `GET /api/admin/model-key returned HTTP ${response.status}`,
             "We couldn't load this deployment's secrets. Please try again.",
@@ -873,7 +876,7 @@ export default function AdminSettings({
         return;
       }
       if (!response.ok) {
-        throw new Error(
+        throw new UserFacingError(
           friendlyErrorMessage(
             `GET /api/admin/entity-roster returned HTTP ${response.status}`,
             "We couldn't load your legal entity names. Please try again.",
@@ -920,17 +923,14 @@ export default function AdminSettings({
         body: JSON.stringify({ entities: parseRosterDraft(rosterDraft) }),
       });
       if (!response.ok) {
-        const body = (await response.json().catch(() => ({}))) as { detail?: unknown };
         // The server's own 400 detail is the useful half here (which name is
         // too long, which character is not allowed), so it is shown rather
         // than replaced — it names no endpoint and no status code (#425).
-        throw new Error(
-          typeof body.detail === 'string' && body.detail
-            ? body.detail
-            : friendlyErrorMessage(
-                `PUT /api/admin/entity-roster returned HTTP ${response.status}`,
-                "We couldn't save your legal entity names. Please try again.",
-              ),
+        // Any other status renders the fixed copy.
+        throw await responseError(
+          response,
+          `PUT /api/admin/entity-roster returned HTTP ${response.status}`,
+          "We couldn't save your legal entity names. Please try again.",
         );
       }
       const data = (await response.json()) as EntityRosterSettings;
@@ -939,9 +939,7 @@ export default function AdminSettings({
       setRosterSaved(true);
     } catch (err) {
       setRosterSaveError(
-        err instanceof Error
-          ? err.message
-          : "We couldn't save your legal entity names. Please try again.",
+        toUserMessage(err, "We couldn't save your legal entity names. Please try again."),
       );
     } finally {
       setRosterSaving(false);
@@ -961,7 +959,7 @@ export default function AdminSettings({
         return;
       }
       if (!response.ok) {
-        throw new Error(
+        throw new UserFacingError(
           friendlyErrorMessage(
             `GET /api/admin/spend returned HTTP ${response.status}`,
             "We couldn't load this deployment's spend. Please try again.",
@@ -1042,17 +1040,13 @@ export default function AdminSettings({
           body: JSON.stringify({ daily_cap_usd_cents: nextCapUsdCents }),
         });
         if (!response.ok) {
-          const body = (await response.json().catch(() => ({}))) as { detail?: unknown };
           // The server's own 400 detail is the useful half here (which bound
           // was missed), so it is shown rather than replaced — it names no
           // endpoint and no status code (#425).
-          throw new Error(
-            typeof body.detail === 'string' && body.detail
-              ? body.detail
-              : friendlyErrorMessage(
-                  `POST /api/admin/spend-cap returned HTTP ${response.status}`,
-                  "We couldn't save the daily spend cap. Please try again.",
-                ),
+          throw await responseError(
+            response,
+            `POST /api/admin/spend-cap returned HTTP ${response.status}`,
+            "We couldn't save the daily spend cap. Please try again.",
           );
         }
         // Re-read the LEDGER, not just the saved cap: "what is left today" and
@@ -1063,9 +1057,7 @@ export default function AdminSettings({
         setCapSaved(true);
       } catch (err) {
         setCapSaveError(
-          err instanceof Error
-            ? err.message
-            : "We couldn't save the daily spend cap. Please try again.",
+          toUserMessage(err, "We couldn't save the daily spend cap. Please try again."),
         );
       } finally {
         setCapSaving(false);
@@ -1082,7 +1074,7 @@ export default function AdminSettings({
         return;
       }
       if (!response.ok) {
-        throw new Error(
+        throw new UserFacingError(
           friendlyErrorMessage(
             `GET /version returned HTTP ${response.status}`,
             "We couldn't read what this deployment is running. Please try again.",
@@ -1359,7 +1351,7 @@ export default function AdminSettings({
                     {duplicateLineCount > 0 && (
                       <span
                         data-testid="admin-settings-roster-duplicate-notice"
-                        style={{ fontSize: '14px', color: 'var(--ct-color-warn, #b45309)', fontWeight: 500 }}
+                        style={{ fontSize: '14px', color: 'var(--ct-warn)', fontWeight: 500 }}
                       >
                         {duplicateLineCount}{' '}
                         {duplicateLineCount === 1 ? 'duplicate entry' : 'duplicate entries'} will be merged on save
@@ -1437,9 +1429,9 @@ export default function AdminSettings({
                 style={{
                   marginTop: '0.5rem',
                   padding: '0.75rem',
-                  borderRadius: 'var(--ct-radius, 6px)',
-                  background: 'var(--ct-color-surface-subtle, rgba(0,0,0,0.02))',
-                  border: '1px solid var(--ct-color-border-subtle, rgba(0,0,0,0.08))',
+                  borderRadius: 'var(--ct-radius-sm)',
+                  background: 'var(--ct-surface-sunken)',
+                  border: '1px solid var(--ct-border)',
                   fontSize: '14px',
                 }}
               >
@@ -1467,7 +1459,7 @@ export default function AdminSettings({
                         borderBottom:
                           idx === rosterLoad.data.history!.length - 1
                             ? 'none'
-                            : '1px solid var(--ct-color-border-subtle, rgba(0,0,0,0.06))',
+                            : '1px solid var(--ct-border)',
                         fontSize: '14px',
                       }}
                       data-testid={`admin-settings-roster-history-entry-${idx}`}
@@ -1496,9 +1488,9 @@ export default function AdminSettings({
                             key={`added-${name}`}
                             style={{
                               fontSize: '14px',
-                              color: 'var(--ct-color-success-text, #15803d)',
-                              background: 'var(--ct-color-success-bg, #f0fdf4)',
-                              border: '1px solid var(--ct-color-success-border, #bbf7d0)',
+                              color: 'var(--ct-ok)',
+                              background: 'var(--ct-ok-bg)',
+                              border: '1px solid var(--ct-ok-border)',
                               padding: '2px 8px',
                               borderRadius: '4px',
                               display: 'inline-block',
@@ -1512,9 +1504,9 @@ export default function AdminSettings({
                             key={`removed-${name}`}
                             style={{
                               fontSize: '14px',
-                              color: 'var(--ct-color-danger-text, #b91c1c)',
-                              background: 'var(--ct-color-danger-bg, #fef2f2)',
-                              border: '1px solid var(--ct-color-danger-border, #fecaca)',
+                              color: 'var(--ct-danger)',
+                              background: 'var(--ct-danger-bg)',
+                              border: '1px solid var(--ct-danger-border)',
                               padding: '2px 8px',
                               borderRadius: '4px',
                               display: 'inline-block',

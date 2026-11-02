@@ -8,7 +8,11 @@ mirrored to the object-locked `audit-archive` S3 bucket; these queries are read-
 ## Key shapes (recap)
 
 - **`audit`** — PK `partition` (`YYYY-MM`, or `target_type#target_id` for entity-scoped history), SK
-  `timestamp#event_id`. GSIs on **`actor`** and **`review_id`**.
+  `timestamp#event_id`. GSIs on **`actor`** and **`review_id`**. In practice the SK is
+  `{epoch_seconds}#{event_id}` with `event_id` a random uuid4 hex, written only by
+  `backend/src/audit_log.py` (and the purge worker Lambda's parity-tested copy) as a conditional
+  `PutItem` that refuses an existing key, so a SK range on the epoch prefix still orders and windows
+  rows, and no row is ever overwritten.
 - **`reviews`** — PK `review_id`; GSI on `owner_sub` ("my reviews"); component-hash fields
   (`playbook_hash`, `prompt_hash`, `standard_form_hash`, `model_policy_hash`, `corpus_snapshot_version`)
   for rollback/quarantine population queries.

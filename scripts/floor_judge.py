@@ -410,6 +410,64 @@ class FloorJudgment:
         return bool(self.unjudged)
 
 
+def worst_case_judge_usage(
+    *,
+    invariants: list[dict[str, Any]],
+    review_context: str,
+    model_id: str,
+    max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
+    perspective_note: str = "",
+) -> dict[str, int]:
+    """The most `judge_floor_invariants` can spend on these arguments (QA W8
+    item 3), for the caller to reserve against the daily cap BEFORE any
+    model pass runs: `{"calls", "input_tokens", "output_tokens"}`, summed
+    over every attempt.
+
+    Mirrors the judging loop exactly: an invariant the loop skips without a
+    call (party-relative with no `perspective_note`) costs nothing; every
+    other one can spend `1 + _MAX_RETRIES_PER_INVARIANT` attempts. Each
+    attempt's input is the calibrated estimate of the system prompt and that
+    invariant's user prompt -- the whole document rides in it -- plus the
+    longest correction block a retry can append; its output is the full
+    `max_tokens` the client sends (content plus the model's reasoning
+    allowance, clamped to the declared cap, as `invoke()` builds it).
+    Estimates err high, never low: the calibrated input ratio is ~7% over.
+    """
+    attempts = 1 + _MAX_RETRIES_PER_INVARIANT
+    longest_correction = max(
+        len(_correction_block("evidence_quote_too_long: " + "x" * 200)),
+        len(_correction_block("invalid_response: " + "x" * 200)),
+    )
+    try:
+        reasoning = _model_client.openrouter_reasoning_max_tokens(model_id)
+        cap = _model_client.openrouter_model_max_output_tokens(model_id)
+    except (OSError, ValueError):
+        reasoning, cap = 0, _model_client.DEFAULT_MAX_OUTPUT_TOKENS
+    per_call_output = min(int(max_output_tokens) + reasoning, cap)
+    calls = 0
+    input_tokens = 0
+    for invariant in invariants:
+        statement = invariant.get("statement", "")
+        if not perspective_note and _is_party_relative(statement):
+            continue
+        user_prompt = _build_user_prompt(
+            invariant_id=invariant.get("id", ""),
+            statement=statement,
+            review_context=review_context,
+            perspective_note=perspective_note,
+        )
+        per_attempt = _primary_review_pass.request_input_tokens_est(
+            _SYSTEM_PROMPT, user_prompt + "x" * longest_correction
+        )
+        calls += attempts
+        input_tokens += attempts * per_attempt
+    return {
+        "calls": calls,
+        "input_tokens": input_tokens,
+        "output_tokens": calls * per_call_output,
+    }
+
+
 def judge_floor_invariants(
     *,
     invariants: list[dict[str, Any]],
@@ -519,6 +577,9 @@ def judge_floor_invariants(
             attempt_prompt = user_prompt + _correction_block(last_error)
             last_error = ""
             attempt_truncated = False
+            # QA W8 item 1: the exception this attempt's invoke() raised, for
+            # the ledger -- a truncated response carries its billed usage.
+            attempt_failure: BaseException | None = None
             # Issue #414: same timing/usage seam as run_primary_pass /
             # run_critic_pass (see those functions' identical comments) --
             # `attempt_duration_ms` is captured the instant invoke()
@@ -544,7 +605,8 @@ def judge_floor_invariants(
                     verdict = parsed
                 else:
                     outcome = "retry" if attempt < attempts_allowed else "failure"
-            except _model_client.ModelOutputTruncatedError:
+            except _model_client.ModelOutputTruncatedError as truncation_error:
+                attempt_failure = truncation_error
                 # Issue #682: the provider stopped at `finish_reason='length'`
                 # -- the judge was CUT OFF before it could write its verdict.
                 # This used to propagate straight out of this function, past
@@ -571,6 +633,10 @@ def judge_floor_invariants(
                 ran_out_of_room = True
                 attempt_truncated = True
                 outcome = "retry" if attempt < attempts_allowed else "failure"
+            except BaseException as failure:
+                # QA W8 item 1: remembered for the ledger, re-raised untouched.
+                attempt_failure = failure
+                raise
             finally:
                 # The token this attempt failed on, for the ledger only. A
                 # truncation is ledgered but never fed back as a correction.
@@ -578,7 +644,9 @@ def judge_floor_invariants(
                     "model_output_truncated" if attempt_truncated else ""
                 )
                 actual_usage = (
-                    getattr(model_client, "last_usage", None) if raw_response is not None else None
+                    getattr(model_client, "last_usage", None)
+                    if raw_response is not None
+                    else _model_client.reported_usage_from_failure(attempt_failure)
                 )
                 # LEDGER every attempt -- success, retry, or terminal failure
                 # alike -- mirroring the primary/critic passes' own

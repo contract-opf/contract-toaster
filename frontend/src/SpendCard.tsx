@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { authorizedFetch, friendlyErrorMessage } from './api';
+import { UserFacingError, toUserMessage } from './userMessage';
 import { failedLoad, type LoadState } from './loadState';
 import {
   capSourceNote,
@@ -64,7 +65,7 @@ export default function SpendCard({
         return;
       }
       if (!response.ok) {
-        throw new Error(
+        throw new UserFacingError(
           friendlyErrorMessage(
             `GET /api/admin/spend returned HTTP ${response.status}`,
             "We couldn't load this deployment's spend. Please try again.",
@@ -134,7 +135,7 @@ export default function SpendCard({
           return;
         }
         if (!response.ok) {
-          throw new Error(
+          throw new UserFacingError(
             friendlyErrorMessage(
               `POST /api/admin/spend-cap returned HTTP ${response.status}`,
               "We couldn't save the daily spend cap. Please try again.",
@@ -145,9 +146,7 @@ export default function SpendCard({
         setCapSaved(true);
       } catch (err) {
         setCapSaveError(
-          err instanceof Error
-            ? err.message
-            : "We couldn't save the daily spend cap. Please try again.",
+          toUserMessage(err, "We couldn't save the daily spend cap. Please try again."),
         );
       } finally {
         setCapSaving(false);
@@ -342,12 +341,7 @@ export default function SpendCard({
 
               <div
                 className="ct-row ct-row--wrap"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  marginBottom: '0.75rem',
-                }}
+                style={{ marginBottom: '0.75rem' }}
                 data-testid={`${testIdPrefix}-cap-presets`}
               >
                 <span style={{ fontSize: 'var(--ct-text-sm)', color: 'var(--ct-text-muted)' }}>Quick presets:</span>
@@ -357,9 +351,9 @@ export default function SpendCard({
                     type="button"
                     data-testid={`${testIdPrefix}-cap-preset-${amount}`}
                     style={{
-                      background: 'var(--ct-bg-subtle, rgba(255,255,255,0.06))',
-                      border: '1px solid var(--ct-border-subtle, rgba(255,255,255,0.12))',
-                      color: 'var(--ct-text, #fff)',
+                      background: 'var(--ct-neutral-bg)',
+                      border: '1px solid var(--ct-neutral-border)',
+                      color: 'var(--ct-text)',
                       borderRadius: '4px',
                       padding: '0.2rem 0.5rem',
                       fontSize: 'var(--ct-text-sm)',

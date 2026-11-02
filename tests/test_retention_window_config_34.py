@@ -250,17 +250,21 @@ class TestForeverDisablesPurge(RetentionWindowConfigTestBase):
         """Going from `forever` back to any finite window is the maximum
         possible reduction and must be dual-controlled, same as any other
         retroactive reduction (#13/#61) -- `forever` must not be a loophole
-        around dual control. Uses the second-admin-confirmed path (rather
-        than the unconfirmed/pending path) as the observable signal: a
-        forward-looking change always applies with
-        `applied_immediately=True` regardless of any confirmation supplied,
-        while a retroactive reduction applies (once confirmed) with
-        `applied_immediately=False` -- so `False` here proves forever ->
-        1095 was classified as a reduction, not silently treated as
-        forward-looking."""
+        around dual control. W6.7: the request is parked (a forward-looking
+        change would apply at once), and only a DIFFERENT admin's
+        confirmation applies it."""
         retention_module.request_retention_change(FOREVER, ADMIN, self.ddb)
         result = retention_module.request_retention_change(
-            1095, ADMIN, self.ddb, second_admin_confirmation={"actor": "admin-2"},
+            1095, ADMIN, self.ddb, reason="matter closed",
+        )
+        self.assertEqual(result["status"], "PENDING_SECOND_APPROVAL")
+        self.assertEqual(
+            retention_module.get_retention_settings(ADMIN, self.ddb)["retention_window_days"],
+            FOREVER,
+        )
+        admin_2 = {**ADMIN, "cognito_sub": "admin-2"}
+        result = retention_module.confirm_pending_reduction(
+            result["pending_id"], admin_2, self.ddb
         )
         self.assertEqual(result["status"], "APPLIED")
         self.assertFalse(result["applied_immediately"])

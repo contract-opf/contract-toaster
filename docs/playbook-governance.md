@@ -268,6 +268,23 @@ doc), B (schema description), and C (adversarial timing + static heuristic). It 
 the `detector-correctness` workflow on every change to `playbooks/` or
 `docs/playbook-governance.md`.
 
+**OPF `numeric_bound` patterns (QA 2026-10-31, report item 12).** An OPF hard rule's
+`numeric_bound` condition carries a playbook-supplied `pattern` that
+`scripts/hard_ledger.py` compiles and runs over the bound clause's text. Uploaded OPF
+playbooks never pass through the CI gate above, so the same constraint is enforced
+where they enter and where they run:
+
+- **At load/upload time** `scripts/opf_load.py` refuses (`OpfUnsafePatternError`, a JSON
+  Pointer and a reason, never the pattern) a pattern that does not compile, does not
+  have exactly one capture group, or that `scripts/regex_safety.structural_hazard`
+  flags. That is the static check Check C runs too: it reads the parsed pattern, so it
+  catches `((?:\d+,?)+)`, whose inner quantifier is not the group's last token.
+- **At run time** the pattern executes in a child interpreter killed after
+  `hard_ledger.NUMERIC_BOUND_TIMEOUT_S` (2 s, interpreter start included), because
+  Python's `re` cannot be interrupted. A timeout, or a pattern the static check flags
+  in a playbook stored before the load-time check existed, is "not evaluable" and fails
+  closed. Pinned by `tests/test_opf_numeric_bound_redos.py`.
+
 ## Canonicalization and content_hash (issue #5)
 
 `release.content_hash` is "SHA-256 over the **canonical** playbook content". The canonical form
@@ -470,7 +487,7 @@ run ID, and signed Legal approval. The bundle moves through three statuses:
 
 **No-active-bundle system state.** There is no requirement that an active bundle always exists for a given playbook. The system explicitly supports a **no-active-bundle** state: when no bundle is currently `active`, `POST /api/reviews` is refused with HTTP `503` and the user-visible message "no active playbook". This state is entered by the **deactivate action** (see below) or when the very first bundle is found bad before any successor exists. Intake resumes as soon as an admin activates a bundle.
 
-**Deactivate action.** An admin (GC-gated — the same approval level required to activate) may **deactivate** the currently active bundle without promoting a successor. This is distinct from **rollback** (which requires a prior bundle as the revert target) and is the correct action when: (a) the first-ever bundle is bad and no prior bundle exists, or (b) intake must be suspended during a quarantine investigation. Deactivate transitions the bundle to `retired` (preserving its snapshot) and clears `active_release_bundle_hash`. The action is audited. In-flight reviews continue to completion. The operating procedure is in [RUNBOOK.md → Suspending intake](../RUNBOOK.md#suspending-intake-deactivate-without-a-successor).
+**Deactivate action.** *Status: PLANNED — no deactivate route or button exists yet, and rollback quarantines nothing automatically; see [implementation-status.md](implementation-status.md) and [RUNBOOK.md → Suspending intake](../RUNBOOK.md#suspending-intake-deactivate-without-a-successor) for what an operator can do today.* An admin (GC-gated — the same approval level required to activate) may **deactivate** the currently active bundle without promoting a successor. This is distinct from **rollback** (which requires a prior bundle as the revert target) and is the correct action when: (a) the first-ever bundle is bad and no prior bundle exists, or (b) intake must be suspended during a quarantine investigation. Deactivate transitions the bundle to `retired` (preserving its snapshot) and clears `active_release_bundle_hash`. The action is audited. In-flight reviews continue to completion. The operating procedure is in [RUNBOOK.md → Suspending intake](../RUNBOOK.md#suspending-intake-deactivate-without-a-successor).
 
 Activation, rollback, and deactivate (one-click revert to a prior bundle, auto-`QUARANTINED` of reviews run under the bad
 bundle, `SUPERSEDED` on re-run, and no-active-bundle suspend-intake), and the audit entries for each are owned by

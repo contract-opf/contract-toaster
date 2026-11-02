@@ -41,7 +41,7 @@ needed".
 
 - Not a replacement for attorney judgment.
 - Not connected to any counterparty system.
-- Not training a model on your documents. We use Anthropic Claude via Amazon Bedrock; per Bedrock terms, prompts and outputs are not used to train models.
+- Not training a model on your documents. The AWS target calls Anthropic Claude via Amazon Bedrock, whose terms exclude prompts and outputs from model training. The Docker Compose target calls models through OpenRouter instead, under OpenRouter's and the model provider's terms; check them before you send real documents.
 
 ## How review works: knowledge and precision
 
@@ -57,22 +57,21 @@ Every playbook resolves to one of two review modes:
   against the playbook's codified negotiating positions directly — no
   canonical standard form is required, so this mode works for any
   counterparty-authored paper from day one.
-- **Precision** (per-playbook registry profile). A playbook may additionally
-  register a canonical standard form and a matching anchor map
-  (`standard-forms/`), which `scripts/playbook_registry.py::profile()`
+- **Precision** (a registry label, not a different review path). A playbook
+  may additionally register a canonical standard form and a matching anchor
+  map (`standard-forms/`), which `scripts/playbook_registry.py::profile()`
   reports as the `precision` profile. The deterministic section-anchored
   diff that profile once selected was retired from issue generation by the
-  2026-07-22 LLM-native decision and deleted in 2026-09 (issue #631); the
-  artifacts remain governed history and the profile still namespaces a
-  playbook's evaluation fixtures.
+  2026-07-22 LLM-native decision and deleted in 2026-09 (issue #631), so
+  every review today runs the same LLM-native path. The artifacts remain
+  governed history and the profile still namespaces a playbook's evaluation
+  fixtures.
 
-The default `synthetic-nda-sample` playbook ships in knowledge mode (no
-standard form required), so a fresh install is reviewable end to end with
-nothing to author or upload first — you just activate it ([First run:
-activate a playbook](#first-run-activate-a-playbook)); nothing is active
-until you do. Precision mode is opt-in per playbook —
-give any playbook a canonical standard form + anchor map and the router
-picks it up automatically, no code change.
+The default `synthetic-nda-sample` playbook needs no standard form, so a fresh
+install is reviewable end to end with nothing to author first. On the Docker
+Compose target the bootstrap installs and activates it on first boot (see
+[First run: the shipped playbook](#first-run-the-shipped-playbook)); on AWS an
+admin uploads and activates it ([RUNBOOK.md, bootstrap step 10](RUNBOOK.md#day-one-bootstrap-one-time-per-environment)).
 
 ## Playbooks
 
@@ -83,10 +82,11 @@ mapping a `playbook_id` to its playbook, anchor-map, section-config, and
 fixtures paths — adding a contract type never requires a code change.
 
 - **Default:** `synthetic-nda-sample` ("Synthetic NDA Sample") — a clearly
-  fictional, brand-free NDA playbook, bundled with the image and
-  activatable with one click on first run (see [First run: activate a
-  playbook](#first-run-activate-a-playbook)), so no real negotiating position is ever exposed by
-  accident. Remove or replace it with your own playbook once you're ready.
+  fictional, brand-free NDA playbook, bundled with the image and installed
+  and activated automatically on a Docker Compose deployment's first boot
+  (see [First run: the shipped playbook](#first-run-the-shipped-playbook)), so
+  no real negotiating position is ever exposed by accident. Remove or replace
+  it with your own playbook once you're ready.
 - **Community playbooks:** [contract-opf/playbooks](https://github.com/contract-opf/playbooks)
   *(coming soon)* — a shared library of OPF playbooks for common agreement
   types, licensed CC BY 4.0.
@@ -97,11 +97,10 @@ fixtures paths — adding a contract type never requires a code change.
 ## Architecture, in brief
 
 - **Frontend.** React SPA on AWS Amplify Hosting. Cognito user pool federated to Google as the only IdP, hosted-domain restricted.
-- **Backend.** Python (FastAPI) container on AWS App Runner serving the API only. Builds go through CI (CodeBuild or equivalent): tests and scans run, a signed container image is pushed to ECR, and App Runner is pinned to an immutable image **digest** that is promoted deliberately. A merge to `main` never auto-mutates production legal behavior.
-- **Review pipeline.** Reviews run asynchronously: the API starts an AWS Step Functions execution **directly** (extract → retrieve → primary review → adversarial review → leakage scan → redline → persist), and the UI polls for the result. There is no SQS buffer on the entry path. Idempotency comes from a submission record, one spend reservation per `review_id`, deterministic Step Functions execution names, and retry-safe "ensure execution started" semantics.
-- **LLM.** Anthropic Claude via Amazon Bedrock (single-region, `us-east-1`, native model ID — no cross-region inference profile), in a two-pass (reviewer + adversarial critic) design. The model is governed by an explicit model-policy matrix: primary model, critic model, embedding model, optional fallback, region, request contract, evaluation run, and cost assumptions. v1 pins **the same model (Opus 4.8) on both passes** (issue #148): the critic, which has the last word (ADR 0001, issue #136), is the stronger model, and the reviewer runs on it too so the two passes share one prompt cache — unless a future evaluated policy says otherwise.
-- **Retrieval.** Hybrid lexical + semantic retrieval over the executed-agreements corpus: an Amazon Bedrock Knowledge Base (backed by S3 Vectors) supplies semantic recall, paired with deterministic keyword/rule detectors for hard-rejection terms that semantic search can miss.
-- **Corpus governance.** Corpus ingestion creates a draft snapshot. Only a curated, regression-tested snapshot can become active, and every review records the corpus snapshot it used.
+- **Backend.** Python (FastAPI) container on AWS App Runner serving the API only. That image runs Python 3.12 (`backend/Dockerfile`); everything else, including the Docker Compose image, is on 3.13. Builds go through CI (CodeBuild or equivalent): tests and scans run, a signed container image is pushed to ECR, and App Runner is pinned to an immutable image **digest** that is promoted deliberately. A merge to `main` never auto-mutates production legal behavior.
+- **Review pipeline.** Reviews run asynchronously: on AWS the API starts a Step Functions execution **directly** (extract → primary review → adversarial review → leakage scan → redline → persist; its review stage is still a mock there), and on Docker Compose an in-process worker runs the real chain. The UI polls for the result. There is no SQS buffer on the entry path. Idempotency comes from a submission record, one spend reservation per `review_id`, deterministic Step Functions execution names, and retry-safe "ensure execution started" semantics.
+- **LLM.** A two-pass (reviewer + adversarial critic) design. The AWS design calls Anthropic Claude via Amazon Bedrock (single-region, `us-east-1`, native model ID — no cross-region inference profile); the Docker Compose target, which is the one that runs real reviews today, calls models through **OpenRouter** and needs an OpenRouter API key (see [The OpenRouter key](deploy/dts/README.md#the-openrouter-key)). The model is governed by an explicit model-policy matrix: primary model, critic model, embedding model, optional fallback, region, request contract, evaluation run, and cost assumptions. v1 pins **the same model (Opus 4.8) on both passes** (issue #148): the critic, which has the last word (ADR 0001, issue #136), is the stronger model, and the reviewer runs on it too so the two passes share one prompt cache — unless a future evaluated policy says otherwise.
+- **Retrieval: dormant by decision.** No review retrieves precedent today. The deterministic keyword/rule detectors for hard-rejection terms do run; the designed semantic layer (a Bedrock Knowledge Base over S3 Vectors) and corpus activation are parked, and only the ingestion half exists (`POST /api/corpus`, which produces a draft snapshot nothing reads). [docs/rag-dormant.md](docs/rag-dormant.md) has the status and what reviving it would take.
 - **Storage.** S3 (uploads, redlines, corpus, audit; governance object lock on corpus and audit; admin-configurable document retention plus storage-level legal hold). DynamoDB (users, playbooks, playbook versions, reviews, audit log, cost ledger). Immutable audit rows contain only non-substantive audit facts; model rationales and critic deltas live only in retention-governed confidential storage.
 - **Infrastructure as code.** AWS CDK (TypeScript). Everything is `cdk deploy`.
 - **Redlining.** `scripts/redline_block_apply.py` is a small, dependency-free OOXML tracked-changes writer we own outright, built entirely on the Python standard library (`zipfile` + `xml.etree.ElementTree`); it edits the uploaded package in place against a proven block transcript, with the non-`document.xml` parts it attaches (footnotes, header/footer, styles) in `scripts/docx_parts.py`. There is no `backend/vendor/` directory in this repo; see [ARCHITECTURE.md → Redlining](ARCHITECTURE.md#redlining--owned-docx-library).
@@ -156,25 +155,43 @@ stack — no local Python and no AWS account required:
 ```bash
 gh repo clone contract-opf/contract-toaster
 cd contract-toaster
-cp deploy/dts/.env.example deploy/dts/.env      # set DEMO_TOKEN_SECRET
+cp deploy/dts/.env.example deploy/dts/.env
+# edit deploy/dts/.env: DEMO_TOKEN_SECRET=<output of `openssl rand -hex 32`>
+# (the backend refuses to start without a strong one), and optionally
+# OPENROUTER_API_KEY — or leave it blank and set the key in the admin UI
 docker compose -f deploy/dts/docker-compose.yml --env-file deploy/dts/.env up --build
 ```
 
-- SPA: <http://localhost:8081> — sign in with **admin/admin** or **user/user**
+- SPA: <http://localhost:8081> — sign in with **admin/admin** or **user/user**.
+  Each must change its password before doing anything else.
 - API: <http://localhost:8080>
+
+**A review needs an OpenRouter key.** This stack runs the real review chain
+and has no mock fallback: with no key, every review ends in `ERROR`. Set
+`OPENROUTER_API_KEY` in `.env`, or sign in as `admin` and set it on the
+**Models** tab (it overrides the variable). Reviews are billed to that key.
+
+**The demo logins are seeded once, on a deployment's first boot**, and on
+every Docker Compose deployment, including one Coolify publishes to the
+internet. They do not come back after you delete them. On anything reachable
+by others: sign in as `admin`, change its password, add your own admin on the
+**Users** tab, sign in as that admin, and delete `admin` and `user`
+([details](deploy/dts/README.md#demo-users-seeded-once)).
 
 ### First run: the shipped playbook
 
 **Contract Toaster is an empty shell:** it knows nothing about any agreement
-type until a playbook is installed. With no active playbook, submitting a
+type until a playbook is installed and active. With no active playbook, submitting a
 review is refused with `503 no active playbook` rather than silently falling
 back to some built-in default — there isn't one.
 
-So that a fresh install is runnable out of the box, the deploy bootstrap
-(`deploy/dts/bootstrap.py`) installs and activates the playbook the image
-ships with, `synthetic-nda-sample` ("Synthetic NDA Sample"), the first time it
-runs against empty tables. Bring the stack up and upload a `.docx` — the
-review runs end to end, no first-run click required.
+So that a fresh install is runnable out of the box, the Docker Compose
+bootstrap (`deploy/dts/bootstrap.py`) installs and activates the playbook the
+image ships with, `synthetic-nda-sample` ("Synthetic NDA Sample"), the first
+time it runs against empty tables. Bring the stack up, set the OpenRouter key,
+and upload a `.docx` — the review runs end to end, no first-run click
+required. (The AWS target does not run this bootstrap; there an admin uploads
+and activates the playbook — see RUNBOOK.md, bootstrap step 10.)
 
 That install is **not** a special path: it calls the same
 `record_playbook_version_upload` / `activate_playbook_version` functions an
@@ -206,8 +223,18 @@ Full instructions, what's mocked, and what to expect are in
 
 This repo is a work in progress; the AWS deployment (App Runner, Amplify
 Hosting, Cognito, Step Functions) is not yet reachable end-to-end from a
-fresh clone — see [docs/REVIEW-GUIDE.md](docs/REVIEW-GUIDE.md) for the
-current status and blocking issues.
+fresh clone, and its review stage is still a mock — see
+[docs/REVIEW-GUIDE.md](docs/REVIEW-GUIDE.md) for the current status and
+blocking issues.
+
+The CDK app refuses to synthesize without six deploy-identity values:
+`githubOwner`, `alarmsEmail`, `appDomain`, `adminEmail`, `hostedDomain` and
+`allowedEmailDomains` (the email domains Cognito sign-ins may come from,
+which the stack hands the backend as `ALLOWED_EMAIL_DOMAINS`).
+Put them in `infra/cdk.context.json` (copy `infra/cdk.context.example.json`;
+the real file is git-ignored) or pass each as `--context key=value`. Also
+replace the dummy account IDs under `dev` / `prod` in `infra/cdk.json`. See
+[infra/README.md](infra/README.md#deploy-identity-context-issues-316-349-409).
 
 ```bash
 # Prerequisites
@@ -217,9 +244,10 @@ npm install -g aws-cdk
 # Infrastructure (CDK)
 cd infra
 npm install
-cdk synth                        # validate
-cdk diff                         # preview changes
-cdk deploy                       # deploy
+cp cdk.context.example.json cdk.context.json   # then fill in the six values
+cdk synth --context env=dev                    # validate (offline)
+cdk diff --context env=dev                     # preview changes
+cdk deploy --context env=dev                   # deploy (add --context profile=minimal for a demo footprint)
 
 # Backend (run locally against deployed AWS resources)
 cd ../backend
@@ -294,7 +322,9 @@ backlog.
 
   Optional pre-commit hooks for both live in `.pre-commit-config.yaml`
   (`pre-commit install`).
-- Anything that modifies `playbooks/` or `prompts/` requires legal review.
+- Anything that changes `playbooks/` or the review prompts (assembled in
+  code by `scripts/primary_review_pass.py` and its sibling pass modules;
+  there is no `prompts/` directory) requires legal review.
 - Conventional commits: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`.
 
 ## License
