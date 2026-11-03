@@ -464,11 +464,14 @@ jobs:
           SHORT_SHA=$(git rev-parse --short HEAD)
           IMAGE_TAG="${SHORT_SHA}-$(date +%Y%m%d%H%M%S)"
           echo "image-tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          # Repo-root context: the image carries the scripts/ modules the
+          # backend imports at runtime (see backend/Dockerfile's header).
           docker build \
             --build-arg VERSION="${IMAGE_TAG}" \
             --build-arg COMMIT_SHA="${COMMIT_SHA}" \
             -t "${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}" \
-            backend/
+            -f backend/Dockerfile \
+            .
 
       - name: Push image to ECR and capture digest (STEP G)
         id: push
