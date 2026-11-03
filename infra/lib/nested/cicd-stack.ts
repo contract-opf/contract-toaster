@@ -290,7 +290,9 @@ export class CicdStack extends cdk.NestedStack {
             'COMMIT_SHA=$(git rev-parse HEAD)',
             'SHORT_SHA=$(git rev-parse --short HEAD)',
             'IMAGE_TAG="${SHORT_SHA}-$(date +%Y%m%d%H%M%S)"',
-            'docker build --build-arg VERSION=$IMAGE_TAG --build-arg COMMIT_SHA=$COMMIT_SHA -t $ECR_REPO_URI:$IMAGE_TAG backend/',
+            // Repo-root context: the image carries the scripts/ modules the
+            // backend imports at runtime (see backend/Dockerfile's header).
+            'docker build --build-arg VERSION=$IMAGE_TAG --build-arg COMMIT_SHA=$COMMIT_SHA -t $ECR_REPO_URI:$IMAGE_TAG -f backend/Dockerfile .',
 
             // --- STEP F: Sign image (cosign + AWS Signer) ---
             'echo "[STEP F] Signing container image …"',

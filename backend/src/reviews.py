@@ -239,8 +239,8 @@ PASSES_PER_REVIEW = 2  # primary + adversarial (critic)
 # lists $8.84 (pre-#148, Sonnet reviewer), $8.71 (pre-#137), $6.86
 # (pre-#144), $2.46 (pre-#658) and $2.11 (pre-#625) as history only. They cannot be loaded
 # directly from model-policy/*.json at runtime: this module ships inside the
-# backend container (backend/Dockerfile COPYs only src/, built from the
-# backend/ directory as its Docker context) and infra/lambda/persist/
+# backend container (backend/Dockerfile COPYs backend/src/ and the runtime
+# scripts/ modules, not model-policy/) and infra/lambda/persist/
 # handler.py ships as its own standalone Lambda asset (infra/lambda/persist/
 # only) -- neither has model-policy/ on its filesystem. Instead,
 # tests/test_spend_reservation_settlement.py cross-checks these hardcoded
