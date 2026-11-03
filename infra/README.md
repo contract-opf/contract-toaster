@@ -40,9 +40,11 @@ pins the 3.13 declarations; the AWS image is the known exception.
 That image is built from the **repo root** (`docker build -f backend/Dockerfile .`,
 in both `ci-pipeline.yml` and the CodeBuild buildspec), not from `backend/`:
 the backend imports pipeline modules from `scripts/` at runtime, and the
-Dockerfile COPYs exactly that import closure.
-`tests/test_aws_image_runtime_scripts.py` fails if the list drifts from the
-import graph.
+Dockerfile COPYs exactly that import closure, plus the `playbooks/` and
+`model-policy/` data those modules read. `tests/test_aws_image_runtime_scripts.py`
+fails if the module list drifts from the import graph, or if runtime code
+starts reading a repo-root directory the image neither copies nor records as
+deliberately absent.
 
 ## Environments
 

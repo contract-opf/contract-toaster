@@ -388,10 +388,10 @@ def openrouter_model_max_output_tokens(
     FAILS CLOSED to `DEFAULT_MAX_OUTPUT_TOKENS` for a model the policy
     declares no cap for, for a falsy `model_id`, and for a Bedrock-target
     model id (which never appears in this artifact at all) -- absence is
-    never read as "this model will accept anything". The policy file is also
-    absent from some deployables' filesystems (backend/Dockerfile COPYs
-    `backend/src/` and the runtime `scripts/` modules, not `model-policy/`), so a load failure fails closed the same way rather than turning
-    an unreadable config into a raised review.
+    never read as "this model will accept anything". The policy file can also
+    be absent from a deployable's filesystem, so a load failure fails closed
+    the same way rather than turning an unreadable config into a raised
+    review.
     """
     if not model_id:
         return DEFAULT_MAX_OUTPUT_TOKENS
