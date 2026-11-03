@@ -28,8 +28,11 @@ scripts/ modules. This file holds that list to the import graph:
   4. The layout keeps the `parents[2]` arithmetic true: `backend/src` lands
      at `backend/src` under the WORKDIR, `scripts/` beside it, and uvicorn
      starts from `/app/backend`.
-  5. `playbooks/` is copied too: `playbook_registry` reads
-     `playbooks/registry.json` the moment it is imported.
+  5. The repo-root data runtime code reads is copied too: `playbooks/`
+     (`playbook_registry` reads `registry.json` the moment it is imported)
+     and `model-policy/` (`model_client`'s pins, capabilities and caps).
+     Every `REPO_ROOT / "<dir>"` in runtime code must name a copied
+     directory or one recorded in NOT_SHIPPED with its reason.
   6. Both producers of the AWS image (`ci-pipeline.yml` STEP E and the CDK
      CodeBuild buildspec) build it from the repo root with
      `-f backend/Dockerfile`; a `backend/` context cannot reach `scripts/`.
@@ -85,6 +88,32 @@ def runtime_scripts_closure() -> set[str]:
         closure.add(name)
         pending |= _imported_top_level_names(SCRIPTS / f"{name}.py") & available
     return closure
+
+
+# Repo-root data directories the AWS image carries, and the ones runtime code
+# names but the image deliberately leaves out (see backend/Dockerfile).
+RUNTIME_DATA_DIRS = ("playbooks", "model-policy")
+NOT_SHIPPED = {
+    "backend": "the module's own tree, already copied as backend/src",
+    "tests": "canonicalize's golden-hash fixture path is used by its CLI only",
+}
+
+_REPO_ROOT_READ = re.compile(r"\b_?REPO_ROOT\s*/\s*[\"']([^\"']+)[\"']")
+
+
+def repo_root_data_reads(closure: set[str]) -> set[str]:
+    """Top-level directory names runtime code joins onto REPO_ROOT."""
+    files = list(BACKEND_SRC.rglob("*.py")) + [SCRIPTS / f"{m}.py" for m in closure]
+    tops: set[str] = set()
+    for path in files:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.lstrip().startswith("#"):
+                continue
+            for match in _REPO_ROOT_READ.finditer(line):
+                top = match.group(1).split("/")[0]
+                if top != "scripts":
+                    tops.add(top)
+    return tops
 
 
 def _instructions(text: str) -> list[tuple[str, list[str]]]:
@@ -143,6 +172,10 @@ class ParserSelfCheck(unittest.TestCase):
         for name in ("opf_load", "hard_ledger", "regex_safety", "cover_note_pass"):
             self.assertIn(name, closure)
 
+    def test_repo_root_reads_are_not_vacuous(self) -> None:
+        reads = repo_root_data_reads(runtime_scripts_closure())
+        self.assertTrue({"playbooks", "model-policy"} <= reads, reads)
+
 
 class AwsImageCarriesRuntimeScripts(unittest.TestCase):
     def setUp(self) -> None:
@@ -188,11 +221,26 @@ class AwsImageCarriesRuntimeScripts(unittest.TestCase):
             "uvicorn must start from /app/backend so `src.main:app` resolves",
         )
 
-    def test_import_time_playbook_data_is_copied(self) -> None:
+    def test_runtime_data_is_copied(self) -> None:
         # playbook_registry reads playbooks/registry.json (and opf_load the
         # output schemas) at import; without them src.main cannot import.
+        # model_client reads model-policy/ for pins, capabilities and caps.
         copies = [args for kw, args in _instructions(self.text) if kw == "COPY"]
-        self.assertIn(["playbooks", "playbooks"], copies)
+        for data_dir in RUNTIME_DATA_DIRS:
+            self.assertIn([data_dir, data_dir], copies, f"{data_dir}/ is not copied")
+
+    def test_every_repo_root_data_read_is_covered(self) -> None:
+        # Every `REPO_ROOT / "<top>"` read in the runtime code names a
+        # directory that is copied, or one this file records as deliberately
+        # absent. A new top-level data read fails here until it is decided.
+        reads = repo_root_data_reads(self.closure)
+        undecided = sorted(reads - set(RUNTIME_DATA_DIRS) - set(NOT_SHIPPED))
+        self.assertEqual(
+            undecided, [],
+            "runtime code reads these repo-root directories, which "
+            "backend/Dockerfile neither COPYs nor records as deliberately "
+            f"absent: {undecided}",
+        )
 
 
 class AwsImageIsBuiltFromTheRepoRoot(unittest.TestCase):

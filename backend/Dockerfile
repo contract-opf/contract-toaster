@@ -67,12 +67,18 @@ COPY scripts/bind_bundle.py \
      scripts/text_fold.py \
      scripts/
 
-# Data those modules read relative to the repo root at IMPORT time:
-# playbook_registry loads playbooks/registry.json and the output schemas when
-# it is first imported, so without this the app cannot start. (model-policy/
-# stays out of this image on purpose -- backend/src/reviews.py mirrors its
-# rates and model_client.py fails closed when it is absent.)
+# Repo-root data the backend and those modules read at runtime:
+#   playbooks/     — playbook_registry loads registry.json and the output
+#                    schemas when it is first imported; without it the app
+#                    cannot start.
+#   model-policy/  — model_client's pinned model ids, capabilities, output
+#                    caps and the admin-selectable catalogue.
+# Deliberately NOT copied: standard-forms/ (only the test-only
+# synthetic-generic playbook names it), infra/fixtures/ (the DTS bootstrap
+# uploads it to object storage; a registry `mock_output_key` is an S3 key, not
+# a file) and tests/ (canonicalize's golden-hash path is CLI-only).
 COPY playbooks playbooks
+COPY model-policy model-policy
 
 # ---- build-time metadata (issue #42) ----
 # The source revision is an explicit input of this final, cheap block, and of
