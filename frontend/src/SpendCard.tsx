@@ -76,7 +76,7 @@ export default function SpendCard({
         cap_setting?: Partial<SpendCapSetting>;
         daily_cap_usd_cents?: number;
         spent_today_usd_cents?: number;
-        settled_today_usd_cents?: number;
+        today?: { settled_usd_cents?: number };
         remaining_usd_cents?: number;
         estimated_review_usd_cents?: number | null;
         worst_case_reservation_usd_cents?: number;
@@ -99,7 +99,7 @@ export default function SpendCard({
         cap_setting: cap,
         daily_cap_usd_cents: data.daily_cap_usd_cents ?? cap.daily_cap_usd_cents,
         spent_today_usd_cents: data.spent_today_usd_cents ?? 0,
-        settled_today_usd_cents: data.settled_today_usd_cents ?? 0,
+        settled_today_usd_cents: data.today?.settled_usd_cents ?? 0,
         remaining_usd_cents: data.remaining_usd_cents ?? 0,
         estimated_review_usd_cents: data.estimated_review_usd_cents ?? null,
         worst_case_reservation_usd_cents: data.worst_case_reservation_usd_cents ?? 0,
