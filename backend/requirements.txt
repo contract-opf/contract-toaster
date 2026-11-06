@@ -9,7 +9,7 @@ uvicorn[standard]==0.52.4
 # algorithm-confusion defence those advisories concern; the negative cases
 # (`alg: none`, HS256-signed-with-the-RSA-public-key, wrong aud, expired,
 # unknown kid) are asserted in tests/test_auth_jwt_pyjwt_61.py.
-PyJWT[crypto]==2.14.0
+PyJWT[crypto]==2.15.0
 httpx==0.28.1
 pydantic==2.13.5
 boto3==1.43.93
