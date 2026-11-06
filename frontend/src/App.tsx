@@ -867,7 +867,13 @@ function PasswordApp(): React.ReactElement {
 
     async function restoreSession(): Promise<void> {
       try {
-        const response = await authorizedFetch('/api/me');
+        // "Am I signed in?" is a question, not a request made on a signed-in
+        // person's behalf: a 401 here means "no cookie yet" for a first-time
+        // visitor, not "your session expired", so it opts out of the notifier
+        // that drives the expired-session banner.
+        const response = await authorizedFetch('/api/me', undefined, {
+          suppressSessionExpiredNotification: true,
+        });
         if (!response.ok) {
           throw new Error(`GET /api/me returned HTTP ${response.status}`);
         }
