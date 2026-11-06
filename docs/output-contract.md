@@ -212,6 +212,56 @@ governance step and not a code change. Read the artifact's *schema* as authorita
 dormancy claim* as superseded by this section until that step runs. This paragraph exists so the
 contradiction is recorded rather than discovered.
 
+### Deleting the last clause leaves the signature blocks
+
+A `delete_block` strikes the body of the block it names, and a signature block at the end of the agreement
+is part of that body as far as the extractor can tell: signature paragraphs have no heading of their own,
+so they are filed as physical paragraphs of the **last** numbered clause. Before this rule a model that
+deleted that clause (first seen on an Opus-class reviewer, which is the first to author `delete_block`
+ops against a real document) struck the signature blocks with it, and the accepted document came back
+unsigned — while rejecting the redline restored the original exactly, which is why no projection proof
+caught it. The model's `block_ops` named one block id; the defect is in the block, not in the transcript,
+so the fix is in the compiler (`scripts/redline_block_apply.py`) and not in the prompt.
+
+The compiler now strikes only the paragraphs **before** a trailing signature block and leaves that block
+untouched, in the same way for every deleted block (not only the document's last). Accepting the redline
+yields the clause heading, `[Intentionally omitted.]` in the clause's own last struck paragraph, and then
+the signature blocks exactly as they were. Rejecting it still reproduces the source paragraph for
+paragraph. Projection proof 2 expects the retained text after the placeholder.
+
+**What counts as a signature block is a heuristic**, implemented as text rules in
+`scripts/signature_block.py` and deliberately conservative — a paragraph is retained only if *every* line
+of it is signature-shaped, so clause text cannot be kept by it:
+
+- A **signature line** *starts* with a signature label (`By:`, `Name:`, `Title:`, `Date:`, `Signature:`,
+  `Signed:`, `Its:`, `Printed Name:`, `Authorized Signatory:`), a run of three or more underscores, or
+  `/s/`, and what remains once those are removed is short (at most 8 words after a label, 3 after an
+  underscore run or `/s/`).
+- A **party line** is at most 10 words ending in a formal entity suffix (`LLC`, `Inc.`, `Incorporated`,
+  `Corp.`, `Ltd`, `LLP`, …), or a role label of at most 3 words ending in a colon (`Company:`).
+- A **lead-in** starts `IN WITNESS WHEREOF`, `The parties have executed/caused`, `Agreed and accepted`,
+  `Accepted and agreed`, or `[Signature page …]`.
+
+The retained tail is the longest run of paragraphs, ending at the block's last one, made only of those
+lines, and it exists only if it holds at least one signature line (a lone party line or lead-in is not a
+signature block). A paragraph here is one `<w:p>`; a soft line break inside it separates lines.
+
+**It fails closed with a named reason**, per edit — the issue degrades to flag-only and sibling edits still
+land — rather than guess in either direction. `delete_block_signature_ambiguous` when a paragraph carries a
+signature line *and* prose (it cannot be split), or when signature lines sit behind text the heuristic does
+not recognise (so there is no clean tail to leave alone). `delete_block_signature_block` when every
+paragraph of the block is a signature block: the compiler never strikes one. The failure detail names the
+block and counts paragraphs; it quotes no document text.
+
+Deliberately **not** recognised, and therefore struck with their clause: contact labels (`Attn:`, `Email:`,
+`Address:`) and notice addresses, a blank-field line that does not start with a label (`Fee: $____`), short
+sentences, and party lines with no formal entity suffix. A false negative keeps the old behaviour and is
+visible in the redline; a false positive is the dangerous direction, so the rules lean toward refusing.
+Two limits: a clause that contains a signature-shaped line *above* its end (a form field inside the body)
+is refused as ambiguous rather than deleted; and `insert_block_after` still anchors on the block's last
+physical paragraph, which for the last clause is below the signature block — a separate behaviour, not
+changed here.
+
 ### The critic's final result (issue #137, ADR 0001)
 
 Under [ADR 0001](adr/0001-critic-has-the-last-word.md) the critic pass emits a **complete final result**,

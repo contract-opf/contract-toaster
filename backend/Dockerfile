@@ -66,6 +66,7 @@ COPY scripts/bind_bundle.py \
      scripts/review_knowledge.py \
      scripts/review_spine.py \
      scripts/seed_active_bundle.py \
+     scripts/signature_block.py \
      scripts/text_fold.py \
      scripts/
 

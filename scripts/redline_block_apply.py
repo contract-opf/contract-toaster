@@ -132,6 +132,12 @@ it never blocks the other edits in the batch:
   `insert_block_after`) whose block lives in a table cell -- v1 writes block
   ops for body and list paragraphs only. Span edits inside the cell are not
   affected.
+- `delete_block_signature_ambiguous` / `delete_block_signature_block`: a
+  `delete_block` whose block ends in signature-block lines the compiler
+  cannot cleanly separate from the clause's own text, or whose every
+  paragraph is a signature block. See "A trailing signature block is never
+  struck" below. The detail names the block and counts paragraphs; it never
+  quotes the document.
 - `round_trip_verification_failed`: the assembled package did not re-open
   cleanly, so no bytes are returned at all.
 - `projection_verification_failed` (issue #623): the assembled package
@@ -180,6 +186,29 @@ instead of degrading those issues to flag-only:
   away and the placeholder would have nowhere to live. A block the rule
   declines simply loses its body, which is the pre-#645 behaviour and never
   a wrong edit.
+  **A trailing signature block is never struck.** The signature blocks at
+  the end of an agreement have no heading of their own, so the extractor
+  files them as physical paragraphs of the LAST numbered clause, and a
+  delete that struck "every physical `<w:p>` of the block" struck them too:
+  the accepted document came back unsigned, while rejecting it restored the
+  original exactly, which is why no projection proof noticed.
+  `signature_block.find_signature_tail` recognises that tail
+  conservatively -- a paragraph is kept only if EVERY line of it is
+  signature-shaped -- and the delete strikes only the paragraphs before it.
+  The `[Intentionally omitted.]` placeholder goes in the last STRUCK `<w:p>`
+  (the clause's own last body paragraph), so the accepted document reads
+  heading, placeholder, then the untouched signature blocks. When the
+  compiler cannot tell clause text from signature text it refuses the
+  delete rather than guess in either direction: a paragraph that mixes prose
+  with a signature line, or signature lines behind text the heuristic does
+  not recognise, is `delete_block_signature_ambiguous`; a block that is
+  nothing but a signature block is `delete_block_signature_block`. Both are
+  per-edit failures, so the issue degrades to flag-only and sibling edits
+  still land. The edit carries the retained text as `retained_text` for
+  projection proof 2, which expects it after the placeholder.
+  An `insert_block_after` still anchors on the block's LAST physical `<w:p>`,
+  which is below the signature block when the anchor is the last clause --
+  a separate behaviour this rule does not change.
   Two readers reconstruct a delete's outcome and both follow: the DERIVED
   `proposed_replacement_text`
   (`redline_generate.derived_replacement_text_by_issue`) is the placeholder
@@ -287,6 +316,7 @@ import extraction_normalization_stage  # noqa: E402
 import ooxml_util  # noqa: E402
 import redline_generate  # noqa: E402
 import redline_projections  # noqa: E402
+import signature_block  # noqa: E402
 
 WORD_NS = ooxml_util.WORD_NS
 XML_NS = ooxml_util.XML_NS
@@ -338,6 +368,16 @@ REASON_PROJECTION_VERIFICATION_FAILED = "projection_verification_failed"
 # is written, so the bad edit never reaches the document and its siblings
 # still land.
 REASON_INSERT_TEXT_NOT_XML_SAFE = "insert_text_not_xml_safe"
+# A `delete_block` whose block ends in a signature block (`signature_block`)
+# the compiler leaves standing. Two ways it refuses instead, both per edit and
+# both fail-closed: the block's signature lines cannot be cleanly separated
+# from its clause text (a paragraph that mixes prose with a signature line, or
+# signature lines behind text the heuristic does not recognise) -- striking
+# them would unsign the agreement and keeping everything would leave clause
+# text behind a deleted clause -- or the block is NOTHING BUT a signature
+# block, which the compiler never strikes.
+REASON_DELETE_BLOCK_SIGNATURE_AMBIGUOUS = "delete_block_signature_ambiguous"
+REASON_DELETE_BLOCK_SIGNATURE_BLOCK = "delete_block_signature_block"
 
 FAILURE_REASONS = (
     REASON_UNKNOWN_BLOCK_ID,
@@ -351,6 +391,8 @@ FAILURE_REASONS = (
     REASON_BLOCK_OP_UNSUPPORTED_IN_TABLE,
     REASON_PROJECTION_VERIFICATION_FAILED,
     REASON_INSERT_TEXT_NOT_XML_SAFE,
+    REASON_DELETE_BLOCK_SIGNATURE_AMBIGUOUS,
+    REASON_DELETE_BLOCK_SIGNATURE_BLOCK,
 )
 
 #: Every character XML 1.0's `Char` production excludes (section 2.2).
@@ -2239,10 +2281,53 @@ def apply_block_transcript(
                 )
                 continue
             live_block_id = target_block_id
-            # A deletion touches EVERY physical `<w:p>` of the block; an
-            # insertion anchors on its LAST one.
+            # A deletion touches every physical `<w:p>` of the block EXCEPT a
+            # trailing signature block, which the extractor files as the body
+            # of the last clause because it has no heading of its own; an
+            # insertion anchors on the block's LAST one.
+            struck_span_count = span_count
+            if block_op["op"] == OP_DELETE_BLOCK:
+                span_texts = [
+                    live.get("text", "")[start:end] for start, end in live["physical_spans"]
+                ]
+                tail = signature_block.find_signature_tail(span_texts)
+                if tail.ambiguous:
+                    failures.append(
+                        _failure(
+                            edit,
+                            target_block_id,
+                            REASON_DELETE_BLOCK_SIGNATURE_AMBIGUOUS,
+                            (
+                                f"{block_op['op']} on block {target_block_id!r}: physical "
+                                f"paragraph {tail.ambiguous_at} of {span_count} carries "
+                                "signature-block lines that cannot be cleanly separated "
+                                f"from the clause's own text ({tail.ambiguity}); striking "
+                                "the block would risk striking the signature block, and "
+                                "leaving it would risk leaving clause text, so neither is "
+                                "done"
+                            ),
+                        )
+                    )
+                    continue
+                if tail.is_whole_block:
+                    failures.append(
+                        _failure(
+                            edit,
+                            target_block_id,
+                            REASON_DELETE_BLOCK_SIGNATURE_BLOCK,
+                            (
+                                f"{block_op['op']} on block {target_block_id!r}: every one of "
+                                f"its {span_count} physical paragraph(s) is a signature "
+                                "block, which this compiler never strikes"
+                            ),
+                        )
+                    )
+                    continue
+                struck_span_count = tail.start
+                if tail.present:
+                    edit["retained_text"] = "\n".join(span_texts[tail.start :])
             wanted_spans = (
-                list(range(span_count))
+                list(range(struck_span_count))
                 if block_op["op"] == OP_DELETE_BLOCK
                 else [span_count - 1]
             )

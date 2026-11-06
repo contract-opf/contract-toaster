@@ -146,6 +146,7 @@ import block_transcript  # noqa: E402, I001
 import extraction_normalization_stage  # noqa: E402
 import docx_parts  # noqa: E402
 import ooxml_util  # noqa: E402
+import signature_block  # noqa: E402
 
 WORD_NS = ooxml_util.WORD_NS
 DOCUMENT_PART = ooxml_util.DOCUMENT_PART
@@ -721,6 +722,10 @@ def _expected_accept_all_texts(
     # `[Intentionally omitted.]` placeholder where the compiler left one, and
     # nothing at all otherwise.
     struck_block_text: dict[str, str] = {}
+    # `block_id -> the trailing signature block a struck block still shows`:
+    # `delete_block` leaves it standing (`signature_block`), so accepting the
+    # redline keeps it after whatever the struck clause left behind.
+    retained_tail_text: dict[str, str] = {}
     inserts_by_anchor: dict[str, list[str]] = {}
 
     if applied_edits is None:
@@ -739,6 +744,20 @@ def _expected_accept_all_texts(
         for block_op in proven.get("block_ops") or []:
             if block_op["op"] == OP_DELETE_BLOCK:
                 deleted_block_ids.add(block_op["block_id"])
+                # Asked of the SAME module the compiler asks, over the same
+                # source paragraphs, for the same reason the placeholder
+                # decision is (see `_placeholder_block_ids_from_transcript`).
+                live = block_map.get(block_op["block_id"])
+                if live is not None:
+                    span_texts = [
+                        (live.get("text", "") or "")[start:end]
+                        for start, end in live.get("physical_spans") or []
+                    ]
+                    tail = signature_block.find_signature_tail(span_texts)
+                    if tail.present:
+                        retained_tail_text[block_op["block_id"]] = "\n".join(
+                            span_texts[tail.start :]
+                        )
             else:
                 inserts_by_anchor.setdefault(block_op["anchor_block_id"], []).append(
                     block_op["new_text"]
@@ -753,6 +772,7 @@ def _expected_accept_all_texts(
                 # A delete that left a placeholder recorded it as its own
                 # `insert_text` (issue #646); an ordinary one recorded "".
                 struck_block_text[block_id] = spec.get("insert_text", "") or ""
+                retained_tail_text[block_id] = spec.get("retained_text", "") or ""
             elif kind == OP_INSERT_BLOCK_AFTER:
                 inserts_by_anchor.setdefault(block_id, []).append(spec.get("insert_text", ""))
             else:
@@ -772,8 +792,18 @@ def _expected_accept_all_texts(
     for block_id, live in block_map.items():
         if block_id in deleted_block_ids:
             # Struck wholesale: contributes nothing, unless the compiler left
-            # `[Intentionally omitted.]` standing under an emptied heading.
-            expected.append(struck_block_text.get(block_id, ""))
+            # `[Intentionally omitted.]` standing under an emptied heading or
+            # left the block's trailing signature block standing.
+            expected.append(
+                "\n".join(
+                    part
+                    for part in (
+                        struck_block_text.get(block_id, ""),
+                        retained_tail_text.get(block_id, ""),
+                    )
+                    if part
+                )
+            )
         else:
             expected.append(final_text_by_block.get(block_id, live.get("text", "") or ""))
         expected.extend(inserts_by_anchor.get(block_id, []))
