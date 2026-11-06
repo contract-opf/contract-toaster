@@ -427,11 +427,11 @@ class WorkflowsPassTheImmutableRevision(unittest.TestCase):
     def test_codebuild_buildspec_passes_the_full_sha(self) -> None:
         text = CICD_STACK.read_text(encoding="utf-8")
         build = re.search(
-            r"docker build [^'\n]*--build-arg COMMIT_SHA=\$COMMIT_SHA[^'\n]*backend/",
+            r"docker build [^'\n]*--build-arg COMMIT_SHA=\$COMMIT_SHA[^'\n]*-f backend/Dockerfile \.'",
             text,
         )
         self.assertIsNotNone(
-            build, "cicd-stack.ts: buildspec docker build of backend/ with "
+            build, "cicd-stack.ts: buildspec docker build of backend/Dockerfile with "
             "--build-arg COMMIT_SHA=$COMMIT_SHA not found",
         )
         assignments = re.findall(r"^\s*'COMMIT_SHA=(.+)',\s*$", text, re.MULTILINE)
