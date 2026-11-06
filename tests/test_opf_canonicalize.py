@@ -18,7 +18,7 @@ trustworthy as the canonicalizer, so this pins its behavior:
   4. SECTION DIGESTS: exactly evidence/posture/floor digests, matching what the
      fixture declares.
   5. CONFORMANCE (issues #128, #177, closing the gap #14 named): every one of
-     the 14 vendored OPF 0.6 conformance vectors (``opf_load.OPF_CONFORMANCE_DIR``,
+     the 15 vendored OPF 0.6 conformance vectors (``opf_load.OPF_CONFORMANCE_DIR``,
      playbooks/opf/conformance-0.6/, pinned in tests/test_opf_schema_sync.py) reproduces the engine's expected
      ``canonical``, ``content_hash`` and ``section_digests`` exactly. The
      vectors are the engine's own definition of the canonical form, so this is
@@ -164,8 +164,8 @@ def check_conformance_vectors() -> list[str]:
     if manifest.get("format_version", {}).get("opf_version") != opf_load.OPF_VERSION:
         failures.append(f"  vendored conformance manifest is not stamped opf_version {opf_load.OPF_VERSION}")
     entries = manifest.get("vectors") or []
-    if len(entries) != 14:
-        return [f"  vendored conformance manifest lists {len(entries)} vectors, not the 14 of OPF 0.6"]
+    if len(entries) != 15:
+        return [f"  vendored conformance manifest lists {len(entries)} vectors, not the 15 of OPF 0.6"]
     for entry in entries:
         vector = json.loads((CONFORMANCE_DIR / entry["file"]).read_text(encoding="utf-8"))
         doc, expected = vector["input"], vector["expected"]
@@ -185,7 +185,7 @@ def main() -> int:
         ("2", "content_hash exclusion/inclusion rules", check_exclusions),
         ("3", "verify_content_hash honest/tampered/absent", check_verify),
         ("4", "section digests present + match declared", check_section_digests),
-        ("5", "all 14 vendored OPF 0.6 conformance vectors reproduce", check_conformance_vectors),
+        ("5", "all 15 vendored OPF 0.6 conformance vectors reproduce", check_conformance_vectors),
     ]
     ok = True
     for code, name, fn in checks:

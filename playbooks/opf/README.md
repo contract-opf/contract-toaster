@@ -18,7 +18,7 @@ replaced 0.5 / digest 4 in place; the owner's 2026-10-06 direction on issue
   `settled`, `standard_history`, `n_signed_without_verified` /
   `n_signed_without_possible`, `verified_absent_deals`).
 - `conformance-0.6/` — the engine's OPF 0.6 conformance set (`README.md`,
-  `manifest.json` + the 14 `vectors/*.json`, byte-for-byte from
+  `manifest.json` + the 15 `vectors/*.json`, byte-for-byte from
   `spec/conformance/0.6/`). `scripts/opf_load.py` names the directory once
   (`OPF_CONFORMANCE_DIR`, `OPF_CONFORMANCE_VECTORS_DIR`) and every test reads
   it from there. `tests/test_opf_canonicalize.py` replays every vector's

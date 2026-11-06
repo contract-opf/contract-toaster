@@ -579,7 +579,17 @@ class TestRefusals(PlaybookUploadTestBase):
         )
 
         second_doc = _opf05_doc()
-        second_doc["evidence"]["clauses"][0]["title"] = "Indemnification (v2 draft)"
+        # A conflicting but CONSISTENT document: the evidence title, the digest
+        # that restates it and the dossier that names it all move together
+        # (intake now refuses a digest that disagrees with its own evidence).
+        clause = second_doc["evidence"]["clauses"][0]
+        clause["title"] = "Indemnification (v2 draft)"
+        for entry in second_doc["digest"]["clauses"]:
+            if entry["id"] == clause["id"]:
+                entry["title"] = clause["title"]
+        dossier = (second_doc.get("dossiers") or {}).get(clause["id"])
+        if dossier is not None:
+            dossier["title"] = clause["title"]
         second_doc = _reseal(second_doc)
         second = json.dumps(second_doc).encode("utf-8")
         self.assertNotEqual(first, second)

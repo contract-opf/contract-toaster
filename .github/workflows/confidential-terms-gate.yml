@@ -1,0 +1,70 @@
+name: confidential-terms-gate
+
+# Server-side backstop for the pre-push confidentiality scanner
+# (scripts/pre-push-confidentiality.py, QA 2026-11-03 #3).
+#
+# This repository is public: a push is a publication. The local hook only
+# protects a machine that has the private term list. This workflow scans every
+# commit of the PR (or push) range -- message, identities, paths, added lines --
+# against the same private list, kept as the repository secret
+# CONFIDENTIAL_TERMS (one term per line, `#` comments allowed).
+#
+# FAIL-OPEN, like counterparty-name-gate.yml: with no CONFIDENTIAL_TERMS secret
+# (a fork, or a repository that has not set it) the job prints a notice and
+# SKIPS, so an outside contributor is not blocked. When the secret is set, a hit
+# fails the job. The secret is written to a runner temp file and never echoed;
+# the scanner prints the commit and the kind of place, never a term.
+
+on:
+  pull_request:
+  push:
+    branches: ["**"]
+
+permissions:
+  contents: read
+
+jobs:
+  confidential-terms:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Scan the commits in range
+        env:
+          CONFIDENTIAL_TERMS: ${{ secrets.CONFIDENTIAL_TERMS }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+        run: |
+          set -eu
+          if [ -z "${CONFIDENTIAL_TERMS:-}" ]; then
+            echo "::notice::confidential-terms-gate SKIPPED: no CONFIDENTIAL_TERMS secret is set (fail-open by design)."
+            exit 0
+          fi
+          terms_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/confidential-terms.XXXXXX")"
+          umask 077
+          printf '%s\n' "$CONFIDENTIAL_TERMS" > "$terms_dir/terms.txt"
+          export PLAYBOOK_CONFIDENTIAL_NAMES_DIR="$terms_dir"
+          zero=0000000000000000000000000000000000000000
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            lsha="$PR_HEAD_SHA"; rsha="$PR_BASE_SHA"
+          else
+            lsha="$PUSH_AFTER"; rsha="${PUSH_BEFORE:-$zero}"
+          fi
+          rc=0
+          printf 'refs/heads/scan %s refs/heads/base %s\n' "$lsha" "$rsha" \
+            | python3 scripts/pre-push-confidentiality.py origin || rc=$?
+          rm -rf "$terms_dir"
+          exit "$rc"
+
+      - name: Scanner regression tests
+        run: python3 tests/test_pre_push_confidentiality.py

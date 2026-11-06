@@ -353,6 +353,29 @@ def build_ledger(opf_doc: dict[str, Any] | None) -> list[dict[str, Any]]:
     return ledger
 
 
+def ledger_gap(opf_doc: dict[str, Any] | None) -> str | None:
+    """Why `build_ledger` is EMPTY although the Floor carries lines, or None.
+
+    The manifest is optional in the 0.6 schema, and `build_ledger` reads only
+    it: a playbook with Floor invariants and no manifest used to yield an empty
+    ledger with nothing recorded, so a presence or predicate hard line
+    (`x_required_presence`, `x_condition`) was silently never enforced by code
+    (QA 2026-11-03 #24). This names the condition so the caller can record it;
+    the Floor judge still judges every line."""
+    if not isinstance(opf_doc, dict) or isinstance(opf_doc.get("manifest"), dict):
+        return None
+    floor = opf_doc.get("floor")
+    invariants = floor.get("invariants") if isinstance(floor, dict) else None
+    count = len([inv for inv in invariants or [] if isinstance(inv, dict)])
+    if not count:
+        return None
+    return (
+        f"hard-rule manifest — absent although the Floor has {count} invariant(s): the hard-rule ledger "
+        "is empty, so no presence or predicate rule is enforced by code (the Floor judge still judges "
+        "each line)"
+    )
+
+
 def ledger_rule_ids(ledger: Iterable[dict[str, Any]]) -> list[str]:
     return [entry["rule_id"] for entry in ledger or ()]
 

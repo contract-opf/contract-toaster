@@ -43,6 +43,23 @@ refuses a direct push to `main`. It is deliberately opt-in — no gate and no
 npm lifecycle script installs it, so a clean checkout keeps git's default
 hooks. Undo with `bash scripts/setup-hooks.sh --uninstall`.
 
+The same `pre-push` also runs the tracked, name-free confidentiality scanner,
+`scripts/pre-push-confidentiality.py`, over **every commit being pushed**
+(message, author identities, paths and added lines, matched case-, separator-
+and Unicode-insensitively, so a hyphen or underscore slug is caught). This
+repository is public: a push is a publication. The terms it blocks are private
+and never tracked: one per line in any `*.txt` under
+`<git-common-dir>/confidentiality/` (or `$PLAYBOOK_CONFIDENTIAL_NAMES_DIR`).
+With no list on your machine the hook prints a notice and skips (fail-open, like
+the counterparty-name gate, so a contributor without the list is not blocked);
+with a list a hit blocks the push and names the commit and the kind of place,
+never the term (`git push --no-verify` for a verified false positive). The
+server-side backstop is `.github/workflows/confidential-terms-gate.yml`: it
+scans the pull-request range against the repository secret `CONFIDENTIAL_TERMS`
+and skips with a notice while that secret is unset. The scanner is vendored
+byte-for-byte from playbook-engine; `tests/test_pre_push_confidentiality.py`
+covers it, the hook wiring and the workflow with invented terms only.
+
 Verified on Node 26.7 / npm 11.19. `frontend/package.json`'s `engines` block
 (`node ^20.19.0 || ^22.13.0 || >=24.0.0` — the intersection the dependency
 tree itself requires, not a round `>=20`; `npm >=10.8.2`) plus

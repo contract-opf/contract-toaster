@@ -46,7 +46,7 @@ needed".
 ## How review works: knowledge and precision
 
 Contract Toaster is **type-blind**: adding a new agreement type is data, not
-code — author a playbook (an [OPF](https://contract-opf.github.io/)-native
+code — author a playbook (an [OPF](https://github.com/contract-opf/opf)-native
 JSON document), add one entry to `playbooks/registry.json`, and it's
 reviewable. No call site in `backend/src/` or `scripts/` hard-codes a
 playbook name.
@@ -76,8 +76,12 @@ admin uploads and activates it ([RUNBOOK.md, bootstrap step 10](RUNBOOK.md#day-o
 ## Playbooks
 
 Playbooks are plain data: JSON documents following the [Open Playbook Format
-(OPF)](https://contract-opf.github.io/) schema (`playbooks/schema.json`,
-`playbooks/opf/`). `playbooks/registry.json` is the single source of truth
+(OPF)](https://github.com/contract-opf/opf), version 0.6 (the one format this
+repo reads; its pinned schema is `playbooks/opf/playbook.schema-0.6.json`, the
+same file as the `playbook.schema-0.6.json` in
+[contract-opf/opf](https://github.com/contract-opf/opf) and the playbook-engine
+`spec/` directory). `playbooks/schema.json` is the older v1 playbook schema,
+kept for the bundled sample. `playbooks/registry.json` is the single source of truth
 mapping a `playbook_id` to its playbook, anchor-map, section-config, and
 fixtures paths — adding a contract type never requires a code change.
 
@@ -87,9 +91,10 @@ fixtures paths — adding a contract type never requires a code change.
   (see [First run: the shipped playbook](#first-run-the-shipped-playbook)), so
   no real negotiating position is ever exposed by accident. Remove or replace
   it with your own playbook once you're ready.
-- **Community playbooks:** [contract-opf/playbooks](https://github.com/contract-opf/playbooks)
-  *(coming soon)* — a shared library of OPF playbooks for common agreement
-  types, licensed CC BY 4.0.
+- **Published playbooks:** [contract-opf/playbooks](https://github.com/contract-opf/playbooks)
+  — published, corpus-derived OPF playbooks, offered as pedagogical examples of
+  the format under that repository's `PLAYBOOK-POLICY.md` (attorney review is
+  mandatory; they are not legal advice).
 - **Bring your own:** author a playbook + anchor map (optional, for a
   precision profile) + section config + fixtures directory, then add one
   `playbooks/registry.json` entry.
@@ -119,7 +124,7 @@ contract-toaster/
 ├── NOTICE
 ├── TRADEMARKS.md                 # name-use grant for the "Contract Toaster" mark
 ├── playbooks/                    # OPF-native playbooks: schema, registry, and playbook data
-│   ├── schema.json               # generalized playbook schema
+│   ├── schema.json               # older v1 playbook schema (the bundled sample's format); OPF 0.6 lives in playbooks/opf/
 │   ├── registry.json             # playbook_id -> artifact paths (add one entry per new agreement type)
 │   └── samples/
 │       └── synthetic-nda-sample-v1.0.0.json  # default (bundled) playbook -- the worked example in this README
@@ -212,8 +217,8 @@ lifecycle through the admin API: upload a new version, activate it, roll back,
 rename it, or remove it outright (removing the last one returns you to the
 empty-shell state).
 
-- **More playbooks:** [contract-opf/playbooks](https://github.com/contract-opf/playbooks) *(coming soon)* — a shared library of OPF playbooks, CC BY 4.0.
-- **Author your own:** write an [OPF](https://contract-opf.github.io/)-native JSON document against `playbooks/schema.json` (see `playbooks/opf/` for the pinned schema versions), then add one entry to `playbooks/registry.json`. No code change is required to add an agreement type — see [docs/playbook-governance.md](docs/playbook-governance.md) for versioning and approval.
+- **More playbooks:** [contract-opf/playbooks](https://github.com/contract-opf/playbooks) — published OPF playbooks (pedagogical examples; see that repository's `PLAYBOOK-POLICY.md`).
+- **Author your own:** write an [OPF](https://github.com/contract-opf/opf) 0.6 JSON document against `playbooks/opf/playbook.schema-0.6.json` (an engine-compiled playbook from [playbook-engine](https://github.com/contract-opf/playbook-engine) already is one), then add one entry to `playbooks/registry.json`. No code change is required to add an agreement type — see [docs/playbook-governance.md](docs/playbook-governance.md) for versioning and approval.
 
 Full instructions, what's mocked, and what to expect are in
 [docs/REVIEW-GUIDE.md](docs/REVIEW-GUIDE.md) and

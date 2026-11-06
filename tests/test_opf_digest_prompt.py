@@ -9,7 +9,7 @@ history, absence and dates -- are pinned in tests/test_opf_digest5_177.py.
     example (tests/fixtures/opf/engine-nda-example.opf.json) renders its
     governing-law block with "Opened with our standard in 4 signed deals;
     signed it unchanged in 2.", the New York variant with "reached from our
-    standard in 2" and the California variant with "signed as proposed in 2".
+    standard in 2" and the California variant with "signed unchanged from the opening text in 2".
  2. PLAIN FACTS ONLY: none of digest 2's judged vocabulary (stance, n/band,
     risk, the four renamed headers) reaches the block, and every digest clause
     is rendered under its clause_id.
@@ -104,8 +104,10 @@ def check_1_nda_example() -> list[str]:
     if "reached from our standard in 2" not in new_york:
         failures.append(f"  New York variant lacks 'reached from our standard in 2': {new_york!r}")
     california = _line_containing(governing_law, "State of California")
-    if "signed as proposed in 2" not in california:
-        failures.append(f"  California variant lacks 'signed as proposed in 2': {california!r}")
+    if "signed unchanged from the opening text in 2" not in california:
+        failures.append(f"  California variant lacks 'signed unchanged from the opening text in 2': {california!r}")
+    if "signed as proposed in" in california:
+        failures.append("  the unchanged count still reads 'signed as proposed' (QA #10): that wording implies the other side opened it")
     if "reached from our standard" in california:
         failures.append("  California variant claims a concession the digest does not record")
     # Cited by the deal's opaque alias, never its slug (issue #173): the

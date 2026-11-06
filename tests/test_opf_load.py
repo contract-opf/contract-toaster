@@ -49,7 +49,7 @@ tolerance behavior that check would have asserted no longer exists):
    byte-for-byte from playbook-engine examples/nda/playbook.opf.json at
    fe89bc6) loads through the full upload path, identity required.
 7. (issues #128, #177) The vendored OPF 0.6 conformance set
-   (`opf_load.OPF_CONFORMANCE_DIR`) is the 14 vectors 001-014 its manifest
+   (`opf_load.OPF_CONFORMANCE_DIR`) is the 15 vectors 001-015 its manifest
    indexes, and every one, assembled as the engine emits it (input + the
    expected digest, manifest, dossiers and provenance index), passes schema
    validation, the sibling-id rule and the injection scan: the engine's
@@ -335,8 +335,8 @@ def check_7_conformance_vectors_load() -> list[str]:
         failures.append(f"  [7] the vendored set is stamped {manifest['format_version']!r}, not OPF 0.6 / digest 5")
     files = [entry["file"] for entry in manifest["vectors"]]
     numbers = [name.split("/")[-1][:3] for name in files]
-    if numbers != [f"{n:03d}" for n in range(1, 15)]:
-        failures.append(f"  [7] the manifest indexes vectors {numbers}, not 001-014")
+    if numbers != [f"{n:03d}" for n in range(1, 16)]:
+        failures.append(f"  [7] the manifest indexes vectors {numbers}, not 001-015")
     on_disk = sorted(f"vectors/{p.name}" for p in (CONFORMANCE_DIR / "vectors").glob("*.json"))
     if on_disk != sorted(files):
         failures.append("  [7] the vectors on disk are not exactly the ones the manifest indexes")
@@ -395,7 +395,7 @@ def main() -> int:
         ("5d", "load_opf rejects a duplicated corpus.documents[].document_id (issue #480)", check_5_rejects_duplicate_document_id),
         ("5e", "load_opf rejects a duplicated document_id without echoing hostile content (issue #480)", check_5_rejects_duplicate_id_with_hostile_content),
         ("6", "only OPF 0.6 / digest 5 loads, 0.5 refused naming 0.6; the engine's NDA example loads (issues #128, #177)", check_6_one_format),
-        ("7", "all 14 engine conformance vectors, as emitted, load (issues #128, #177)", check_7_conformance_vectors_load),
+        ("7", "all 15 engine conformance vectors, as emitted, load (issues #128, #177)", check_7_conformance_vectors_load),
     ]
 
     overall_pass = True
