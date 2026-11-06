@@ -1,5 +1,11 @@
 # AFK grind handoff — 2026-09-11
 
+> **Historical.** The loop queue drained on 2026-10-23 and nothing below is a
+> live to-do. Current state is in [CLAUDE.md](../../CLAUDE.md) and
+> [docs/implementation-status.md](../implementation-status.md). Operational
+> detail (hosts, service identifiers, credential locations) is deliberately not
+> in this repository; it lives in the private overlay.
+
 Written for a fresh session picking up the autonomous backlog grind on
 `contract-opf/contract-toaster`. Needs no other context. Supersedes the
 Orbit Diner completion handoff of 2026-09-08 for "what to do next".
@@ -99,24 +105,12 @@ longer needed. Until then, after each landing, run the `roll-forward.sh`
 script that the 2026-09-10 session left in its own temporary scratchpad
 directory.
 
-That scratchpad is session-specific and may be gone. The script is
-small; its logic: newest completed `dts-image-publish.yml` run with both
-build jobs green → if its SHA differs from the last rolled one, POST
-
-```
-https://coolify.example.com/api/v1/services/<service-uuid>/restart?latest=true
-```
-
-with headers `CF-Access-Client-Id` / `CF-Access-Client-Secret` /
-`Authorization: Bearer …` read from the login keychain items
-`<keychain-item>`, `<keychain-item>`,
-`<keychain-item>`. GET returns 405; Python's default User-Agent gets
-Cloudflare 1010 (use curl). Verify by fetching `/` with a cachebust in a
-browser session and diffing the `index-*.js` hash; `/version` is advisory
-(#613). Last rolled: `54597b6`, hash `index-BuakuPjj.js`.
-
-The Chrome session to `toaster.example.com` expired overnight; the hash
-check still works unauthenticated, `/version` does not.
+That scratchpad is session-specific and may be gone. The manual roll-forward
+(restart the Coolify service with `?latest=true` through its API, with the
+Cloudflare Access service-token headers and the Coolify API token) is
+documented with the real host, service identifier and credential locations in
+the private overlay's operations notes. Verify a roll by fetching `/` with a
+cache-buster and diffing the `index-*.js` hash; `/version` is advisory.
 
 ## Gotchas hit today
 
