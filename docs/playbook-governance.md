@@ -329,6 +329,20 @@ This means:
   playbook JSON. The hash was computed at upload time and is stable through the lifecycle.
 - Code that gates production reviews must read `playbook_versions.status`, never `playbook.status`.
 
+### OPF intake recomputes the derived sections (QA 2026-11-03 #24)
+
+An OPF 0.6 upload's `identity.content_hash` is recomputable by anyone, so a valid hash does not show
+that the digest, manifest or section digests follow from the document's own evidence and Floor.
+`scripts/opf_load.py::_validate_doc` therefore also runs `scripts/opf_integrity.derivation_errors`
+and refuses (`OpfDerivedMismatchError`, JSON pointers only, no document value) a playbook whose
+`identity.section_digests`, `digest.perspective`, digest uncapped totals and absence counts,
+`manifest.hard_rules` or precedent references differ from their recomputation, that lists a retired
+Floor line (`floor.x_retired`) as still active, or whose signed invariant no longer matches its
+`x_signed_hash`. The reference compiler's capped variant lists, labels and part maps are not
+re-derived here (that is `build_digest_v5`, which this repo does not carry); the engine validator and
+the vendored conformance vectors cover them. With no manifest, `hard_ledger.ledger_gap` makes the
+prompt composition record that the hard-rule ledger is empty rather than leaving it silent.
+
 ### Gate 7 — "approved hashes match the artifacts being promoted"
 
 Gate 7 is now implementable step-by-step:

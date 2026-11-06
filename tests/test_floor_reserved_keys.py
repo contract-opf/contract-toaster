@@ -57,7 +57,7 @@ class RetiredLines(unittest.TestCase):
 class DirectionAndClause(unittest.TestCase):
     def test_binding_block_states_direction_and_clause(self) -> None:
         doc = _doc()
-        line = next(l for l in (opf_prompt._binding_block(doc) or "").splitlines() if "[floor:exclusions-from-confidential" in l)
+        line = next(ln for ln in (opf_prompt._binding_block(doc) or "").splitlines() if "[floor:exclusions-from-confidential" in ln)
         self.assertIn("Direction — hold:", line)
         self.assertIn("(Clause: Exclusions from Confidential Information.)", line)
 

@@ -80,11 +80,11 @@ _COUNT_FIELDS = (
 )
 
 
-def _dicts(value: Any) -> list[dict]:
+def _dicts(value: Any) -> list[dict[str, Any]]:
     return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
 
 
-def signed_fields_hash(invariant: dict) -> str:
+def signed_fields_hash(invariant: dict[str, Any]) -> str:
     """`sha256:` over the canonical form of the signed fields present."""
     return opf_canonicalize.sha256_hex(
         opf_canonicalize.canonicalize({k: invariant[k] for k in SIGNED_FIELDS if k in invariant})
@@ -113,7 +113,7 @@ def retired_ids(floor: Any) -> set[str]:
     return {r["id"] for r in _dicts(records) if isinstance(r.get("id"), str)}
 
 
-def active_invariants(floor: Any) -> list[dict]:
+def active_invariants(floor: Any) -> list[dict[str, Any]]:
     """The Floor's invariants that are not also recorded as retired."""
     invariants = floor.get("invariants") if isinstance(floor, dict) else None
     gone = retired_ids(floor)
@@ -126,28 +126,29 @@ def direction_of(invariant: Any) -> str | None:
     return value if value in DIRECTIONS else None
 
 
-def _expected_hard_rules(doc: dict) -> list[dict]:
+def _expected_hard_rules(doc: dict[str, Any]) -> list[dict[str, Any]]:
     """`manifest.hard_rules` as §3.12.3 derives it: one per Floor invariant, in
     Floor order, from the signed Floor only."""
     clauses = _dicts((doc.get("evidence") or {}).get("clauses"))
-    by_taxonomy: dict[str, dict] = {}
+    by_taxonomy: dict[str, dict[str, Any]] = {}
     for clause in clauses:
         taxonomy_id = clause.get("taxonomy_id")
         if isinstance(taxonomy_id, str) and taxonomy_id not in by_taxonomy:
             by_taxonomy[taxonomy_id] = clause
-    rules: list[dict] = []
+    rules: list[dict[str, Any]] = []
     for invariant in _dicts((doc.get("floor") or {}).get("invariants")):
-        taxonomy_id = invariant.get("x_taxonomy_id")
-        taxonomy_id = taxonomy_id if isinstance(taxonomy_id, str) else None
-        clause = by_taxonomy.get(taxonomy_id) if taxonomy_id else None
-        standard = clause.get("our_standard") if clause else None
+        named = invariant.get("x_taxonomy_id")
+        taxonomy_id = named if isinstance(named, str) else None
+        match = by_taxonomy.get(taxonomy_id) if taxonomy_id else None
+        clause = match if match is not None else {}
+        standard = clause.get("our_standard")
         fallback = standard.get("text") if isinstance(standard, dict) else None
         condition = invariant.get("x_condition")
         proof = invariant.get("x_permissible_proof")
         rules.append(
             {
                 "rule_id": invariant.get("id"),
-                "clause_id": clause.get("id") if clause else None,
+                "clause_id": clause.get("id") if match is not None else None,
                 "taxonomy_id": taxonomy_id,
                 "statement": invariant.get("statement"),
                 "required_presence": invariant.get("x_required_presence") is True,
@@ -174,7 +175,7 @@ def _walk_precedent_refs(node: Any, path: str, out: list[tuple[str, str]]) -> No
             _walk_precedent_refs(value, f"{path}[{index}]", out)
 
 
-def derivation_errors(doc: dict) -> list[str]:
+def derivation_errors(doc: dict[str, Any]) -> list[str]:
     """Every way the document's derived sections fail to follow from its
     evidence and Floor, as pointer-only messages. Empty list: consistent."""
     errors: list[str] = []
@@ -186,7 +187,7 @@ def derivation_errors(doc: dict) -> list[str]:
             if declared.get(name) != value:
                 errors.append(f"/identity/section_digests/{name}: differs from the digest recomputed over the section")
 
-    evidence = doc.get("evidence") if isinstance(doc.get("evidence"), dict) else {}
+    evidence: dict[str, Any] = doc["evidence"] if isinstance(doc.get("evidence"), dict) else {}
     clauses = _dicts(evidence.get("clauses"))
     clause_by_id = {c["id"]: c for c in clauses if isinstance(c.get("id"), str)}
     precedent_ids = {p["id"] for p in _dicts(evidence.get("precedent")) if isinstance(p.get("id"), str)}
@@ -195,7 +196,7 @@ def derivation_errors(doc: dict) -> list[str]:
     if isinstance(digest, dict):
         if digest.get("perspective") != doc.get("perspective"):
             errors.append("/digest/perspective: differs from the top-level perspective")
-        absence = evidence.get("absence") if isinstance(evidence.get("absence"), dict) else {}
+        absence: dict[str, Any] = evidence["absence"] if isinstance(evidence.get("absence"), dict) else {}
         records = _dicts(absence.get("records"))
         record_status = {r["id"]: r.get("status") for r in records if isinstance(r.get("id"), str)}
         for index, entry in enumerate(_dicts(digest.get("clauses"))):
@@ -216,8 +217,8 @@ def derivation_errors(doc: dict) -> list[str]:
                 ("n_signed_without_verified", "absent_verified"),
                 ("n_signed_without_possible", "possibly_present"),
             ):
-                expected = len({r.get("document_id") for r in mine if r.get("status") == status})
-                if entry.get(field) != expected:
+                distinct = len({r.get("document_id") for r in mine if r.get("status") == status})
+                if entry.get(field) != distinct:
                     errors.append(f"{where}/{field}: differs from the distinct deals of evidence.absence")
             for position, deal in enumerate(_dicts(entry.get("verified_absent_deals"))):
                 if record_status.get(deal.get("absence_id")) != "absent_verified":
@@ -232,7 +233,7 @@ def derivation_errors(doc: dict) -> list[str]:
             _walk_precedent_refs(doc[section], f"/{section}", refs)
     errors.extend(f"{path}: dangling precedent id" for path, ref in refs if ref not in precedent_ids)
 
-    floor = doc.get("floor") if isinstance(doc.get("floor"), dict) else {}
+    floor: dict[str, Any] = doc["floor"] if isinstance(doc.get("floor"), dict) else {}
     invariants = _dicts(floor.get("invariants"))
     active_ids = {inv.get("id") for inv in invariants}
     for index, invariant in enumerate(invariants):
@@ -249,11 +250,11 @@ def derivation_errors(doc: dict) -> list[str]:
     manifest = doc.get("manifest")
     if isinstance(manifest, dict):
         actual = manifest.get("hard_rules")
-        expected = _expected_hard_rules(doc)
-        if not isinstance(actual, list) or len(actual) != len(expected):
+        wanted = _expected_hard_rules(doc)
+        if not isinstance(actual, list) or len(actual) != len(wanted):
             errors.append("/manifest/hard_rules: does not hold exactly one rule per Floor invariant")
         else:
-            for index, (got, want) in enumerate(zip(actual, expected)):
+            for index, (got, want) in enumerate(zip(actual, wanted, strict=True)):
                 if not isinstance(got, dict) or any(got.get(k) != v for k, v in want.items()):
                     errors.append(f"/manifest/hard_rules/{index}: differs from its recomputation from the Floor")
 
