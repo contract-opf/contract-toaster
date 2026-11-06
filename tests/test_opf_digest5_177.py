@@ -154,8 +154,11 @@ def test_1_verified_and_possible_absence_render_separately_never_summed() -> Non
         assert verified and possible, "vector 014 seeds both counts on every clause"
         text = _clause_block(doc, clause["id"])
         (line,) = [ln for ln in text.splitlines() if ln.startswith("Signed without this clause:")]
-        assert f"absent in {verified} signed deals (verified: " in line, line
+        assert f"our check found no matching text in {verified} signed deals (verified by that check only, not proof" in line, line
         assert f"possibly absent in {possible} more; not verified" in line, line
+        # QA #5: an unverifiable record is "could not be checked", never an absence.
+        assert "1 could not be checked" in line, line
+        assert not line.startswith("Signed without this clause: absent"), line
         # Never merged: the sum appears nowhere as a count of deals.
         assert f"{verified + possible} signed deal" not in line, line
         for entry in clause["verified_absent_deals"]:
@@ -478,6 +481,22 @@ def test_7_new_free_text_is_block_tag_neutralised() -> None:
     assert opf_prompt._neutralise(note) == note
 
 
+def test_8_intro_is_origin_neutral_and_caveats_verified_absence() -> None:
+    """QA #10 and #5: the intro never says the other side opened an unchanged
+    variant (the first draft may be ours), and verified absence is a check
+    result with a caveat, not "we signed without the clause"."""
+    intro = opf_prompt.DIGEST_INTRO
+    assert "wording the other side opened with that we signed unchanged" not in intro
+    assert "signed unchanged from the opening text" in intro and "ours or the other side's" in intro
+    assert "Only \"verified\" means we signed that deal without the clause" not in intro
+    assert "not proof the deal lacked the clause" in intro and "Could not be checked" in intro
+    # Every unverifiable record, nothing scored: "could not be checked", no absence.
+    clause = {"taxonomy_id": "x", "n_signed_without_verified": 0, "n_signed_without_possible": 2}
+    line = opf_prompt._absence_line(clause, "test", unverifiable=2)
+    assert line == "Signed without this clause: possibly absent in 2 signed deals; not verified (all could not be checked).", line
+    assert "verified by that check" not in line
+
+
 def main() -> int:
     tests = [
         test_1_verified_and_possible_absence_render_separately_never_summed,
@@ -489,6 +508,7 @@ def main() -> int:
         test_6_prior_form_text_and_owner_note_are_check_2_and_check_4,
         test_6b_prior_form_reasons_and_summaries_are_check_4_spans,
         test_7_new_free_text_is_block_tag_neutralised,
+        test_8_intro_is_origin_neutral_and_caveats_verified_absence,
     ]
     failed = 0
     for test in tests:
