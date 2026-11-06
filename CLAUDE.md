@@ -2,10 +2,19 @@
 
 ## Read this first
 
-**[docs/plans/2026-09-11-afk-grind-handoff.md](docs/plans/2026-09-11-afk-grind-handoff.md)** —
-current state of the autonomous backlog grind: what landed, where the loop
-stopped, how to relaunch it, and the prod roll-forward rule. Written to be read
-cold. The 2026-09-08 Orbit Diner completion handoff it supersedes is still the
+**State as of 2026-11-06:** `main` is green and moves by reviewed PR; the
+autonomous loop's queue drained on 2026-10-23 and nothing depends on a stashed
+fix. Work now comes from the open issues (`gh issue list`), labelled `afk` when
+ready for a coder. The playbook engine moved to OPF 0.6 (engine 2.0.0) and its
+public history was rewritten, so old engine commit SHAs in older notes are dead
+links. Issue numbers in older docs are pre-migration and may point at unrelated
+issues (AGENTS.md warns). What ships and what is still stubbed:
+[docs/implementation-status.md](docs/implementation-status.md). A reviewer's
+orientation and roadmap: [docs/REVIEW-GUIDE.md](docs/REVIEW-GUIDE.md).
+
+The 2026-09-11 grind handoff
+([docs/plans/2026-09-11-afk-grind-handoff.md](docs/plans/2026-09-11-afk-grind-handoff.md))
+is **historical**; the 2026-09-08 Orbit Diner completion handoff is still the
 reference for the Review-tab rewrite itself.
 
 Architecture is `ARCHITECTURE.md`; operating procedures are `RUNBOOK.md` (note
