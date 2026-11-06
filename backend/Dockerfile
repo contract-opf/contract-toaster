@@ -47,12 +47,14 @@ COPY scripts/bind_bundle.py \
      scripts/ooxml_util.py \
      scripts/opf_canonicalize.py \
      scripts/opf_html.py \
+     scripts/opf_integrity.py \
      scripts/opf_injection_scan.py \
      scripts/opf_load.py \
      scripts/opf_prompt.py \
      scripts/playbook_registry.py \
      scripts/playbook_validation.py \
      scripts/policy_load.py \
+     scripts/precedent_citations.py \
      scripts/preflight_pass.py \
      scripts/primary_review_pass.py \
      scripts/reconciliation.py \
