@@ -154,6 +154,7 @@ import hard_ledger  # noqa: E402
 import leakage_scan  # noqa: E402
 import model_client as _model_client  # noqa: E402
 import opf_prompt  # noqa: E402
+import precedent_citations  # noqa: E402
 import primary_review_pass  # noqa: E402
 import reconciliation  # noqa: E402
 import redline_generate  # noqa: E402
@@ -1647,6 +1648,10 @@ def run_review(
     # `redline_generate.output_withheld`, not by the status.
     leakage_blocked = redline_generate.output_withheld(redline_result)
     findings = [] if leakage_blocked else reconciled.get("issues", [])
+    # QA 2026-11-03 #25: check each citation against the refs the digest
+    # actually showed the model; an unresolved one is stripped, a resolved one
+    # is listed as `precedent_basis` for the reviewing lawyer. OPF reviews only.
+    findings, _citation_counts = precedent_citations.annotate_findings(findings, dossier_opf_doc)
 
     # Issue #147: stage 4.5 recorded the ledger insertions it HANDED to
     # stage 5, and stage 5 gates each one like any other edit -- a compile
