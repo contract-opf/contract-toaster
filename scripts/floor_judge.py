@@ -238,8 +238,43 @@ def _is_party_relative(statement: str) -> bool:
 _REVIEW_CONTEXT_TAGS = frozenset({"REVIEW_CONTEXT"})
 
 
+#: The Floor's `x_direction` (OPF-SPEC §3.7) as the judge is told it. Closed,
+#: fixed text: no document string is spliced into it.
+_DIRECTION_LINES = {
+    "hold": "direction: hold -- this line keeps a clause. It is violated when the clause is "
+    "missing, struck, or weaker than the standard given for it.",
+    "refuse": "direction: refuse -- this line names a term we never accept. It is violated when "
+    "the material contains that term.",
+}
+
+
+def _clause_lines(clause: Optional[dict[str, str]]) -> str:  # noqa: UP045
+    """The clause an invariant's `x_taxonomy_id` binds it to, and our standard
+    for it, so "do not concede on X" is judged against the standard it is
+    relative to (QA 2026-11-03: the judge used to see the statement alone).
+    The standard is playbook text, escaped like the review context so it
+    cannot close the block that follows."""
+    if not clause or not clause.get("title"):
+        return ""
+    title = _primary_review_pass.neutralise_prompt_delimiters(clause["title"], _REVIEW_CONTEXT_TAGS)
+    lines = f"clause: {title}\n"
+    standard = clause.get("standard")
+    if standard:
+        lines += (
+            "our_standard_for_this_clause: "
+            f"{_primary_review_pass.neutralise_prompt_delimiters(standard, _REVIEW_CONTEXT_TAGS)}\n"
+        )
+    return lines
+
+
 def _build_user_prompt(
-    *, invariant_id: str, statement: str, review_context: str, perspective_note: str = ""
+    *,
+    invariant_id: str,
+    statement: str,
+    review_context: str,
+    perspective_note: str = "",
+    direction: Optional[str] = None,  # noqa: UP045
+    clause: Optional[dict[str, str]] = None,  # noqa: UP045
 ) -> str:
     # Issue #679: the note goes FIRST, ahead of the invariant -- its closing
     # line disambiguates "the counterparty" for "the rule below", so it only
@@ -249,11 +284,29 @@ def _build_user_prompt(
         f"{prefix}"
         f"invariant_id: {invariant_id}\n"
         f"statement: {statement}\n"
+        f"{_DIRECTION_LINES.get(direction or '', '') + chr(10) if direction in _DIRECTION_LINES else ''}"
+        f"{_clause_lines(clause)}"
         "\n"
         "<REVIEW_CONTEXT>\n"
         f"{_primary_review_pass.neutralise_prompt_delimiters(review_context, _REVIEW_CONTEXT_TAGS)}\n"
         "</REVIEW_CONTEXT>\n"
     )
+
+
+def _direction_of(invariant: dict[str, Any]) -> Optional[str]:  # noqa: UP045
+    """The invariant's `x_direction` when it is one of the two the spec names."""
+    value = invariant.get("x_direction")
+    return value if value in _DIRECTION_LINES else None
+
+
+def _clause_for(
+    invariant: dict[str, Any], clause_context: Optional[dict[str, dict[str, str]]]  # noqa: UP045
+) -> Optional[dict[str, str]]:  # noqa: UP045
+    """The `clause_context` entry for the invariant's `x_taxonomy_id`, if any."""
+    taxonomy_id = invariant.get("x_taxonomy_id")
+    if not clause_context or not isinstance(taxonomy_id, str):
+        return None
+    return clause_context.get(taxonomy_id)
 
 
 def _check_judge_response(raw_text: str, *, expected_invariant_id: str) -> tuple[dict[str, Any] | None, str]:
@@ -417,6 +470,7 @@ def worst_case_judge_usage(
     model_id: str,
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
     perspective_note: str = "",
+    clause_context: Optional[dict[str, dict[str, str]]] = None,  # noqa: UP045
 ) -> dict[str, int]:
     """The most `judge_floor_invariants` can spend on these arguments (QA W8
     item 3), for the caller to reserve against the daily cap BEFORE any
@@ -455,6 +509,8 @@ def worst_case_judge_usage(
             statement=statement,
             review_context=review_context,
             perspective_note=perspective_note,
+            direction=_direction_of(invariant),
+            clause=_clause_for(invariant, clause_context),
         )
         per_attempt = _primary_review_pass.request_input_tokens_est(
             _SYSTEM_PROMPT, user_prompt + "x" * longest_correction
@@ -478,6 +534,7 @@ def judge_floor_invariants(
     review_id: str = "",
     ledger_write: Optional[Callable[["_model_client.ModelInvocationRecord"], None]] = None,  # noqa: UP037, UP045
     perspective_note: str = "",
+    clause_context: Optional[dict[str, dict[str, str]]] = None,  # noqa: UP045
 ) -> FloorJudgment:
     """Judge every Floor invariant against `review_context`, one
     `model_client.invoke()` call per invariant (plus one bounded retry for
@@ -556,6 +613,8 @@ def judge_floor_invariants(
             statement=statement,
             review_context=review_context,
             perspective_note=perspective_note,
+            direction=_direction_of(invariant),
+            clause=_clause_for(invariant, clause_context),
         )
 
         verdict: dict[str, Any] | None = None

@@ -1063,6 +1063,7 @@ def run_review(
     # Stays "" for a v1 bundle, which has no Floor invariants to judge at
     # all -- `floor_invariants` is empty there, so stage 3.5 never runs.
     floor_perspective_note: str = ""
+    floor_clause_context: dict[str, dict[str, str]] = {}
     # Issue #582 (Defect 3): `knowledge.lineage_record()` -- absent (never a
     # null placeholder) for a v1 bundle, exactly like `floor_judgment`/
     # `opf_lineage` above -- so an operator reading a completed OPF review
@@ -1134,6 +1135,9 @@ def run_review(
             knowledge.opf_doc or {}, knowledge.overrides
         )
         floor_perspective_note = _floor_perspective_note(knowledge.opf_doc, entity_roster)
+        # OPF-SPEC §3.7: a Floor line naming a clause (x_taxonomy_id) is judged
+        # against that clause and our standard for it.
+        floor_clause_context = opf_prompt.floor_clause_context(knowledge.opf_doc or {})
         opf_knowledge_lineage = knowledge.lineage_record()
         ledger = hard_ledger.build_ledger(knowledge.opf_doc)
         dossier_opf_doc = knowledge.opf_doc
@@ -1304,6 +1308,7 @@ def run_review(
                 review_context=doc_text,
                 model_id=critic_model_id,
                 perspective_note=floor_perspective_note,
+                clause_context=floor_clause_context,
             )
         )
 
@@ -1463,6 +1468,7 @@ def run_review(
             model_id=critic_model_id,
             review_id=review_id,
             ledger_write=ledger_write,
+            clause_context=floor_clause_context,
             # Issue #679: the judge reads NONE of the composed system
             # blocks, so the CONTEXT block's `perspective` never reached it
             # and its directional invariants -- the ones asking what runs in
