@@ -45,6 +45,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import hard_ledger  # noqa: E402
+import opf_integrity  # noqa: E402
 import opf_load  # noqa: E402
 
 VECTOR_008 = opf_load.OPF_CONFORMANCE_VECTORS_DIR / "008-hard-rules-and-dossiers.json"
@@ -76,25 +77,26 @@ def _doc_with_pattern(pattern: str) -> dict:
     for section in ("digest", "manifest", "dossiers", "provenance_index"):
         doc[section] = vector["expected"][section]
     doc.pop("identity", None)
-    doc["manifest"] = {
-        "hard_rules": [
+    condition = {"type": "numeric_bound", "pattern": pattern, "max": 1000000, "unit": "usd"}
+    # One Floor line carries the bound; the manifest is then derived from it
+    # (intake recomputes the manifest from the Floor, QA 2026-11-03 #24), and
+    # the vector's dossiers, which name other Floor rules, are dropped.
+    doc["floor"] = {
+        "invariants": [
             {
-                "rule_id": "r-bound",
-                "clause_id": "clause.term",
-                "taxonomy_id": "term",
+                "id": "r-bound",
                 "statement": "Liability is capped.",
-                "required_presence": True,
-                "condition": {
-                    "type": "numeric_bound",
-                    "pattern": pattern,
-                    "max": 1000000,
-                    "unit": "usd",
-                },
-                "permissible_proof": [],
-                "fallback_language": None,
+                "x_taxonomy_id": "term",
+                "x_required_presence": True,
+                "x_condition": condition,
             }
         ]
     }
+    doc["dossiers"] = {}
+    doc["manifest"] = {"hard_rules": opf_integrity._expected_hard_rules(doc)}
+    # The Floor carries the same pattern; keep the manifest first in document
+    # order so the refusal still names the manifest pointer this suite asserts.
+    doc["floor"] = doc.pop("floor")
     return doc
 
 
