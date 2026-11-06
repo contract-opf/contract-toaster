@@ -96,6 +96,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 import opf_canonicalize  # noqa: E402
 import opf_html  # noqa: E402
 import opf_injection_scan  # noqa: E402
+import opf_integrity  # noqa: E402
 import playbook_registry  # noqa: E402
 import regex_safety  # noqa: E402
 
@@ -186,6 +187,17 @@ class OpfDigestVersionError(OpfValidationError):
     semantics we do not understand would silently mis-weight precedent, which
     is worse than refusing to run.
     """
+
+
+class OpfDerivedMismatchError(OpfValidationError):
+    """Raised when an OPF document's derived sections do not follow from its
+    own evidence and Floor (QA 2026-11-03 #24): section digests, the digest's
+    perspective, uncapped totals and absence counts, the hard-rule manifest,
+    a dangling precedent id, a retired line still active, or a signed
+    invariant whose `x_signed_hash` no longer matches (OPF-SPEC §3.7, §3.12).
+    A valid `identity.content_hash` does not prevent this: the hash covers the
+    bytes, and a re-stamped edit carries a matching one. The message lists
+    JSON pointers, never a document value (see `scripts/opf_integrity.py`)."""
 
 
 class OpfExtractError(OpfValidationError):
@@ -475,6 +487,15 @@ def _validate_doc(doc: dict, *, require_identity: bool) -> dict:
             "OPF validation failed at /identity/content_hash: declared hash does not "
             "match the hash recomputed over the document's canonical content "
             "(the document changed after it was compiled)"
+        )
+
+    problems = opf_integrity.derivation_errors(doc)
+    if problems:
+        shown = "; ".join(problems[:5]) + (f"; and {len(problems) - 5} more" if len(problems) > 5 else "")
+        raise OpfDerivedMismatchError(
+            f"OPF validation failed: the document's derived sections do not follow from its evidence "
+            f"and Floor ({len(problems)} problem(s): {shown}). Recompile or re-sign the playbook with "
+            "playbook-engine so the digest, manifest and section digests are re-derived."
         )
 
     findings = opf_injection_scan.scan_untrusted_playbook_text(doc)
