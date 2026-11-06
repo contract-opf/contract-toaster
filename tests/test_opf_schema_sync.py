@@ -82,7 +82,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 OPF_DIR = REPO_ROOT / "playbooks" / "opf"
 
 # The sha256 the ENGINE PUBLISHED for each vendored artifact (engine
-# `spec/CHANGELOG.md`, "Current pins", at main fe89bc6), which our vendored
+# `spec/CHANGELOG.md`, "Current pins", at engine 2.0.0), which our vendored
 # bytes must equal. Transcribe from the engine changelog on re-vendor; do NOT
 # regenerate from our own copy (see the module docstring, layer 2 -- a pin
 # computed from the file it pins proves only that the file equals itself).
@@ -94,7 +94,7 @@ UPSTREAM_FROZEN_SHA256 = {
 # by vectors/*.json sorted by filename, concatenated (its
 # tests/test_spec_consistency.py, "Current pins").
 CONFORMANCE_DIR_NAME = "conformance-0.6"
-UPSTREAM_CONFORMANCE_SHA256 = "c5e3828e7d59c961aca2d633b390b3ea536902e7818efe0dd778a0916cf8be96"
+UPSTREAM_CONFORMANCE_SHA256 = "453c3d3cfacb90578c7b289580169dba3645ba1ee6713417fe0e50c138e16c59"
 # Where the engine keeps the same set, relative to its repo root.
 SOURCE_CONFORMANCE_SUBDIR = Path("spec") / "conformance" / "0.6"
 

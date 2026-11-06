@@ -252,6 +252,11 @@ def _minimal_digest_clause(template: dict[str, Any], topic_id: str) -> dict[str,
     ):
         clause[key] = 0
     clause["positions"] = dict.fromkeys(clause["positions"], 0)
+    # No deal behind the clause, so no signed-without record either (intake
+    # recomputes these counts from `evidence.absence`, QA 2026-11-03 #24).
+    clause["n_signed_without_verified"] = 0
+    clause["n_signed_without_possible"] = 0
+    clause["verified_absent_deals"] = []
     return clause
 
 
@@ -305,6 +310,7 @@ def _wide_vocabulary_opf_doc() -> dict[str, Any]:
     # No deal behind the widened vocabulary: an empty precedent record, and
     # none of the optional sections derived from the old one.
     doc["evidence"]["precedent"] = []
+    doc["evidence"]["absence"]["records"] = []
     for section in ("manifest", "dossiers", "provenance_index"):
         doc.pop(section, None)
 

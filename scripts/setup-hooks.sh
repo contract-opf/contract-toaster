@@ -30,4 +30,8 @@ git config core.hooksPath .githooks
 echo "setup-hooks: core.hooksPath = .githooks"
 echo "setup-hooks: 'git push origin main' is now refused; override with"
 echo "setup-hooks:     LAND_TO_MAIN=1 git push origin main"
+echo "setup-hooks: the pre-push hook also runs scripts/pre-push-confidentiality.py over every"
+echo "setup-hooks: commit it pushes. Its private term lists go in any *.txt under"
+echo "setup-hooks:     $(git rev-parse --path-format=absolute --git-common-dir)/confidentiality/"
+echo "setup-hooks: (one term per line, never committed); with none present the scan is skipped."
 echo "setup-hooks: undo with 'bash scripts/setup-hooks.sh --uninstall'."

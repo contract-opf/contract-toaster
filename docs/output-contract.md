@@ -1236,7 +1236,8 @@ as its response keys — the rename is a storage-layer fact, not an API one. See
 | A computed override's `.primary_issue` / `.critic_issue` | The analysis artifact and `get_review_detail`'s `critic_delta` (#138); an `added` entry's `critic_issue` rationales in internal `.docx` footnotes (#140) | Yes (each scanned as a primary issue) | `external` (per field, as above) |
 | `critic_delta.overrides[].section_ref` (stamped by the reconciler) | The analysis artifact and `get_review_detail`'s `critic_delta`; internal `.docx` footnotes in the `internal`/`both` notes modes, where each note names its section (#140) | Yes (a locator — see below) | `external` |
 | `cover_note_draft` | The cover-note card in the finished review's panel / History expanded row; copied into the reviewer's own email client and sent to the counterparty | Yes | `external` |
-| `internal_precedent_citation` | Retained only in confidential audit storage; never rendered in UI | n/a (stripped) | n/a |
+| `internal_precedent_citation` | Retained only in confidential audit storage; never rendered in UI. On an OPF review each citation is first checked against the refs the digest showed the model (`scripts/precedent_citations.py`): one that does not resolve is set to null before storage | n/a (stripped) | n/a |
+| `precedent_citation_status`, `precedent_basis` (added by the toaster, not the model) | The analysis artifact and `get_review_detail`'s `issues` (OPF reviews). `status` is `resolved`, `unresolved_stripped` or `none`; `basis` lists the resolved refs as opaque `alias@version §clause_path` strings, never a deal id, name or precedent text | n/a (not model prose) | n/a |
 
 The `critic_delta` rows are enumerated field by field rather than summarised as one line, because
 the summary is what hid issue #517: the table said "`critic_delta` rationale / contested

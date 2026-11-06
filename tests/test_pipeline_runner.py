@@ -182,6 +182,7 @@ class KnowledgeCacheTest(unittest.TestCase):
     def test_activation_composes_afresh_and_rollback_hits(self) -> None:
         changed = _doc()
         changed["perspective"]["party"] = "Synthetic Other Party"
+        changed["digest"]["perspective"]["party"] = "Synthetic Other Party"  # the digest restates it
         v1 = _stored(self.s3, _doc(), "1.0.0")
         v2 = _stored(self.s3, _rehashed(changed), "2.0.0")
 

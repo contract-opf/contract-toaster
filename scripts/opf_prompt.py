@@ -34,7 +34,7 @@ The engine-built `digest` section replaces it: the same knowledge projected
 for exactly this use. Digest 5 (OPF 0.6) is verdict-free precedent -- per
 clause, our standard (in its parts), how many signed deals opened with it and
 kept it, the positions of the signed texts, the signed variants (with how many
-were reached from our standard and how many were signed as proposed), the
+were reached from our standard and how many were signed unchanged from the opening text), the
 refused asks and the openings not signed as proposed -- each entry carrying a
 citation that resolves back into the full OPF. The engine enforces a
 ~40K-token budget on it BY CONSTRUCTION (tightening per-list caps until it
@@ -93,8 +93,11 @@ stance (the #129 rule):
     on a former form says so by the form's label (read from
     `evidence.precedent[]` through its `precedent_ids`: the record's
     `opened_with` / `opened_with_form`, nothing else): its origin is ours.
-  - **Absence.** "absent in N signed deals (verified)" and, separately,
-    "possibly absent in M more; not verified" -- never summed, and neither
+  - **Absence.** "our check found no matching text in N signed deals" (a
+    caveated fact about the check, not proof the deal lacked the clause) and,
+    separately, "possibly absent in M more; not verified" (with the count that
+    could not be checked at all, from `evidence.absence` basis `unverifiable`)
+    -- never summed, and neither
     is the same as "no precedent" (the heading's coverage and the closing
     no-precedent line, #158).
 
@@ -222,6 +225,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 import deal_aliases  # noqa: E402
 import entity_normalize  # noqa: E402
 import hard_ledger  # noqa: E402
+import opf_integrity  # noqa: E402
 
 #: Composition modes. `review_knowledge.py` re-exports these and adds its own
 #: MODE_V1_PROJECTION (the pre-OPF projection path, which does not compose here).
@@ -409,8 +413,10 @@ DIGEST_INTRO = (
     "- Our standard: our own template language for the clause, in its parts.\n"
     "- Signed language on record: wording other than our standard that we signed. A "
     "variant reached from our standard is a concession we have signed: it marks the edge "
-    "of what we have accepted, not a preference. A variant signed as proposed is wording "
-    "the other side opened with that we signed unchanged.\n"
+    "of what we have accepted, not a preference. A variant signed unchanged from the "
+    "opening text is wording the deal's first draft opened with that we signed as it "
+    "stood: that first draft may have been ours or the other side's, so it says nothing "
+    "about who proposed the wording.\n"
     "- Asked for and refused: wording the other side proposed and we did not sign. It is "
     "NEVER our position and must NEVER be used as replacement language or as a model for "
     "an edit; its only use is precedent for refusing the same ask if it is made again. If "
@@ -443,11 +449,15 @@ DIGEST_INTRO = (
     "A deal that opened on a former form opened on OUR wording, not the other side's. The "
     "playbook never says why a form changed; only an owner's note, when one is shown, "
     "does.\n"
-    "- Signed without this clause: signed deals that carry no text for the clause. Only "
-    "\"verified\" means we signed that deal without the clause. \"Possibly absent ... not "
-    "verified\" means a passage may carry the clause unrecognised, so it is evidence of "
-    "nothing either way; never add it to the verified count. Neither is the same as the "
-    "playbook having no precedent for a clause.\n"
+    "- Signed without this clause: signed deals that carry no text for the clause. "
+    "\"Verified\" means our check found no matching text in that deal's executed copy. It "
+    "is not proof the deal lacked the clause: an amendment, cover sheet or order form can "
+    "incorporate terms that are not in the copy, so say \"our check found none\", never "
+    "that the deal was signed without the clause. \"Possibly absent ... not verified\" "
+    "means a passage may carry the clause unrecognised, so it is evidence of nothing either "
+    "way; never add it to the verified count. \"Could not be checked\" means the executed "
+    "copy gave nothing readable to check: it is no evidence of absence at all. Neither is "
+    "the same as the playbook having no precedent for a clause.\n"
     "- Every count is of distinct deals. A citation [document@version §clause] names "
     "where the entry was signed or proposed; the document is an opaque "
     "reference, never the other party's name. A citation of prior_template:<form> "
@@ -726,7 +736,7 @@ def _fmt_signed_variant(
     if span:
         facts.append(span)
     for field, words in (("n_from_standard", "reached from our standard in"),
-                         ("n_unchanged", "signed as proposed in")):
+                         ("n_unchanged", "signed unchanged from the opening text in")):
         n = _count(entry.get(field), field, where)
         if n:
             facts.append(f"{words} {n}")
@@ -944,7 +954,7 @@ def _standard_history_lines(clause: dict, show_part_map: bool, where: str) -> li
     return out
 
 
-def _absence_line(clause: dict, where: str) -> str | None:
+def _absence_line(clause: dict, where: str, unverifiable: int = 0) -> str | None:
     """`Signed without this clause: absent in 4 signed deals (verified:
     deal-03, deal-07); possibly absent in 2 more; not verified.` (digest 5,
     issue #251), or None when the clause was signed in every signed deal.
@@ -973,20 +983,48 @@ def _absence_line(clause: dict, where: str) -> str | None:
         if names and verified > len(names):
             listed += f", and {verified - len(names)} more"
         parts.append(
-            f"absent in {_plural(verified, 'signed deal')} (verified"
+            f"our check found no matching text in {_plural(verified, 'signed deal')} "
+            "(verified by that check only, not proof the clause was absent"
             + (f": {listed})" if listed else ")")
         )
     if possible:
         more = " more" if verified else ""
         noun = "" if verified else (" signed deal" if possible == 1 else " signed deals")
-        parts.append(f"possibly absent in {possible}{more}{noun}; not verified")
+        cannot = min(max(unverifiable, 0), possible)
+        note = ""
+        if cannot:
+            note = " (all could not be checked)" if cannot == possible else f" ({cannot} could not be checked)"
+        parts.append(f"possibly absent in {possible}{more}{noun}; not verified{note}")
     if not parts:
         return None
     return f"Signed without this clause: {'; '.join(parts)}."
 
 
+def _unverifiable_absences(opf_doc: dict) -> dict[str, int]:
+    """`{taxonomy_id: deals whose absence could not be checked}` from
+    `evidence.absence.records[]` with `basis: "unverifiable"` (OPF 0.6 spec
+    3.5.8: the executed copy gave nothing readable). Only the taxonomy id and
+    the basis are read, never a deal id. The digest folds these into
+    `n_signed_without_possible`; the prompt says so, so they never read as an
+    absence."""
+    evidence = opf_doc.get("evidence")
+    absence = evidence.get("absence") if isinstance(evidence, dict) else None
+    records = absence.get("records") if isinstance(absence, dict) else None
+    out: dict[str, int] = {}
+    for record in records if isinstance(records, list) else []:
+        if not isinstance(record, dict) or record.get("basis") != "unverifiable":
+            continue
+        taxonomy_id = record.get("taxonomy_id")
+        if isinstance(taxonomy_id, str):
+            out[taxonomy_id] = out.get(taxonomy_id, 0) + 1
+    return out
+
+
 def _digest_clause_block(
-    clause: dict, corpus_n_deals: int | None = None, prior_forms: dict[str, str] | None = None
+    clause: dict,
+    corpus_n_deals: int | None = None,
+    prior_forms: dict[str, str] | None = None,
+    unverifiable: dict[str, int] | None = None,
 ) -> str:
     """One digest-5 clause, rendered as plain facts under plain headers.
 
@@ -1057,7 +1095,10 @@ def _digest_clause_block(
     if positions:
         lines.append(positions)
 
-    absence = _absence_line(clause, where)
+    taxonomy_id = clause.get("taxonomy_id")
+    absence = _absence_line(
+        clause, where, (unverifiable or {}).get(taxonomy_id, 0) if isinstance(taxonomy_id, str) else 0
+    )
     if absence:
         lines.append(absence)
 
@@ -1220,8 +1261,9 @@ def _digest_block(opf_doc: dict) -> str:
     digest = deal_aliases.alias_digest(_strip_x_keys(digest), deal_aliases.alias_map(opf_doc))
     corpus_n_deals = _corpus_n_deals(digest)
     prior_forms = _prior_form_openings(opf_doc)
+    unverifiable = _unverifiable_absences(opf_doc)
     body = "\n\n".join(
-        _digest_clause_block(c, corpus_n_deals, prior_forms)
+        _digest_clause_block(c, corpus_n_deals, prior_forms, unverifiable)
         for c in digest["clauses"]
         if isinstance(c, dict)
     )
@@ -1230,6 +1272,33 @@ def _digest_block(opf_doc: dict) -> str:
     uncovered = _uncovered_line(digest)
     tail = f"\n\n{uncovered}" if uncovered else ""
     return f"{head}\n\n{body}{tail}"
+
+
+#: The Floor's `x_direction` (OPF-SPEC §3.7), in words. The vocabulary is
+#: closed and fixed text: nothing from the document is spliced into it.
+DIRECTION_WORDS = {
+    "hold": "hold: the line keeps a clause; a clause that is missing, struck or weaker than the "
+    "standard violates it",
+    "refuse": "refuse: the line names a term we never accept; a draft that contains the term "
+    "violates it",
+}
+
+
+def floor_clause_context(opf_doc: dict) -> dict[str, dict[str, str]]:
+    """`{taxonomy_id: {"title", "standard"}}` for every evidence clause with a
+    taxonomy id: what a Floor invariant's `x_taxonomy_id` binds it to
+    (OPF-SPEC §3.7, §3.12.3). `standard` is our standard's text, `""` when the
+    clause has none. A Floor line naming a clause is judged against THAT
+    clause and our standard for it, not against the statement alone."""
+    out: dict[str, dict[str, str]] = {}
+    for clause in hard_ledger._evidence_clauses(opf_doc):
+        taxonomy_id, title = clause.get("taxonomy_id"), clause.get("title")
+        if not isinstance(taxonomy_id, str) or not isinstance(title, str) or taxonomy_id in out:
+            continue
+        standard = clause.get("our_standard")
+        text = standard.get("text") if isinstance(standard, dict) else None
+        out[taxonomy_id] = {"title": title, "standard": text if isinstance(text, str) else ""}
+    return out
 
 
 def resolve_floor_invariants(opf_doc: dict, overrides: Optional[dict] = None) -> list[dict[str, Any]]:  # noqa: UP045
@@ -1247,7 +1316,10 @@ def resolve_floor_invariants(opf_doc: dict, overrides: Optional[dict] = None) ->
     `opf.floor.invariants` verbatim -- byte-identical to pre-#294 behavior.
     """
     floor = opf_doc.get("floor") or {}
-    invariants = list(floor.get("invariants") or [])
+    # `floor.x_retired` (OPF-SPEC §3.7): a retired line binds nothing, so it is
+    # neither judged nor rendered as an active hard line, even if a hand-edit
+    # left it in `invariants` as well.
+    invariants = opf_integrity.active_invariants(floor)
     if overrides:
         invariants = invariants + list(overrides.get("floor_additions") or [])
     return invariants
@@ -1351,6 +1423,7 @@ def _binding_block(
     # rationale is aliased the same way. The statement is not aliased: see
     # `deal_aliases`' module docstring.
     aliases = deal_aliases.alias_map(opf_doc)
+    clause_context = floor_clause_context(opf_doc)
     for invariant in invariants:
         index += 1
         invariant_id = invariant.get("id", "")
@@ -1365,6 +1438,14 @@ def _binding_block(
                 f"floor invariant #{index} [{invariant_id}]",
             )
         line = f"{index}. [floor:{invariant_id}] {statement}"
+        direction = opf_integrity.direction_of(invariant)
+        if direction:
+            line += f" (Direction — {DIRECTION_WORDS[direction]}.)"
+        clause_title = clause_context.get(invariant.get("x_taxonomy_id"), {}).get("title") if isinstance(
+            invariant.get("x_taxonomy_id"), str
+        ) else None
+        if clause_title:
+            line += f" (Clause: {_neutralise(clause_title)}.)"
         if rationale:
             line += f" (Rationale: {deal_aliases.alias_text(rationale, aliases)})"
         lines.append(line)
@@ -1500,6 +1581,9 @@ def _manifest_block(opf_doc: dict) -> str | None:
     """
     manifest = opf_doc.get("manifest")
     if not isinstance(manifest, dict):
+        gap = hard_ledger.ledger_gap(opf_doc)
+        if gap:
+            _omit(gap, "manifest")
         return None
     manifest = _strip_x_keys(manifest)
     rules = manifest.get("hard_rules")

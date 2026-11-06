@@ -92,6 +92,7 @@ EXPECTED_PINNED_WORKFLOWS = frozenset(
         "ci-pipeline-gate.yml",
         "ci-pipeline.yml",
         "codeowners-coverage.yml",
+        "confidential-terms-gate.yml",
         "cost-model-lint.yml",
         "counterparty-name-gate.yml",
         "dependency-audit.yml",
