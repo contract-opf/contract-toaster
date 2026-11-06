@@ -1,6 +1,6 @@
-# DTS backend image — built from the REPO ROOT context (unlike the AWS
-# backend/Dockerfile, which builds from backend/ and is left untouched so the
-# AWS CI build `docker build ... backend/` keeps working).
+# DTS backend image — built from the REPO ROOT context, as the AWS
+# backend/Dockerfile now is too. That image copies only the scripts/ modules
+# the backend imports; this one copies the whole tree.
 #
 # Mirrors the repo tree under /app so:
 #   - `src.main:app` imports resolve (PYTHONPATH=/app/backend),

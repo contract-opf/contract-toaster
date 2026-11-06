@@ -29,8 +29,8 @@ WHAT THIS FILE CANNOT DO
   mismatch with `.python-version` for exactly this reason.
 
 SCOPE
-  `backend/Dockerfile` (the AWS App Runner image, built from the `backend/`
-  context) is deliberately NOT covered: #63's change list names only the DTS
+  `backend/Dockerfile` (the AWS App Runner image, built from the repo root
+  with `-f backend/Dockerfile`) is deliberately NOT covered: #63's change list names only the DTS
   image, and that path promotes signed image digests on its own schedule. It
   still says `FROM python:3.12-slim`. Do not add it here without also proving
   that image builds.

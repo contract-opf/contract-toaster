@@ -238,11 +238,10 @@ PASSES_PER_REVIEW = 2  # primary + adversarial (critic)
 # attempts x 32K out, per pass (issues #658, #144, #137, #148). That table
 # lists $8.84 (pre-#148, Sonnet reviewer), $8.71 (pre-#137), $6.86
 # (pre-#144), $2.46 (pre-#658) and $2.11 (pre-#625) as history only. They cannot be loaded
-# directly from model-policy/*.json at runtime: this module ships inside the
-# backend container (backend/Dockerfile COPYs only src/, built from the
-# backend/ directory as its Docker context) and infra/lambda/persist/
-# handler.py ships as its own standalone Lambda asset (infra/lambda/persist/
-# only) -- neither has model-policy/ on its filesystem. Instead,
+# directly from model-policy/*.json at runtime: infra/lambda/persist/
+# handler.py, which settles the same reservations, ships as its own
+# standalone Lambda asset (infra/lambda/persist/ only) with no model-policy/
+# on its filesystem, and both copies must agree. Instead,
 # tests/test_spend_reservation_settlement.py cross-checks these hardcoded
 # figures against model-policy/bedrock-us-east-1.json (base rate x the
 # regional premium below) and against infra/lambda/persist/handler.py's own
