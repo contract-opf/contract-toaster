@@ -225,6 +225,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 import deal_aliases  # noqa: E402
 import entity_normalize  # noqa: E402
 import hard_ledger  # noqa: E402
+import opf_integrity  # noqa: E402
 
 #: Composition modes. `review_knowledge.py` re-exports these and adds its own
 #: MODE_V1_PROJECTION (the pre-OPF projection path, which does not compose here).
@@ -1273,6 +1274,33 @@ def _digest_block(opf_doc: dict) -> str:
     return f"{head}\n\n{body}{tail}"
 
 
+#: The Floor's `x_direction` (OPF-SPEC §3.7), in words. The vocabulary is
+#: closed and fixed text: nothing from the document is spliced into it.
+DIRECTION_WORDS = {
+    "hold": "hold: the line keeps a clause; a clause that is missing, struck or weaker than the "
+    "standard violates it",
+    "refuse": "refuse: the line names a term we never accept; a draft that contains the term "
+    "violates it",
+}
+
+
+def floor_clause_context(opf_doc: dict) -> dict[str, dict[str, str]]:
+    """`{taxonomy_id: {"title", "standard"}}` for every evidence clause with a
+    taxonomy id: what a Floor invariant's `x_taxonomy_id` binds it to
+    (OPF-SPEC §3.7, §3.12.3). `standard` is our standard's text, `""` when the
+    clause has none. A Floor line naming a clause is judged against THAT
+    clause and our standard for it, not against the statement alone."""
+    out: dict[str, dict[str, str]] = {}
+    for clause in hard_ledger._evidence_clauses(opf_doc):
+        taxonomy_id, title = clause.get("taxonomy_id"), clause.get("title")
+        if not isinstance(taxonomy_id, str) or not isinstance(title, str) or taxonomy_id in out:
+            continue
+        standard = clause.get("our_standard")
+        text = standard.get("text") if isinstance(standard, dict) else None
+        out[taxonomy_id] = {"title": title, "standard": text if isinstance(text, str) else ""}
+    return out
+
+
 def resolve_floor_invariants(opf_doc: dict, overrides: Optional[dict] = None) -> list[dict[str, Any]]:  # noqa: UP045
     """Union of `opf.floor.invariants` and `overrides.floor_additions`,
     genesis first, stable order (issue #294 scope item 4). No dedup logic
@@ -1288,7 +1316,10 @@ def resolve_floor_invariants(opf_doc: dict, overrides: Optional[dict] = None) ->
     `opf.floor.invariants` verbatim -- byte-identical to pre-#294 behavior.
     """
     floor = opf_doc.get("floor") or {}
-    invariants = list(floor.get("invariants") or [])
+    # `floor.x_retired` (OPF-SPEC §3.7): a retired line binds nothing, so it is
+    # neither judged nor rendered as an active hard line, even if a hand-edit
+    # left it in `invariants` as well.
+    invariants = opf_integrity.active_invariants(floor)
     if overrides:
         invariants = invariants + list(overrides.get("floor_additions") or [])
     return invariants
@@ -1392,6 +1423,7 @@ def _binding_block(
     # rationale is aliased the same way. The statement is not aliased: see
     # `deal_aliases`' module docstring.
     aliases = deal_aliases.alias_map(opf_doc)
+    clause_context = floor_clause_context(opf_doc)
     for invariant in invariants:
         index += 1
         invariant_id = invariant.get("id", "")
@@ -1406,6 +1438,14 @@ def _binding_block(
                 f"floor invariant #{index} [{invariant_id}]",
             )
         line = f"{index}. [floor:{invariant_id}] {statement}"
+        direction = opf_integrity.direction_of(invariant)
+        if direction:
+            line += f" (Direction — {DIRECTION_WORDS[direction]}.)"
+        clause_title = clause_context.get(invariant.get("x_taxonomy_id"), {}).get("title") if isinstance(
+            invariant.get("x_taxonomy_id"), str
+        ) else None
+        if clause_title:
+            line += f" (Clause: {_neutralise(clause_title)}.)"
         if rationale:
             line += f" (Rationale: {deal_aliases.alias_text(rationale, aliases)})"
         lines.append(line)
