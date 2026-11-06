@@ -35,7 +35,7 @@ tolerance behavior that check would have asserted no longer exists):
    and, only when the id itself matches `^[a-z0-9_-]+$` under a length cap,
    the duplicated id value (issue #480, parity with the playbook-engine's
    fail-closed `_check_duplicate_ids` validator rule, engine commit
-   390a259). Check 5e additionally proves the negative: a duplicated
+   957306d). Check 5e additionally proves the negative: a duplicated
    `document_id` holding long, document-shaped/injection-shaped text is
    never echoed, since the vendored schema does not constrain any of these
    four id fields and this check runs before the injection scan.
@@ -47,7 +47,7 @@ tolerance behavior that check would have asserted no longer exists):
    refused for its opf_version, naming 0.6. The engine's own public NDA
    example (tests/fixtures/opf/engine-nda-example.opf.json, vendored
    byte-for-byte from playbook-engine examples/nda/playbook.opf.json at
-   fe89bc6) loads through the full upload path, identity required.
+   c0ef689) loads through the full upload path, identity required.
 7. (issues #128, #177) The vendored OPF 0.6 conformance set
    (`opf_load.OPF_CONFORMANCE_DIR`) is the 15 vectors 001-015 its manifest
    indexes, and every one, assembled as the engine emits it (input + the
