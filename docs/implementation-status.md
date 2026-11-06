@@ -8,6 +8,8 @@ open-source adopter) what actually works today. This table is the
 correction: it enumerates every admin-UI capability and observability
 surface RUNBOOK.md describes and states, plainly, whether it ships._
 
+_Refreshed 2026-11-06 against `main` after the OPF 0.6 consumption work (#195): the Review-tab, playbook lifecycle and admin surfaces below are unchanged in status; the STUBBED and PLANNED rows are the roadmap items listed in [REVIEW-GUIDE](REVIEW-GUIDE.md#next-steps-roadmap-for-a-reviewer)._
+
 **Legend**
 
 | Status | Meaning |
