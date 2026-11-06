@@ -35,7 +35,7 @@ advice.
   unset it falls back to `run_mock_pipeline`, which is the escape hatch for
   tests and for callers that do not want a live model call.
 - **AWS does not.** `infra/lib/nested/pipeline-stack.ts` still wires
-  `MockReviewStageFunction` as the review stage. Replacing it is #243, which was
+  `MockReviewStageFunction` as the review stage. Replacing it is #29 (the old #243 in pre-migration docs), which was
   **deliberately deferred past the open-source launch** by an owner decision on
   2026-07-14 — it is not an oversight, and it is tracked by its own milestone
   ("AWS real-pipeline acceptance — deferred") so that Phase 2 completing on the
@@ -81,9 +81,10 @@ advice.
   [docs/implementation-status.md](implementation-status.md) (a lint-enforced
   SHIPPED / STUBBED / PLANNED ledger). Treat any RUNBOOK/ARCHITECTURE procedure
   marked PLANNED there as a design spec, not an operating procedure.
-- **Not production-deployable yet.** See #225 (repo not yet deployable from a
-  clone), #96 (prod account bootstrap), and the blocking go-live gates #98
-  (production readiness review) and #99 (pilot parallel-run + go-live decision).
+- **Not production-deployable yet.** See #28 (repo not yet deployable from a
+  clone). The AWS production bootstrap and go-live gates (production account
+  bootstrap, readiness review, pilot parallel-run and go-live decision) are
+  tracked in the private overlay repository, not here.
 
 ## Two deployment targets, one codebase
 
@@ -205,7 +206,7 @@ with real infra failures hidden in the FLAKY bucket.
 1. **Replace the AWS mock Step Functions stage** with the same tested `scripts/`
    chain the Docker Compose target already runs, driven by a real model client.
    The `OpenRouterModelClient` exists; the AWS Bedrock client is still deferred.
-   This is #243, and it carries its own milestone.
+   This is #29, and it carries its own milestone.
    (The spend model already prices OpenRouter reviews per model, from the
    rates in `model-policy/openrouter.json`, so the daily cap covers the
    Docker Compose target today.)
@@ -216,12 +217,14 @@ with real infra failures hidden in the FLAKY bucket.
    (`deploy/dts/README.md`, "Retention purge cadence").
 
 **To make AWS production-deployable:**
-3. Close #225 (deployability), #96 (prod account bootstrap), and pass the
-   blocking gates #98 (production readiness) and #99 (pilot + go-live decision).
+3. Close #28 (deployability) and pass the go-live gates tracked in the private
+   overlay (production account bootstrap, readiness review, pilot + go-live
+   decision).
 
 **Product completeness:**
-4. Finish the reviewer result view (#85): per-issue provenance (#35), the
-   disposition capture flow (#74), per-review cost, and every-status copy.
+4. The reviewer result view, with per-issue provenance and the disposition
+   capture flow, ships (#23). What remains is per-review cost and every-status
+   copy polish; see the open issues.
 5. Admin surfaces currently STUBBED/PLANNED in
    [docs/implementation-status.md](implementation-status.md) (bundle
    deactivation and rollback quarantine, audit viewer, corpus upload UI,
