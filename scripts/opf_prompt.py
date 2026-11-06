@@ -1541,6 +1541,9 @@ def _manifest_block(opf_doc: dict) -> str | None:
     """
     manifest = opf_doc.get("manifest")
     if not isinstance(manifest, dict):
+        gap = hard_ledger.ledger_gap(opf_doc)
+        if gap:
+            _omit(gap, "manifest")
         return None
     manifest = _strip_x_keys(manifest)
     rules = manifest.get("hard_rules")
