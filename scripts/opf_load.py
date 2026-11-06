@@ -447,7 +447,9 @@ def _validate_doc(doc: dict, *, require_identity: bool) -> dict:
     Order is deliberate: versions first (both of them), then structure (schema),
     then sibling-id uniqueness (schema-shaped but not schema-checkable, see
     OpfDuplicateIdError), then artifact integrity (content_hash), then
-    content safety (injection scan). Checking a version before validating
+    content safety (injection scan), then derived-section consistency
+    (`opf_integrity`, QA 2026-11-03 #24: after the scan so injected text is
+    named as injection, not as a mismatch it also causes). Checking a version before validating
     against a shape is what turns "failed the 'required' check at
     /evidence" on an OPF 0.3 upload into "unsupported version" -- and it is
     the only check that can see a semantic version change that leaves the
@@ -489,6 +491,10 @@ def _validate_doc(doc: dict, *, require_identity: bool) -> dict:
             "(the document changed after it was compiled)"
         )
 
+    findings = opf_injection_scan.scan_untrusted_playbook_text(doc)
+    if findings:
+        raise OpfInjectionError(_describe_injection(findings))
+
     problems = opf_integrity.derivation_errors(doc)
     if problems:
         shown = "; ".join(problems[:5]) + (f"; and {len(problems) - 5} more" if len(problems) > 5 else "")
@@ -497,10 +503,6 @@ def _validate_doc(doc: dict, *, require_identity: bool) -> dict:
             f"and Floor ({len(problems)} problem(s): {shown}). Recompile or re-sign the playbook with "
             "playbook-engine so the digest, manifest and section digests are re-derived."
         )
-
-    findings = opf_injection_scan.scan_untrusted_playbook_text(doc)
-    if findings:
-        raise OpfInjectionError(_describe_injection(findings))
 
     return doc
 

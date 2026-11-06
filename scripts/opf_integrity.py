@@ -194,7 +194,9 @@ def derivation_errors(doc: dict[str, Any]) -> list[str]:
 
     digest = doc.get("digest")
     if isinstance(digest, dict):
-        if digest.get("perspective") != doc.get("perspective"):
+        # A playbook with no top-level perspective is refused by the upload
+        # minimums gate (#676) with its own message; do not shadow it here.
+        if "perspective" in doc and digest.get("perspective") != doc.get("perspective"):
             errors.append("/digest/perspective: differs from the top-level perspective")
         absence: dict[str, Any] = evidence["absence"] if isinstance(evidence.get("absence"), dict) else {}
         records = _dicts(absence.get("records"))

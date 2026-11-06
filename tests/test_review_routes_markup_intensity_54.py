@@ -189,12 +189,18 @@ CRITIC_MODEL_ID = "anthropic.claude-sonnet-4-6"
 # live review keeps. Re-appending exactly that sentence reproduces the previous
 # values (1465c5ce... and 73fa2c13...), so nothing else in the knowledge moved.
 # The V1 pin did NOT move (no Binding block).
-GOLDEN_KNOWLEDGE_BARE_SHA256 = "f8cfcdd342e08a713ad810194313eada75b40147f83765a1467ef3032152b08a"
+#
+# QA 2026-11-03 #10/#5 moved BOTH OPF pins, deliberately: DIGEST_INTRO now says
+# a variant "signed unchanged from the opening text" (the first draft may have
+# been ours) and caveats verified absence as "our check found no matching
+# text", and the absence line is rendered as a caveated check result. The V1
+# pin did NOT move (no digest). Previous values f8cfcdd3... and b667f61b....
+GOLDEN_KNOWLEDGE_BARE_SHA256 = "af2e420f3162383cc9fd7fc65d4880934e76cda0059a64e1e86b8a3d76bac671"
 # The ASSEMBLED OPF system prompt (`review_spine._assemble_opf_system_blocks`
 # over `resolve_knowledge` of the same fixture): sha256 of the blocks' texts
 # joined with "\n\n".
 GOLDEN_OPF_ASSEMBLED_BARE_SHA256 = (
-    "b667f61bad3f107a082f3b5701796cdf3228c0f08888daca3424dacf2d826f6a"
+    "f867cd81350c64cdbd8f286957398df265c400b5a009b5729ce5e5479b127af1"
 )
 # The ASSEMBLED v1 system prompt (`primary_review_pass.assemble_system_blocks`
 # over V1_PLAYBOOK).
