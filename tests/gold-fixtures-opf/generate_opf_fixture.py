@@ -40,7 +40,7 @@ artifacts are what every test reads, and CI has no sibling.
 engine's validator, only when the sibling is present -- the same local-only
 convention as `tests/test_opf_schema_sync.py`'s source-parity check.
 
-Pinned engine: main `fe89bc6` (the commit `playbooks/opf/playbook.schema-0.6.json`
+Pinned engine: main `c0ef689` (the commit `playbooks/opf/playbook.schema-0.6.json`
 was vendored from). A different engine commit may stamp a different digest;
 that is a drift signal to understand, not a reason to regenerate blindly.
 
