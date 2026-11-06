@@ -40,6 +40,42 @@ _truthy() {
   esac
 }
 
+# Git writes the pushed refs on stdin, and both steps below need them.
+PUSH_LINES="$(cat)"
+
+# Confidentiality scan (QA 2026-11-03 #3): every commit about to be pushed --
+# message, identities, paths and added lines -- against the PRIVATE term lists
+# in <git-common-dir>/confidentiality/*.txt (or $PLAYBOOK_CONFIDENTIAL_NAMES_DIR).
+# This repository is public, so a push IS a publication. The scanner is tracked
+# and name-free (scripts/pre-push-confidentiality.py); the terms never are.
+#
+# It runs even behind LAND_TO_MAIN / CONTRACT_TOASTER_LOOP (those lift only the
+# main-branch guard below), and not on a CI runner, where the server-side
+# `confidential-terms-gate.yml` workflow covers the PR range.
+#
+# FAIL-OPEN here, like the counterparty-name gate: with no term list on this
+# machine it SKIPS with a notice, so a contributor without the private list is
+# not blocked. With a list, a hit blocks the push (`git push --no-verify` for a
+# verified false positive).
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+CONFIDENTIALITY_SCAN="${REPO_ROOT:-.}/scripts/pre-push-confidentiality.py"
+if ! _truthy "${CI:-}" && [ -n "$REPO_ROOT" ] && [ -f "$CONFIDENTIALITY_SCAN" ]; then
+  if [ -n "${PLAYBOOK_CONFIDENTIAL_NAMES_DIR:-}" ]; then
+    _terms_dir="$PLAYBOOK_CONFIDENTIAL_NAMES_DIR"
+  else
+    _terms_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)/confidentiality"
+  fi
+  if ls "$_terms_dir"/*.txt >/dev/null 2>&1; then
+    printf '%s\n' "$PUSH_LINES" | python3 "$CONFIDENTIALITY_SCAN" "${1:-}" "${2:-}"
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+      exit "$rc"
+    fi
+  else
+    echo "pre-push: confidentiality scan SKIPPED -- no term list in '$_terms_dir' (see docs/INDEX.md, scripts/setup-hooks.sh)." >&2
+  fi
+fi
+
 if _truthy "${LAND_TO_MAIN:-}" || _truthy "${CI:-}" || _truthy "${CONTRACT_TOASTER_LOOP:-}"; then
   exit 0
 fi
@@ -51,7 +87,7 @@ while read -r _local_ref _local_sha remote_ref _remote_sha; do
   case "$remote_ref" in
     refs/heads/main) blocked=1 ;;
   esac
-done
+done <<< "$PUSH_LINES"
 
 if [ "$blocked" -eq 1 ]; then
   echo "pre-push: refusing to push to 'main'." >&2

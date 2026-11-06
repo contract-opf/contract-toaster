@@ -55,6 +55,10 @@ external = ["A002", "ANN001", "ARG001", "ARG002", "N801", "N802", "N803", "PLC04
 # The test tree is assertions, throwaway credentials and subprocess drivers by
 # construction; S101/S105/S106 there are the shape of the code, not a finding.
 "tests/**" = ["S101", "S105", "S106"]
+# Kept byte-identical to the playbook-engine copy it is vendored from: it shells
+# out to git by design and fails CLOSED on any exception, so a blind except is
+# the contract, not a smell.
+"scripts/pre-push-confidentiality.py" = ["S603", "S607", "BLE001"]
 
 [tool.mypy]
 python_version = "3.13"
