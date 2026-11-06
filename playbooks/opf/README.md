@@ -35,8 +35,8 @@ that names 0.6 (`scripts/opf_load.py`).
 
 | Vendored artifact | playbook-engine commit | Engine pin (`spec/CHANGELOG.md`) |
 | --- | --- | --- |
-| `playbook.schema-0.6.json` | `fe89bc6` | `b2a925811fd661c5d7c11eaa768444fa63764b479c34fff9a50187c580668bf2` |
-| `conformance-0.6/` (manifest + vectors, concatenated) | `fe89bc6` | `c5e3828e7d59c961aca2d633b390b3ea536902e7818efe0dd778a0916cf8be96` |
+| `playbook.schema-0.6.json` | `c0ef689` | `b2a925811fd661c5d7c11eaa768444fa63764b479c34fff9a50187c580668bf2` |
+| `conformance-0.6/` (manifest + vectors, concatenated) | `c0ef689` | `c5e3828e7d59c961aca2d633b390b3ea536902e7818efe0dd778a0916cf8be96` |
 
 The engine announced 0.6 on its epic contract-opf/playbook-engine#245. Until
 this repo vendored it, 0.6 had no consumer and the engine changed it in place;

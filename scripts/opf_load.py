@@ -38,7 +38,7 @@ verify-if-present contract for backward compatibility; `bind_bundle` requires
 The owner's 2026-10-06 direction (issue #128): this repo supports exactly ONE
 format -- no backward compatibility and no dispatch by version. Issue #177
 replaced OPF 0.5 / digest 4 with `opf_version` "0.6" / `digest_version` "5"
-in place (the engine emits 0.6 only, from playbook-engine `fe89bc6`); the 0.5
+in place (the engine emits 0.6 only, from playbook-engine `c0ef689`); the 0.5
 schema, its conformance set and every 0.5 path are gone, as the 0.2/0.3
 schemas and the digest-2 reader were before them.
 

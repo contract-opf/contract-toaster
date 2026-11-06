@@ -6,7 +6,7 @@ playbook-engine spec: physically committed here because this repo's CI has no
 sibling checkout and must validate uploads hermetically. Since issue #128 it is
 exactly ONE file (the owner's 2026-10-06 direction: one format, no backward
 compatibility); since issue #177 that file is ``playbook.schema-0.6.json``,
-vendored from engine main ``fe89bc6`` together with the engine's OPF 0.6
+vendored from engine main ``c0ef689`` together with the engine's OPF 0.6
 conformance vectors (``playbooks/opf/conformance-0.6/``,
 ``opf_load.OPF_CONFORMANCE_DIR``, replayed by
 ``tests/test_opf_canonicalize.py``). The 0.5 schema and its vectors are
