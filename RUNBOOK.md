@@ -627,7 +627,9 @@ because the alternative looks free and is not:
   input document* action works because it is a link the browser navigates, which
   that policy does not cover; a background fetch is a different thing and would
   be blocked in production.
-- Every presign **spends one of your daily document-download slots** and writes
+- Every presign **spends one of your daily document-download slots** (a day is
+  the UTC calendar day: the count resets at 00:00 UTC, not at local midnight)
+  and writes
   a `review_input_downloaded` audit row. A silent re-fetch would have charged
   you for a download you never asked for and put a document read in the audit
   log that nobody performed.
