@@ -900,6 +900,79 @@ class TestSpendReservationTracksTheSelection(ModelSelectionTestBase):
             actual = reviews.compute_actual_usd_cents_from_usage(usage, usage, self.ddb)
         self.assertEqual(actual, expected)
 
+    # -- #33: the reversal is the STORED reservation, not a recompute --------
+
+    def _reserve_then_reselect(self, first: tuple[str, str], second: tuple[str, str]):
+        """Reserve under `first`, stamp the row the way submit_review does,
+        then have an admin switch to `second` while the review is in flight."""
+        import ddb_fixtures  # noqa: PLC0415
+
+        os.environ.setdefault("REVIEW_SUBMISSIONS_TABLE", "contract-toaster-submissions-test")
+        ddb_fixtures.create_submissions_table(self.ddb)
+        model_settings.set_model_selection(*first, ADMIN, self.ddb)
+        with _no_env_overrides():
+            reservation_id, amount = reviews.reserve_spend_with_amount(
+                "review-mid", self.ddb
+            )
+        submissions = self.ddb.Table(os.environ["REVIEW_SUBMISSIONS_TABLE"])
+        submissions.put_item(
+            Item={"idempotency_key": "k-mid", "review_id": "review-mid"}
+        )
+        reviews._record_spend_reservation(
+            {"idempotency_key": "k-mid"}, reservation_id, self.ddb, amount
+        )
+        model_settings.set_model_selection(*second, ADMIN, self.ddb)
+        return amount
+
+    def test_mid_review_switch_to_dearer_models_settles_back_to_exactly_zero(self):
+        amount = self._reserve_then_reselect(
+            (CHEAPEST_ID, CHEAPEST_ID), (DEAREST_ID, DEAREST_ID)
+        )
+        self.assertEqual(self._reserved_cents(), amount)
+        with _no_env_overrides():
+            pipeline_runner._settle_reservation("review-mid", self.ddb)
+        self.assertEqual(
+            self._reserved_cents(), 0, "the counter must not go negative or strand cap"
+        )
+
+    def test_mid_review_switch_to_cheaper_models_settles_back_to_exactly_zero(self):
+        amount = self._reserve_then_reselect(
+            (DEAREST_ID, DEAREST_ID), (CHEAPEST_ID, CHEAPEST_ID)
+        )
+        self.assertEqual(self._reserved_cents(), amount)
+        with _no_env_overrides():
+            pipeline_runner._settle_reservation("review-mid", self.ddb)
+        self.assertEqual(self._reserved_cents(), 0)
+
+    def test_the_reserved_amount_is_persisted_on_the_submission_row(self):
+        amount = self._reserve_then_reselect(
+            (CHEAPEST_ID, CHEAPEST_ID), (DEAREST_ID, DEAREST_ID)
+        )
+        row = self.ddb.Table(os.environ["REVIEW_SUBMISSIONS_TABLE"]).get_item(
+            Key={"idempotency_key": "k-mid"}
+        )["Item"]
+        self.assertEqual(int(row["spend_reservation_usd_cents"]), amount)
+
+    def test_a_legacy_row_without_the_amount_falls_back_to_the_recompute(self):
+        """Rows written before this change carry no stored figure."""
+        import ddb_fixtures  # noqa: PLC0415
+
+        os.environ.setdefault("REVIEW_SUBMISSIONS_TABLE", "contract-toaster-submissions-test")
+        ddb_fixtures.create_submissions_table(self.ddb)
+        model_settings.set_model_selection(CHEAPEST_ID, CHEAPEST_ID, ADMIN, self.ddb)
+        with _no_env_overrides():
+            reservation_id = reviews.reserve_spend("review-legacy", self.ddb)
+        self.ddb.Table(os.environ["REVIEW_SUBMISSIONS_TABLE"]).put_item(
+            Item={
+                "idempotency_key": "k-legacy",
+                "review_id": "review-legacy",
+                "spend_reservation_id": reservation_id,
+            }
+        )
+        with _no_env_overrides():
+            pipeline_runner._settle_reservation("review-legacy", self.ddb)
+        self.assertEqual(self._reserved_cents(), 0)
+
     def test_a_stale_selection_is_priced_at_what_will_actually_run(self):
         """A stored id that fell off the allowlist is DROPPED at invocation
         time, so pricing it would reserve for a model no review can use."""

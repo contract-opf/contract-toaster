@@ -1190,11 +1190,26 @@ def review_duration_estimate(
     }
 
 
+# The submission-row attribute that records the amount a review's reservation
+# put on the day's counter (#33), so settlement reverses the stored figure.
+# infra/lambda/{persist,orphan_reconciler}/handler.py read the same name.
+SPEND_RESERVATION_USD_CENTS_FIELD = "spend_reservation_usd_cents"
+
+
 def reserve_spend(
     review_id: str,
     dynamodb_resource: Any,
     now_epoch: float | None = None,
 ) -> str:
+    """`reserve_spend_with_amount`, returning only the reservation id."""
+    return reserve_spend_with_amount(review_id, dynamodb_resource, now_epoch)[0]
+
+
+def reserve_spend_with_amount(
+    review_id: str,
+    dynamodb_resource: Any,
+    now_epoch: float | None = None,
+) -> tuple[str, int]:
     """Atomically reserve the worst-case cost for `review_id`, exactly once.
 
     A SINGLE atomic conditional UpdateExpression increments the day's
@@ -1203,7 +1218,11 @@ def reserve_spend(
     read-then-check, so concurrent submissions cannot collectively overshoot
     the cap before settlement (issue #59 AC).
 
-    Returns the reservation id (used as the settlement key later).
+    Returns `(reservation_id, amount_usd_cents)`: the id is the settlement
+    key, and the amount is the figure this call actually put on the day's
+    counter, which the caller persists on the submission row
+    (`spend_reservation_usd_cents`) so settlement reverses THAT number and
+    not a recompute against whatever the admin selection is by then (#33).
 
     Raises:
         HTTPException(429) — "daily limit reached" — if reserving would
@@ -1294,32 +1313,45 @@ def reserve_spend(
             detail="Unable to reserve spend.",
         ) from exc
 
-    return reservation_id
+    return reservation_id, reservation_amount_cents
 
 
 def _record_spend_reservation(
     submission: dict[str, Any],
     reservation_id: str,
     dynamodb_resource: Any,
+    reservation_amount_cents: int | None = None,
 ) -> dict[str, Any]:
-    """Attach a spend reservation id to an already-created submission record.
+    """Attach a spend reservation id (and the amount reserved) to an
+    already-created submission record.
 
     Called only by the winner of the create_submission_record race (see
     submit_review): the submission row is created first with
     spend_reservation_id=None, then reserve_spend runs, then this stamps the
     resulting reservation id onto that same row. A losing concurrent request
     never reaches reserve_spend at all, so it cannot leak a reservation.
+
+    `reservation_amount_cents` is written in the SAME update as the id, so a
+    row never carries an id without its amount (#33). Omitted only by callers
+    that predate it; settlement then falls back to a recompute.
     """
     table = dynamodb_resource.Table(os.environ["REVIEW_SUBMISSIONS_TABLE"])
+    values: dict[str, Any] = {
+        ":rid": reservation_id,
+        ":now": str(int(time.time())),
+    }
+    expression = "SET spend_reservation_id = :rid, updated_at = :now"
+    if reservation_amount_cents is not None:
+        expression += ", " + SPEND_RESERVATION_USD_CENTS_FIELD + " = :amt"
+        values[":amt"] = int(reservation_amount_cents)
     table.update_item(
         Key={"idempotency_key": submission["idempotency_key"]},
-        UpdateExpression="SET spend_reservation_id = :rid, updated_at = :now",
-        ExpressionAttributeValues={
-            ":rid": reservation_id,
-            ":now": str(int(time.time())),
-        },
+        UpdateExpression=expression,
+        ExpressionAttributeValues=values,
     )
     submission["spend_reservation_id"] = reservation_id
+    if reservation_amount_cents is not None:
+        submission[SPEND_RESERVATION_USD_CENTS_FIELD] = int(reservation_amount_cents)
     return submission
 
 
@@ -1411,6 +1443,19 @@ def reserve_floor_spend(
     return cents
 
 
+def stored_reservation_settle_kwargs(submission: dict[str, Any] | None) -> dict[str, int]:
+    """`settle_spend` keyword arguments carrying the amount this submission's
+    reservation put on the counter (#33) -- empty for a row written before it
+    was persisted, so `settle_spend` falls back to its recompute."""
+    raw = (submission or {}).get(SPEND_RESERVATION_USD_CENTS_FIELD)
+    if raw is None:
+        return {}
+    try:
+        return {"reservation_amount_cents": max(0, int(raw))}
+    except (TypeError, ValueError):
+        return {}
+
+
 def floor_reserved_usd_cents(submission: dict[str, Any] | None) -> int:
     """The Floor-judge top-up recorded on a submission row, 0 when none."""
     try:
@@ -1435,6 +1480,7 @@ def settle_spend(
     now_epoch: float | None = None,
     *,
     additional_reserved_usd_cents: int = 0,
+    reservation_amount_cents: int | None = None,
 ) -> None:
     """Reconcile the reservation against ledgered actual spend.
 
@@ -1443,22 +1489,23 @@ def settle_spend(
     retried review still settles (possibly to $0 actual spend) rather than
     silently holding the worst-case reservation forever.
 
-    The amount to reverse is RECOMPUTED here rather than read back from the
-    reservation, exactly as it always has been, and so is priced against the
-    admin model selection in force right now (#445). KNOWN RESIDUAL: an admin
-    who changes the selection while a review is in flight makes the reversal
-    disagree with what that review reserved, leaving the day's
-    `reserved_usd_cents` counter off by the difference until the UTC-midnight
-    row rolls over. Same shape as the pre-existing mid-day
-    DAILY_SPEND_CAP_USD_CENTS window documented in `reserve_spend`. Closing
-    it properly means persisting the reserved amount alongside the
-    reservation id and reversing the stored figure — issue #459, deliberately
-    kept out of #445 rather than smuggled into it.
+    The amount to reverse is the one the reservation STORED
+    (`reservation_amount_cents`, read from the submission row's
+    `spend_reservation_usd_cents`), not a recompute: the rates track the live
+    admin model selection (#445), so an admin who switches models while a
+    review is in flight would otherwise make the reversal disagree with what
+    that review reserved and leave the day's counter off (#33). Only a row
+    written before the amount was persisted lacks it, and that one falls back
+    to recomputing against the selection in force now -- the old behaviour,
+    and the old residual, for legacy rows only.
     """
     table = dynamodb_resource.Table(os.environ["DAILY_SPEND_TABLE"])
     now_epoch = time.time() if now_epoch is None else now_epoch
     spend_date = time.strftime("%Y-%m-%d", time.gmtime(now_epoch))
-    reservation_amount_cents = compute_worst_case_reservation_usd_cents(dynamodb_resource)
+    if reservation_amount_cents is None:
+        reservation_amount_cents = compute_worst_case_reservation_usd_cents(dynamodb_resource)
+    else:
+        reservation_amount_cents = max(0, int(reservation_amount_cents))
     # QA W8 item 3: plus whatever the run added on top for its Floor judge
     # (`reserve_floor_spend`, recorded on the submission row) -- reversed
     # exactly as recorded, never recomputed.
@@ -2365,8 +2412,12 @@ def submit_review(
         dynamodb_resource=dynamodb_resource,
     )
 
-    reservation_id = reserve_spend(review_id, dynamodb_resource)
-    submission = _record_spend_reservation(submission, reservation_id, dynamodb_resource)
+    reservation_id, reservation_amount_cents = reserve_spend_with_amount(
+        review_id, dynamodb_resource
+    )
+    submission = _record_spend_reservation(
+        submission, reservation_id, dynamodb_resource, reservation_amount_cents
+    )
 
     _create_review_row(
         review_id,
@@ -3916,6 +3967,7 @@ def settle_reservation_for_cancel(review_id: str, dynamodb_resource: Any) -> Non
         submission["spend_reservation_id"],
         actual_usd_cents,
         dynamodb_resource,
+        **stored_reservation_settle_kwargs(submission),
         **floor_top_up_settle_kwargs(submission),
     )
     submissions.update_item(

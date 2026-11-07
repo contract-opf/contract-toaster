@@ -185,6 +185,8 @@ class FakeTable:
 
         if "spend_reservation_id = :rid" in UpdateExpression:
             item["spend_reservation_id"] = vals[":rid"]
+            if ":amt" in vals:
+                item["spend_reservation_usd_cents"] = vals[":amt"]
             return
 
         if "reservation_released = :true" in UpdateExpression:
@@ -596,6 +598,34 @@ class TestSettleSpendDecrementsDailySpend(MotoSubmissionsMixin, unittest.TestCas
             "credit daily_spend a second time.",
         )
 
+    def test_persist_stage_reverses_the_stored_reservation_not_the_constant(self):
+        """#33: a row carrying `spend_reservation_usd_cents` is reversed by
+        THAT figure; the hardcoded regional constant is only the fallback."""
+        ddb = FakeDynamoDBResource(self.submissions_table)
+        orig_boto3 = _persist_module.boto3
+        _persist_module.boto3 = Boto3Stub(ddb)
+        self.addCleanup(lambda: setattr(_persist_module, "boto3", orig_boto3))
+
+        stored = _persist_module.compute_worst_case_reservation_usd_cents() + 77
+        spend_date = _today()
+        daily_spend_table = ddb.Table(os.environ["DAILY_SPEND_TABLE"])
+        daily_spend_table.items[spend_date] = {
+            "spend_date": spend_date,
+            "reserved_usd_cents": stored,
+            "daily_cap_usd_cents": 100000,
+        }
+        self.seed_submission({
+            "idempotency_key": "idem-persist-stored",
+            "review_id": "review-persist-stored",
+            "spend_reservation_id": "res-persist-stored",
+            "spend_reservation_usd_cents": stored,
+        })
+        _persist_module.handler({"review_id": "review-persist-stored"})
+        self.assertEqual(
+            daily_spend_table.items[spend_date]["reserved_usd_cents"],
+            0 + _persist_module.MOCK_PIPELINE_ACTUAL_USD_CENTS,
+        )
+
 
 # ---------------------------------------------------------------------------
 # (c) Orphan reconciler's dead-execution path credits daily_spend for real
@@ -657,6 +687,40 @@ class TestOrphanReconcilerCreditsDailySpend(MotoSubmissionsMixin, unittest.TestC
             0,
             "Dead-execution reconciliation must credit the reservation back "
             "to daily_spend.reserved_usd_cents, not just flip a flag.",
+        )
+
+    def test_dead_execution_reverses_the_stored_reservation_not_the_constant(self):
+        """#33: same, on the reconciler's dead-execution path."""
+        review_id = "review-dead-stored"
+        execution_arn = (
+            "arn:aws:states:us-east-1:123456789012:execution:contract-toaster-test:"
+            f"{review_id}"
+        )
+        self.ddb.Table(os.environ["REVIEWS_TABLE"]).items[review_id] = {
+            "review_id": review_id,
+            "status": "RUNNING",
+            "execution_arn": execution_arn,
+        }
+        stored = _reconciler_module.compute_worst_case_reservation_usd_cents() + 77
+        self.seed_submission({
+            "idempotency_key": "idem-dead-stored",
+            "review_id": review_id,
+            "execution_arn": execution_arn,
+            "spend_reservation_id": "res-dead-stored",
+            "spend_reservation_usd_cents": stored,
+        })
+        spend_date = _today()
+        daily_spend_table = self.ddb.Table(os.environ["DAILY_SPEND_TABLE"])
+        daily_spend_table.items[spend_date] = {
+            "spend_date": spend_date,
+            "reserved_usd_cents": stored,
+            "daily_cap_usd_cents": 100000,
+        }
+        self.sfn.status = "FAILED"
+        _reconciler_module._reconcile_dead_executions()
+        self.assertEqual(
+            daily_spend_table.items[spend_date]["reserved_usd_cents"],
+            0 + _reconciler_module.DEAD_EXECUTION_ACTUAL_USD_CENTS,
         )
 
 
