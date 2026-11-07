@@ -224,10 +224,33 @@ def check_upload_rate_rule_scoped_to_post() -> list[str]:
 
     failures += _assert(
         len(path_matches) >= 1,
-        "AndStatement retains the URI-path-prefix ByteMatchStatement "
+        "AndStatement retains the URI-path ByteMatchStatement "
         "(/api/reviews)",
         f"ByteMatchStatements found: {byte_matches!r}",
     )
+
+    # Issue #88: rule 4 is the UPLOAD budget, so its path scope is the exact
+    # upload path. STARTS_WITH '/api/reviews' also caught preflight, preflight
+    # /match, cancel, cover-note and disposition: three reviewers behind one
+    # NAT each doing preflight + match + submit used up the 10, and the tenth
+    # POST -- anyone's cancel of a runaway review -- was blocked.
+    if path_matches:
+        path_bm = path_matches[0]
+        failures += _assert(
+            path_bm.get("PositionalConstraint") == "EXACTLY"
+            and str(path_bm.get("SearchString", "")).lower() == "/api/reviews",
+            "Rule 4's path match is EXACTLY '/api/reviews' (the upload), not a prefix",
+            f"PositionalConstraint={path_bm.get('PositionalConstraint')!r} "
+            f"SearchString={path_bm.get('SearchString')!r}",
+        )
+        failures += _assert(
+            any(
+                t.get("Type") == "LOWERCASE"
+                for t in path_bm.get("TextTransformations", [])
+            ),
+            "Rule 4's path match keeps the LOWERCASE transform (case cannot dodge the scope)",
+            f"TextTransformations={path_bm.get('TextTransformations')!r}",
+        )
 
     failures += _assert(
         len(method_matches) >= 1,
