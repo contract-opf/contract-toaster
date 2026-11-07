@@ -127,15 +127,29 @@ def compute_worst_case_reservation_usd_cents() -> int:
     return int(round(usd * 100))  # noqa: RUF046
 
 
+def _stored_reservation_cents(submission: dict[str, Any]) -> int | None:
+    """The amount this submission's reservation stored (#33), or None for a
+    row written before it was persisted."""
+    raw = submission.get("spend_reservation_usd_cents")
+    try:
+        return None if raw is None else max(0, int(raw))
+    except (TypeError, ValueError):
+        return None
+
+
 def settle_spend(actual_usd_cents: int, dynamodb_resource: Any,
-                  now_epoch: float | None = None) -> None:
+                  now_epoch: float | None = None,
+                  reservation_amount_cents: int | None = None) -> None:
     """MIRROR of backend/src/reviews.py's settle_spend -- reconciles the
     worst-case reservation against ledgered actual spend on today's
-    daily_spend row."""
+    daily_spend row. Reverses the amount stored on the submission row
+    (`spend_reservation_usd_cents`, #33) when given; the hardcoded regional
+    constant only for a row written before that was persisted."""
     table = dynamodb_resource.Table(DAILY_SPEND_TABLE)
     now_epoch = time.time() if now_epoch is None else now_epoch
     spend_date = time.strftime("%Y-%m-%d", time.gmtime(now_epoch))
-    reservation_amount_cents = compute_worst_case_reservation_usd_cents()
+    if reservation_amount_cents is None:
+        reservation_amount_cents = compute_worst_case_reservation_usd_cents()
     delta = actual_usd_cents - reservation_amount_cents
     table.update_item(
         Key={"spend_date": spend_date},
@@ -199,7 +213,11 @@ def _release_reservation(review_id: str, submission: dict[str, Any]) -> None:
     if submission.get("reservation_released"):
         return
 
-    settle_spend(DEAD_EXECUTION_ACTUAL_USD_CENTS, _ddb())
+    settle_spend(
+        DEAD_EXECUTION_ACTUAL_USD_CENTS,
+        _ddb(),
+        reservation_amount_cents=_stored_reservation_cents(submission),
+    )
 
     table = _ddb().Table(REVIEW_SUBMISSIONS_TABLE)
     table.update_item(
