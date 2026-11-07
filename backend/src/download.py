@@ -68,13 +68,14 @@ Usage (FastAPI dependency injection):
       )
 """
 
-import logging  # noqa: I001
+import datetime
+import logging
 import os
 import re
-import time
 import uuid
-from urllib.parse import quote
+from collections.abc import Callable
 from typing import Any
+from urllib.parse import quote
 
 import boto3
 from botocore.config import Config  # noqa: F401
@@ -223,7 +224,36 @@ def content_disposition_for_input(original_filename: str | None, review_id: str)
 # Deliberately no concurrency counter here — see module docstring's
 # "DynamoDB owner check" section for why a download-time increment-only
 # counter is wrong.
-MAX_DAILY_REVIEWS = 20        # max download-URL requests per user per calendar day
+MAX_DAILY_REVIEWS = 20        # max download-URL requests per user per UTC calendar day
+
+# What "daily" means (issue #45, owner decision D8): the UTC calendar day.
+# The limit resets at 00:00:00 UTC for everyone, whatever zone they or the
+# deployment sit in -- no organization zone, no per-account zone, and so no
+# DST. The reviewer-facing copy says so (frontend/src/api.ts
+# DOWNLOAD_QUOTA_COPY: "downloads reset at midnight UTC") and the 429 detail
+# says "per UTC day".
+
+# A clock is a zero-argument callable returning the current instant as a
+# timezone-AWARE datetime. Production passes `system_clock`; tests pass a
+# deterministic one. This module never reads the time itself except through
+# one, so a test controls exactly the instant the limiter sees.
+Clock = Callable[[], datetime.datetime]
+
+
+def system_clock() -> datetime.datetime:
+    """The production clock: now, as an aware UTC datetime."""
+    return datetime.datetime.now(datetime.timezone.utc)  # noqa: UP017
+
+
+def utc_day_key(instant: datetime.datetime) -> str:
+    """The UTC calendar day (`YYYY-MM-DD`) an instant falls on.
+
+    An aware instant in any zone is converted to UTC first, so the reset
+    boundary is 00:00 UTC and never a local midnight. A naive datetime is
+    refused: guessing its zone is how a boundary silently moves."""
+    if instant.tzinfo is None or instant.utcoffset() is None:
+        raise ValueError("clock must return a timezone-aware datetime")
+    return instant.astimezone(datetime.timezone.utc).strftime("%Y-%m-%d")  # noqa: UP017
 
 
 def _get_outputs_bucket() -> str:
@@ -372,6 +402,7 @@ def _check_per_user_limits(
     user_sub: str,
     env_name: str,
     dynamodb_client: Any,
+    clock: Clock = system_clock,
 ) -> None:
     """Enforce the per-user daily download-request limit via DynamoDB
     conditional write.
@@ -380,7 +411,8 @@ def _check_per_user_limits(
     the increment are atomic — there is no TOCTOU race.
 
     Limit enforced:
-      - daily_review_count <= MAX_DAILY_REVIEWS (per user, per UTC day)
+      - daily_review_count <= MAX_DAILY_REVIEWS (per user, per UTC calendar day;
+        the day comes from the injected `clock`, see `utc_day_key`)
 
     Deliberately NOT enforced here: a per-user *concurrency* counter. See
     the module docstring's "DynamoDB owner check" section — "max in-flight
@@ -402,8 +434,11 @@ def _check_per_user_limits(
         user_sub: the caller's `cognito_sub`.
         env_name: the deployment environment name (dev/staging/prod).
         dynamodb_client: a boto3 DynamoDB client (injected for testability).
+        clock: returns the current aware instant; the charge lands on that
+            instant's UTC day (issue #45). Defaults to `system_clock`.
 
     Raises:
+        ValueError if `clock` returns a naive datetime.
         HTTPException(429) if the daily limit is exceeded.
         HTTPException(503) if the DynamoDB check itself fails.
     """
@@ -423,7 +458,7 @@ def _check_per_user_limits(
     # rejects with ValidationException (issue #528 -- it 503'd every
     # authenticated download, sitting directly behind the #465 bucket 503
     # that used to fire first and hide it).
-    today_attr = "dailyReviewCount_" + time.strftime("%Y-%m-%d", time.gmtime())
+    today_attr = "dailyReviewCount_" + utc_day_key(clock())
 
     try:
         dynamodb_client.update_item(
@@ -450,7 +485,7 @@ def _check_per_user_limits(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail=(
                     f"Per-user limit exceeded: max {MAX_DAILY_REVIEWS} download requests "
-                    "per day."
+                    "per UTC day."
                 ),
             ) from exc
         error_id = uuid.uuid4().hex
@@ -475,6 +510,7 @@ def generate_presigned_download_url(
     require_object_exists: bool = False,
     download_filename: str | None = None,
     charge_quota: bool = True,
+    clock: Clock = system_clock,
 ) -> JSONResponse:
     """Generate a short-lived presigned URL for an output file download.
 
@@ -541,6 +577,8 @@ def generate_presigned_download_url(
             (issue #102).  ONLY the completion-time auto-save may pass False,
             and its route bounds it to one use per review server-side; every
             user-initiated download keeps the default.
+        clock: injected clock for the daily limit (issue #45); the slot is
+            charged to the UTC calendar day of the instant it returns.
 
     Returns:
         JSONResponse with {"url": "<presigned-url>", "expires_in": 60} and
@@ -689,6 +727,7 @@ def generate_presigned_download_url(
             user_sub=caller_user_row["cognito_sub"],
             env_name=env_name,
             dynamodb_client=dynamodb_client,
+            clock=clock,
         )
 
     # Step 5: return with Cache-Control: no-store.
