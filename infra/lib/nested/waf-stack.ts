@@ -300,8 +300,15 @@ export class WafStack extends cdk.NestedStack {
         // application layer (DynamoDB conditional write) and complement
         // this IP-based rate rule.
         //
-        // Scope-down is an AndStatement of (URI path prefix) AND (HTTP
-        // method == POST). Without the method constraint, GET
+        // Scope-down is an AndStatement of (URI path EXACTLY /api/reviews)
+        // AND (HTTP method == POST). The path is exact, not a prefix (issue
+        // #88): this is the UPLOAD budget, and a prefix also caught
+        // POST /api/reviews/preflight, /preflight/match, /{id}/cancel,
+        // /{id}/cover-note and /{id}/disposition, so three reviewers behind
+        // one NAT doing preflight + match + submit used up the 10 and the
+        // tenth POST -- anyone's cancel of a runaway review -- was blocked.
+        // Those routes now fall under rule 5's 300/5 min (it matches any
+        // method under /api/reviews/). Without the method constraint, GET
         // /api/reviews/{id} status polling also matches this rule — a UI
         // polling every few seconds burns through the 10-request budget in
         // well under a minute and gets its IP blocked before rule 5 (the
@@ -322,7 +329,7 @@ export class WafStack extends cdk.NestedStack {
                     {
                       byteMatchStatement: {
                         fieldToMatch: { uriPath: {} },
-                        positionalConstraint: 'STARTS_WITH',
+                        positionalConstraint: 'EXACTLY',
                         searchString: '/api/reviews',
                         textTransformations: [{ priority: 0, type: 'LOWERCASE' }],
                       },
@@ -355,8 +362,10 @@ export class WafStack extends cdk.NestedStack {
         // asserted by frontend/src/__tests__/poll-budget-waf.test.tsx), so
         // one healthy 15-minute review plus its output download stays far
         // inside it, and about five concurrent reviews behind one egress IP
-        // fit (issue #50). Cancel and the other POSTs under the prefix are
-        // governed by rule 4's 10/5 min, not by this rule.
+        // fit (issue #50). Cancel, preflight and the other POSTs under the prefix
+        // count against THIS budget (rule 4 is the exact upload path only,
+        // issue #88). The budget is per egress IP, not per review; the
+        // supported headcount is computed in tests/test_waf_per_nat_headroom_88.py.
         // ----------------------------------------------------------------
         {
           name: 'RateLimitPollingEndpoint',
