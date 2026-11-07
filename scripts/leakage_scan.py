@@ -247,6 +247,12 @@ the text it is:
     (#179): a shorter earlier version that today's wording extends is
     literally inside the position we openly ask for. Containment runs one
     way only -- a former form that extends today's standard is still held.
+  * The same containment rule covers every precedent text (#180): a digest
+    signed variant or exemplar, refused ask or changed opening, an
+    `evidence.precedent[]` text and a dossier excerpt that is equal to or
+    contained in today's standard (a deal that signed a shorter former form
+    as it stood) is our standard, neither a check-2 gram nor a check-4 span
+    (`_without_contained_standard`). One way only: a superstring stays held.
   * A former form's `vs_standard` reasons and summaries (`reason`,
     `parts[].reason`, `additions[].summary`, `owner_label.reason`) and each
     digest form's `reason` (`_opf_prior_form_reasons`) are check-4 spans
@@ -1014,7 +1020,9 @@ def _opf_digest_precedent_texts(opf_doc: dict[str, Any]) -> list[str]:
     refused asks and openings not signed as proposed -- never our standard,
     which is `_opf_standard_texts`'. `from_opf_document` makes each a check-2
     gram and (issue #171) a check-4 `precedent_verbatim_spans` entry, the
-    only one of the two that runs on the internal channel."""
+    only one of the two that runs on the internal channel -- unless its
+    `_normalize`d form is equal to or contained in today's standard
+    (issue #180, `_without_contained_standard`), which stays our standard."""
     texts: list[str] = []
     digest = opf_doc.get("digest")
     clauses = digest.get("clauses") if isinstance(digest, dict) else None
@@ -1035,7 +1043,9 @@ def _opf_evidence_precedent_texts(opf_doc: dict[str, Any]) -> list[str]:
     """Every non-standard text of the OPF per-deal precedent record
     (`evidence.precedent[]`, issue #128): the signed text unless it is our
     standard, the opening unless the deal opened with our standard, and every
-    refused ask."""
+    refused ask. `from_opf_document` then drops any of them whose
+    `_normalize`d form is equal to or contained in today's standard
+    (issue #180, `_without_contained_standard`)."""
     texts: list[str] = []
     evidence = opf_doc.get("evidence")
     records = evidence.get("precedent") if isinstance(evidence, dict) else None
@@ -1092,6 +1102,22 @@ def _opf_our_standard_keys(opf_doc: dict[str, Any]) -> set[str]:
             keys.update(_normalize(text) for text in texts if text)
     keys.discard("")
     return keys
+
+
+def _without_contained_standard(texts: list[str], standard_keys: set[str]) -> list[str]:
+    """*texts* minus every text whose `_normalize`d form is equal to or
+    contained in a key of `_opf_our_standard_keys` (issue #180): that text is
+    our standard's own wording -- a deal that signed a shorter former form as
+    it stood carries those words as its signed text, a digest signed variant
+    and a dossier excerpt -- which check 2b already allowlists for replacement
+    text and which is never a check-4 span. The predicate is exactly
+    `_opf_prior_form_texts`' (#179), and runs one way: a text that CONTAINS
+    the standard plus more wording, or only overlaps it, is kept."""
+    return [
+        text
+        for text in texts
+        if not any(_normalize(text) in key for key in standard_keys)
+    ]
 
 
 def _opf_prior_form_texts(opf_doc: dict[str, Any]) -> list[str]:
@@ -1313,7 +1339,9 @@ def _opf_dossier_texts(
     Excerpt texts: the blocked `opening` / `signed` texts again, on their
     own -- the whole precedent texts a counterparty wrote or signed, which
     `from_opf_document` also makes check-4 `precedent_verbatim_spans`
-    because check 2 does not run on the internal channel."""
+    because check 2 does not run on the internal channel. An excerpt text
+    contained in today's standard is dropped from both by
+    `from_opf_document` (issue #180); this function still returns it."""
     blocked: list[str] = []
     standards: list[str] = []
     excerpts: list[str] = []
@@ -1959,7 +1987,8 @@ class ConfidentialCorpus:
         (`scripts/critic_dossiers.py`), via `_opf_dossier_texts`: a dossier
         floor rule's `statement` / `rationale` and an excerpt's `opening` /
         `signed` are blocked (unless the excerpt text is that dossier's own
-        standard), and its `our_standard.parts[].text` is our standard
+        standard, or -- issue #180 -- equal to or contained in today's
+        standard, `_without_contained_standard`), and its `our_standard.parts[].text` is our standard
         (allowlisted). Only what the derived lists do not already hold is
         added: on an engine-built document every one of those texts is
         already the Floor invariant's, a precedent record's or our
@@ -1975,7 +2004,11 @@ class ConfidentialCorpus:
         whole is blocked. Each digest precedent text
         (`_opf_digest_precedent_texts`) that is not our standard follows
         them (issue #171) -- both passes read it verbatim in the shared
-        prefix, in a dossier or not -- through the same #616 filter. A part
+        prefix, in a dossier or not -- through the same #616 filter. Every
+        precedent text (digest, `evidence.precedent[]`, dossier excerpt) whose
+        `_normalize`d form is equal to or contained in a key of
+        `_opf_our_standard_keys` is our standard and is neither a gram nor a
+        span (issue #180; containment runs one way, a superstring stays held). A part
         of an excerpt or a digest text, or a paraphrase, is not blocked
         (see the module docstring, "Checks 3 and 4 are live for the critic
         dossiers"). Each excerpt's `precedent_id` and each
@@ -2074,8 +2107,19 @@ class ConfidentialCorpus:
                 if aliased != rationale:
                     playbook_ngrams.append(aliased)
 
-        playbook_ngrams.extend(_opf_digest_precedent_texts(opf_doc))
-        playbook_ngrams.extend(_opf_evidence_precedent_texts(opf_doc))
+        # Issue #180: a precedent text contained in today's standard (a deal
+        # that signed a shorter former form as it stood) IS our standard, so
+        # it is neither a check-2 gram nor, below, a check-4 span.
+        standard_keys = _opf_our_standard_keys(opf_doc)
+        digest_precedent_texts = _without_contained_standard(
+            _opf_digest_precedent_texts(opf_doc), standard_keys
+        )
+        playbook_ngrams.extend(digest_precedent_texts)
+        playbook_ngrams.extend(
+            _without_contained_standard(
+                _opf_evidence_precedent_texts(opf_doc), standard_keys
+            )
+        )
         standard_clause_ngrams.extend(_opf_standard_texts(opf_doc))
         # Issue #177 (OPF 0.6): our former forms' wording, never one that
         # reads as today's standard, and the owner's why-changed note, on
@@ -2108,6 +2152,14 @@ class ConfidentialCorpus:
         # record -- leaves the corpus byte-identical. A dossier text that is
         # already allowlisted as our standard is never also blocked.
         dossier_blocked, dossier_standards, dossier_excerpts = _opf_dossier_texts(opf_doc)
+        # Issue #180: a dossier excerpt contained in today's standard is our
+        # standard, so it is neither blocked nor a span. Floor statements and
+        # rationales in `dossier_blocked` are not precedent texts and stay.
+        contained_excerpts = set(dossier_excerpts) - set(
+            _without_contained_standard(dossier_excerpts, standard_keys)
+        )
+        dossier_blocked = [t for t in dossier_blocked if t not in contained_excerpts]
+        dossier_excerpts = [t for t in dossier_excerpts if t not in contained_excerpts]
         standard_clause_ngrams.extend(
             text
             for text in dict.fromkeys(dossier_standards)
@@ -2158,7 +2210,7 @@ class ConfidentialCorpus:
         # whole is blocked on every channel.
         for candidates in (
             dossier_excerpts,
-            _opf_digest_precedent_texts(opf_doc),
+            digest_precedent_texts,
             prior_form_texts,
             why_changed_texts,
             _opf_prior_form_labels(opf_doc),
