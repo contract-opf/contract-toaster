@@ -530,6 +530,9 @@ def _settle_reservation(
         submission["spend_reservation_id"],
         actual_usd_cents,
         dynamodb_resource,
+        # #33: reverse the amount this review's reservation actually stored,
+        # not a recompute against the selection in force now.
+        **reviews.stored_reservation_settle_kwargs(submission),
         # QA W8 item 3: reverse the Floor-judge top-up too, as recorded.
         # Passed only when there is one, so a review without a Floor makes
         # exactly the call it always made.
