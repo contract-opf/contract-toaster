@@ -104,13 +104,13 @@ def main() -> int:
     section = doc[doc.find("Per-IP assumptions") :] if "Per-IP assumptions" in doc else ""
     check(bool(section), "docs/threat-model.md has a 'Per-IP assumptions' paragraph")
     check(
-        "about five concurrent reviews per egress IP" in section
+        "about five concurrent reviews on polling alone" in section
         and "about two" in section
         and "10 submissions per 5 minutes" in section,
         "the paragraph states the 5 / 2 / 10 figures this test computes",
     )
     check(
-        "EXACTLY /api/reviews" in section or "exactly `/api/reviews`" in section,
+        "EXACTLY `/api/reviews`" in section or "EXACTLY /api/reviews" in section,
         "the paragraph states that rule 4 is scoped to the exact upload path",
     )
 
