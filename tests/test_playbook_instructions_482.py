@@ -615,7 +615,7 @@ class TestReviewInstructionsLineageStamp(unittest.TestCase):
         This test injects the v3 save into the REAL window between that
         resolution (reviews.py `_resolve_instructions_lineage`, called from
         `submit_review`) and the row write (`_create_review_row`), by
-        making `reserve_spend` -- which `submit_review` calls strictly
+        making `reserve_spend_with_amount` -- which `submit_review` calls strictly
         between the two -- perform the save as a side effect before
         deferring to the real reservation logic. A `_create_review_row`
         that re-reads "current" instead of trusting the value it was
@@ -625,14 +625,14 @@ class TestReviewInstructionsLineageStamp(unittest.TestCase):
         pi.save_instructions(REVIEW_PLAYBOOK_ID, "v1 text", "local:admin", self.ddb)
         pi.save_instructions(REVIEW_PLAYBOOK_ID, "v2 text", "local:admin", self.ddb)
 
-        real_reserve_spend = reviews_module.reserve_spend
+        real_reserve_spend = reviews_module.reserve_spend_with_amount
 
         def _save_v3_then_reserve(review_id, dynamodb_resource, *args, **kwargs):
             pi.save_instructions(REVIEW_PLAYBOOK_ID, "v3 text", "local:admin", dynamodb_resource)
             return real_reserve_spend(review_id, dynamodb_resource, *args, **kwargs)
 
         with mock.patch.object(
-            reviews_module, "reserve_spend", side_effect=_save_v3_then_reserve
+            reviews_module, "reserve_spend_with_amount", side_effect=_save_v3_then_reserve
         ):
             result = self._submit("owner-482f", "filehash-482f", "rev-482f")
 
