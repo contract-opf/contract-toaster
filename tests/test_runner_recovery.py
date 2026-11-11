@@ -622,9 +622,9 @@ class TestReservationSettlement(RecoveryFixture):
         seen: list[str] = []
         real = reviews.settle_reservation_for_cancel
 
-        def spy(review_id: str, dynamodb_resource: Any) -> None:
+        def spy(review_id: str, dynamodb_resource: Any, **kwargs: Any) -> None:
             seen.append(review_id)
-            real(review_id, dynamodb_resource)
+            real(review_id, dynamodb_resource, **kwargs)
 
         with patch.object(reviews, "settle_reservation_for_cancel", spy):
             runner_recovery.recover_orphaned_reviews(
@@ -657,10 +657,12 @@ class TestReservationSettlement(RecoveryFixture):
         that is the condition the whole module exists to clear."""
         real = reviews.settle_reservation_for_cancel
 
-        def explode_on_the_first(review_id: str, dynamodb_resource: Any) -> None:
+        def explode_on_the_first(
+            review_id: str, dynamodb_resource: Any, **kwargs: Any
+        ) -> None:
             if review_id == ORPHAN_INPROCESS:
                 raise RuntimeError("dynamodb is unreachable")
-            real(review_id, dynamodb_resource)
+            real(review_id, dynamodb_resource, **kwargs)
 
         with patch.object(
             reviews, "settle_reservation_for_cancel", explode_on_the_first

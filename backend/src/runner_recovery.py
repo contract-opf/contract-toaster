@@ -230,7 +230,7 @@ def recover_orphaned_reviews(
                 # reservation is credited back exactly once, guarded by the
                 # same `reservation_released` idempotency flag.
                 reviews_module.settle_reservation_for_cancel(
-                    str(review_id), dynamodb_resource
+                    str(review_id), dynamodb_resource, failed=True
                 )
                 audit_log.write_audit_entry(
                     dynamodb_resource,
