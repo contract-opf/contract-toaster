@@ -142,13 +142,32 @@ const FRONTEND_SRC = path.resolve(__dirname, '../src');
 const HIDDEN_HELPER_OWNERS = {
   '.ct-button__live': 'ct-button',
   '.ct-file-drop__input': '.ct-file-drop__well',
-  // Issue #492: ReviewSubmission.tsx's completion-handoff live region
-  // (`review-ready-announcement`) is visually hidden via app.css's
-  // `.ct-sr-only` rather than plain muted text — its containing block is
-  // the component's root section, positioned via app.css's own
-  // `[data-testid='review-submission']` rule.
-  '.ct-sr-only': "[data-testid='review-submission']",
 };
+
+// Issue #36: every key above must be a COMPONENT-SCOPED helper (a BEM element,
+// `.ct-<component>__<part>`), never a global utility class. A utility such as
+// `.ct-sr-only` is usable from any component, so registering it against ONE
+// component's containing block made the audit treat every other use of it as
+// having a verified positioned owner — a permanent blind spot where the audit
+// should fail closed. The `.ct-sr-only` utility had no remaining consumer (the
+// completion-handoff region is the Orbit Diner console's own `.od-sr`, which
+// is contained by the positioned `.od-console`), so the rule and its entry
+// were deleted rather than re-scoped. A helper added later is declared under
+// its own component-scoped selector or the check below refuses it.
+const SCOPED_HELPER_KEY_RE = /^\.ct-[a-z0-9]+(?:-[a-z0-9]+)*__[a-z0-9]+(?:[_-][a-z0-9]+)*$/;
+
+/** Keys of an owners map that are not component-scoped, RETURNED for the
+ * self-test. */
+function unscopedHelperKeyFailures(owners) {
+  return Object.keys(owners)
+    .filter((key) => !SCOPED_HELPER_KEY_RE.test(key))
+    .map(
+      (key) =>
+        `hidden helper: HIDDEN_HELPER_OWNERS key "${key}" is not component-scoped (.ct-<component>__<part>). ` +
+        'A global utility class registered against one component\'s containing block hides every other use of ' +
+        'it from this audit (issue #36).',
+    );
+}
 
 const failures = [];
 
@@ -313,6 +332,8 @@ function hiddenHelperFailures(source, label, owners = HIDDEN_HELPER_OWNERS) {
 for (const cssPath of cssFilesUnder(FRONTEND_SRC)) {
   failures.push(...hiddenHelperFailures(readFileSync(cssPath, 'utf8'), path.relative(FRONTEND_SRC, cssPath)));
 }
+
+failures.push(...unscopedHelperKeyFailures(HIDDEN_HELPER_OWNERS));
 
 // Every declared owner must actually exist somewhere, or the map rots into a
 // list of selectors nothing checks.
@@ -872,6 +893,22 @@ for (const testCase of HELPER_CASES) {
     failures.push(`self-test: mutation "${testCase.name}" was NOT detected by the hidden-helper check (issue #457)`);
   } else if (!testCase.flagged && hits.length > 0) {
     failures.push(`self-test: "${testCase.name}" must be exempt from the hidden-helper check but was flagged: ${hits[0]}`);
+  }
+}
+
+// Issue #36: the scoped-key rule itself must be able to fail — a global
+// utility key is refused, a component-scoped one passes.
+for (const testCase of [
+  { name: 'a bare global utility key', owners: { '.ct-sr-only': 'x-host' }, flagged: true },
+  { name: 'a non-ct- class with a BEM-shaped name', owners: { '.utility-a__b': 'x-host' }, flagged: true },
+  { name: 'a component-scoped key', owners: { '.ct-button__live': 'ct-button' }, flagged: false },
+  { name: 'a multi-word component-scoped key', owners: { '.ct-file-drop__input': '.ct-file-drop__well' }, flagged: false },
+]) {
+  const hits = unscopedHelperKeyFailures(testCase.owners);
+  if (testCase.flagged && hits.length === 0) {
+    failures.push(`self-test: mutation "${testCase.name}" was NOT detected by the scoped-helper-key check (issue #36)`);
+  } else if (!testCase.flagged && hits.length > 0) {
+    failures.push(`self-test: "${testCase.name}" must pass the scoped-helper-key check but was flagged: ${hits[0]}`);
   }
 }
 
