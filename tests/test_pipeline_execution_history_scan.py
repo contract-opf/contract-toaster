@@ -231,13 +231,14 @@ _KNOWN_SHORT_FIXED_STRINGS = {
     "playbook_coming_soon",
     "unknown_playbook",
 }
-# Note (issue #513): this set used to also carry the old attorney-approval
-# watermark string as an explicit entry. That string was never load-bearing
-# here -- it is well under `_MAX_PLAUSIBLE_POINTER_LENGTH`, so the generic
-# short-string carve-out below already permits it (and still permits
-# whatever literal `infra/lambda/mock_review/handler.py::WATERMARK` emits,
-# unchanged by #513's retirement of the attorney-approval framing from the
-# live redline-generation surfaces).
+# Note (issue #513, issue #38): this set used to also carry the old
+# attorney-approval watermark string as an explicit entry, and the mock
+# review stage used to emit a `watermark` payload field. #513 retired both,
+# so nothing here names that string and no payload field carries one. What
+# keeps the short free-form values a payload legitimately carries (a canned
+# `summary`, a `reason` enum) from tripping the scan is the generic
+# short-string carve-out in `_looks_like_pointer_or_enum` below, not any
+# entry in this set.
 
 
 def _looks_like_pointer_or_enum(value: str) -> bool:
