@@ -270,11 +270,13 @@ def run(
 
     # --- Stage 8: PRESERVE --------------------------------------------------
     # Runs the real preservation gate (tests/redline/test_inbound_comments_preserved.py)
-    # rather than re-asserting anything here: that gate drives the actual
-    # in-place patcher over every comment run shape Word emits, and checks the
-    # ANCHORS in the output document. Deliberately NOT a comments.xml
-    # byte-identity check -- byte-identity reported True for a comment that was
-    # already orphaned, which is how this stage came to overstate PR #363.
+    # rather than re-asserting anything here: that gate drives the block-mode
+    # redline (`redline_generate.generate_redline_from_blocks`, the path every
+    # review delivers through) over the comment run shapes Word emits, and
+    # checks the ANCHORS in the output document id by id. Deliberately NOT a
+    # comments.xml byte-identity check -- byte-identity reports True for a
+    # comment that is already orphaned. The gate is independent of the bundle
+    # under test: it runs on its own synthetic documents.
     try:
         import importlib.util
 
@@ -283,19 +285,8 @@ def run(
         gate = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(gate)
 
-        failures = []
-        for check in (
-            gate.check_1_every_inbound_comment_body_survives,
-            gate.check_2_comment_anchors_survive,
-            gate.check_3_redline_still_applied,
-            gate.check_4_no_text_duplicated_by_a_mixed_run,
-            gate.check_5_no_comment_range_collapsed,
-            gate.check_6_no_orphans_reported,
-            gate.check_7_other_parts_untouched,
-        ):
-            failures.extend(check())
-
-        shapes = sorted({shape for shape, _ in gate.SHAPES.values()})
+        failures = gate.run_all()
+        shapes = sorted(gate.SHAPES)
         if failures:
             by_name["PRESERVE"].status = FAIL
             by_name["PRESERVE"].detail = (
@@ -304,9 +295,8 @@ def run(
         else:
             by_name["PRESERVE"].status = PASS
             by_name["PRESERVE"].detail = (
-                f"all inbound comment anchors survive the redline in the output "
-                f"document across {len(shapes)} Word run shapes ({', '.join(shapes)}); "
-                f"zero orphaned"
+                f"all inbound comment anchors and bodies survive the block redline "
+                f"across {len(shapes)} Word run shapes ({', '.join(shapes)}); zero orphaned"
             )
     except Exception as exc:  # noqa: BLE001
         by_name["PRESERVE"].status = FAIL

@@ -16,6 +16,8 @@ not vacuous:
      `our_standard` part is our own wording rendered by design, not a leak.
   4. `--stage` reports exactly the named stage: REVIEW passing does not make a
      stage that is still PENDING pass.
+  5. Stage 8 (PRESERVE) runs its gate, tests/redline/test_inbound_comments_
+     preserved.py, instead of failing on a file the cutover deleted.
 
 pytest-collectable (tests/README.md §2): each check is a no-argument `test_*`
 function that raises AssertionError. Run standalone with
@@ -112,7 +114,25 @@ def test_stage_reports_only_the_named_stage() -> None:
     )
 
 
+def test_preserve_stage_runs_its_gate_instead_of_failing_on_a_missing_file() -> None:
+    """Stage 8 used to import a preservation test that the cutover deleted with
+    the in-place patcher it tested, so it reported `FAIL FileNotFoundError` for
+    every bundle. It now runs tests/redline/test_inbound_comments_preserved.py
+    against the block-mode redline and says which run shapes it covered."""
+    assert (REPO_ROOT / "tests" / "redline" / "test_inbound_comments_preserved.py").is_file()
+    proc = _run(str(FIXTURE.relative_to(REPO_ROOT)), "--stage", "PRESERVE")
+    line = next((line for line in proc.stdout.splitlines() if " PRESERVE " in line), "")
+    assert "FileNotFoundError" not in line, f"stage 8 still cannot find its gate: {line.strip()!r}"
+    assert proc.returncode == 0 and "STAGE PRESERVE: PASS" in proc.stdout, (
+        f"--stage PRESERVE exited {proc.returncode}: {line.strip()!r}"
+    )
+    assert "Word run shapes" in line and "zero orphaned" in line, (
+        f"PRESERVE passed without saying what it checked: {line.strip()!r}"
+    )
+
+
 TESTS = [
+    test_preserve_stage_runs_its_gate_instead_of_failing_on_a_missing_file,
     test_review_stage_passes_on_the_fixture_and_the_engine_example,
     test_the_wholesale_evidence_detector_is_not_vacuous,
     test_a_precedent_text_inside_another_clauses_standard_part_is_not_a_leak,
