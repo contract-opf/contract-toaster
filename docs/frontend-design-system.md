@@ -342,7 +342,11 @@ produced a measured horizontal page scroll on the admin screens, and
   `.ct-button__live` inside a scrolled `ct-table` row bought a 60px
   horizontal page scroll with nothing painted in it. Give the helper's
   owner `position: relative`, and declare the pair in the audit's
-  `HIDDEN_HELPER_OWNERS` map.
+  `HIDDEN_HELPER_OWNERS` map. Every key there must be component-scoped
+  (`.ct-<component>__<part>`), never a global utility class: a utility is
+  usable anywhere, so registering it against one component's containing
+  block hides every other use from the audit (issue #36; the audit refuses a
+  bare key).
 
 Overflow belongs to the component that owns it: a `ct-table` that scrolls
 itself is correct, a page that scrolls horizontally is not.

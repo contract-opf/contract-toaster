@@ -27,10 +27,11 @@
  *             issue #727 deleted that panel along with the rest of the
  *             surface the Orbit Diner console replaced; see git history for
  *             both rules)
- *   Status    .ct-muted  .ct-mono  .ct-sr-only (issue #492 — announced,
- *             never painted; standard clip-rect pattern, mirrors
- *             ct-button.css's .ct-button__live and ct-file-drop.css's
- *             .ct-file-drop__input)
+ *   Status    .ct-muted  .ct-mono  (the visually-hidden `.ct-sr-only`
+ *             utility added by #492 was deleted by issue #36: nothing used
+ *             it once the Orbit Diner console's own `.od-sr` took over the
+ *             completion-handoff announcement, and a global utility cannot
+ *             be audited per component — see layout-audit.mjs check 2)
  *   Layout    .ct-row  .ct-row--between  .ct-row--wrap  .ct-stack
  *             .ct-actions  .ct-row-actions(__main|__danger)
  *   Controls  .ct-input (compact search/filter field in a panel toolbar)
@@ -109,33 +110,15 @@
   font-family: var(--ct-font-mono);
 }
 
-/* Screen-reader-only (issue #492): present in the accessibility tree and
-   announced by assistive tech, but never painted. Standard clip-rect
-   pattern — mirrors ct-button.css's .ct-button__live and ct-file-drop.css's
-   .ct-file-drop__input, which solve the identical "announce, don't paint"
-   problem for their own components; this is the app-chrome-level copy for
-   plain markup that isn't a ct-* component (ReviewSubmission.tsx's
-   completion-handoff live region). Never display:none / visibility:hidden,
-   either of which would also hide it from assistive tech, not just sighted
-   users. */
-.ct-sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
-/* Containing block for the .ct-sr-only completion-handoff region above
-   (ReviewSubmission.tsx) — load-bearing, not decoration, same reasoning as
+/* Containing block for anything inside the Review tab that is positioned
+   against the section (load-bearing, not decoration, same reasoning as
    ct-button.css's own `position: relative` comment: an absolutely-
    positioned box is clipped by its CONTAINING BLOCK's overflow, not
-   whatever it happens to sit inside, so without this the region escapes
-   this section and can enlarge an ANCESTOR's scrollable area instead. */
+   whatever it happens to sit inside, so without this it can escape this
+   section and enlarge an ANCESTOR's scrollable area instead). It was
+   originally the owner of the `.ct-sr-only` completion-handoff region
+   (issue #492); that utility is gone (issue #36) but the rule stays so no
+   positioned descendant's containing block moves. */
 [data-testid='review-submission'] {
   position: relative;
 }

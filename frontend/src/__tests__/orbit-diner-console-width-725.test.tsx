@@ -45,9 +45,10 @@
  *      would hide the very thing the reviewer is choosing.
  *
  * `--ct-maxw` is unchanged (owner decision A2) and `review-submission` keeps
- * its `position: relative` (layout-audit check 2's declared owner for
- * `.ct-sr-only`); both are pinned below so a well-meaning edit to app.css
- * cannot quietly take them.
+ * its `position: relative` (originally the containing block of #492's
+ * `.ct-sr-only` live region, deleted by #36; kept so nothing positioned
+ * against the section moves); both are pinned below so a well-meaning edit
+ * to app.css cannot quietly take them.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -302,11 +303,14 @@ describe('issue #725 — the 1320px shell is kept, not replaced', () => {
     expect(declaredValue(orbitCss, '.od-console', 'max-width')).toBe('1320px');
   });
 
-  it('review-submission stays the positioned owner of .ct-sr-only', () => {
-    // layout-audit.mjs check 2 declares this element as the containing block
-    // for the completion-handoff live region. Losing it lets an absolutely
-    // positioned, visually hidden box enlarge an ANCESTOR's scrollable area —
-    // the measured 60px phantom page scroll of #457.
+  it('review-submission keeps position: relative', () => {
+    // Originally the containing block for #492's `.ct-sr-only` completion-
+    // handoff region (the utility was deleted by #36; the announcement is the
+    // console's own `.od-sr`, contained by the positioned `.od-console`).
+    // Losing this rule would still move the containing block of anything
+    // positioned against the section, and an absolutely positioned box that
+    // escapes its scroller enlarges an ANCESTOR's scrollable area — the
+    // measured 60px phantom page scroll of #457.
     expect(declaredValue(appCss, "[data-testid='review-submission']", 'position')).toBe('relative');
   });
 });
