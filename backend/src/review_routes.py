@@ -639,6 +639,19 @@ async def post_review(
         upload_pointer = f"uploads/{owner_sub}/{review_id}/in.docx"
         _put_upload_object(s3_client, upload_pointer, contents, file_sha256)
 
+    # Issue #71 / cost: one count, used twice -- recorded on the row for the
+    # duration estimate's sample and priced here for the cost the reviewer was
+    # quoted. Skipped on the duplicate/retry path (`submit_review` ignores
+    # both there: the original row already records what actually ran).
+    submitted_words = None if existing else _submitted_word_count(contents)
+    submitted_estimate = (
+        None
+        if existing
+        else _submitted_cost_estimate_cents(
+            playbook_id, submitted_words, dynamodb_resource, s3_client
+        )
+    )
+
     result = reviews.submit_review(
         owner_sub=owner_sub,
         playbook_id=playbook_id,
@@ -663,13 +676,52 @@ async def post_review(
         # `submit_review` ignores this argument there (the original row
         # already records the document that actually ran), so parsing
         # the .docx again would be work with nowhere to land.
-        word_count=None if existing else _submitted_word_count(contents),
+        word_count=submitted_words,
+        estimated_usd_cents=submitted_estimate,
     )
 
     return JSONResponse(
         status_code=result["status_code"],
         content={"review_id": result["review_id"], "resumed": result["resumed"]},
     )
+
+
+def _submitted_cost_estimate_cents(
+    playbook_id: str,
+    word_count: int | None,
+    dynamodb_resource: Any,
+    s3_client: Any,
+) -> int | None:
+    """The expected cost, in cents, of the review being submitted -- what the
+    reviewer's own estimate line would have said for this document and
+    playbook -- so History can show it beside the settled actual.
+
+    Computed HERE, from the bytes the server just counted, never taken from
+    the client: a self-reported figure would let a caller write whatever it
+    liked into its own record. The same `reviews.review_cost_estimate` the
+    estimate route serves, so the two cannot disagree about the formula.
+
+    Fail-soft on the same advisory posture as `_submitted_word_count`: any
+    failure (an unreadable playbook, a store blip) yields None, the row simply
+    carries no estimate, and the submission proceeds exactly as it did before
+    this existed. Nothing to quote without a word count either -- the policy
+    constant is the fallback figure, but a constant that ignores the document
+    is not what the reviewer was shown, so it is not recorded as if it were.
+    """
+    if not word_count:
+        return None
+    try:
+        basis = pipeline_runner.review_prompt_basis(playbook_id, dynamodb_resource, s3_client)
+        if basis is None:
+            return None
+        estimate = reviews.review_cost_estimate(
+            dynamodb_resource, playbook_id=playbook_id, words=word_count, basis=basis
+        )
+    except Exception:  # noqa: BLE001 -- advisory: never fail a submit over an estimate
+        logger.warning("submit: cost estimate unavailable; the review proceeds without one")
+        return None
+    cents = estimate.get("estimated_usd_cents")
+    return cents if isinstance(cents, int) and cents > 0 else None
 
 
 def _submitted_word_count(contents: bytes) -> int | None:

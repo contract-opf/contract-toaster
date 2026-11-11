@@ -118,7 +118,10 @@ if str(_SCRIPTS_DIR) not in sys.path:
 
 import canonicalize  # noqa: E402
 import document_injection_scan  # noqa: E402
+import model_output_schema  # noqa: E402
+import opf_prompt  # noqa: E402
 import playbook_registry  # noqa: E402
+import primary_review_pass  # noqa: E402
 import review_knowledge  # noqa: E402
 import review_spine  # noqa: E402
 
@@ -545,8 +548,28 @@ def _settle_reservation(
     )
 
 
+def _settled_cents(
+    cost: dict[str, Any],
+    client: Any,
+    dynamodb_resource: Any,
+    model_ids: dict[str, str] | None,
+) -> int:
+    """The cents to settle at: the figure already priced into `cost`
+    (`_actual_cost_for_client`) so the row and the daily ledger agree, or --
+    only when that pricing failed and left `cost` empty -- the same direct
+    computation this call site always made."""
+    cents = cost.get("actual_usd_cents")
+    if isinstance(cents, int):
+        return cents
+    return _actual_cents_from_client(client, dynamodb_resource, model_ids)
+
+
 def _settle_reservation_safely(
-    review_id: str, dynamodb_resource: Any, actual_usd_cents: int = 0
+    review_id: str,
+    dynamodb_resource: Any,
+    actual_usd_cents: int = 0,
+    *,
+    cost: dict[str, Any] | None = None,
 ) -> None:
     """Settle the reservation, but never let settling FAIL THE REVIEW (#446).
 
@@ -565,7 +588,23 @@ def _settle_reservation_safely(
 
     `actual_usd_cents` (issue #415, default 0) is threaded straight through
     to `_settle_reservation` -- see its docstring.
+
+    `cost` (`_actual_cost_for_client`'s dict) is also stamped on the review
+    row, first write wins (`reviews.record_actual_cost`). The success and
+    failure paths already wrote it with their terminal status, so for them
+    this is a no-op safety net; for the paths that write no cost of their own
+    (a cancelled run, a quarantine) it is the only writer. Omitted -- the mock
+    pipeline -- it records nothing: a canned fixture's $0 is not a measurement.
     """
+    if cost and isinstance(cost.get("actual_usd_cents"), int):
+        reviews.record_actual_cost(
+            review_id,
+            dynamodb_resource,
+            cost["actual_usd_cents"],
+            failed=bool(cost.get("actual_cost_failed")),
+            input_tokens=cost.get("actual_input_tokens"),
+            output_tokens=cost.get("actual_output_tokens"),
+        )
     try:
         _settle_reservation(review_id, dynamodb_resource, actual_usd_cents)
     except Exception:  # an unsettled reservation must not fail the review
@@ -669,6 +708,43 @@ def _actual_cents_from_client(
     if not usage:
         return 0
     return reviews.compute_actual_usd_cents_from_usage(usage, None, dynamodb_resource)
+
+
+def _actual_cost_for_client(
+    client: Any,
+    dynamodb_resource: Any,
+    model_ids: dict[str, str] | None = None,
+    *,
+    failed: bool = False,
+) -> dict[str, Any]:
+    """The `reviews.actual_cost_fields` dict for whatever `client` has spent so
+    far: the settled cents (`_actual_cents_from_client`, so the row and the
+    daily ledger always carry the same number) plus the measured token totals
+    the cost estimator calibrates its output median against.
+
+    `failed` marks a review that ended in a failure -- it still spent what the
+    client accumulated before it stopped. A client that never ran, or one with
+    no `cumulative_usage` (a test double, the Bedrock path), spent nothing
+    measurable: cents 0 and no token counts.
+
+    Never raises. This runs BEFORE the terminal write so the cost is on the row
+    the moment the status is, and a pricing fault must not be the reason a
+    finished review fails; it degrades to an empty dict (the row simply
+    carries no cost, i.e. unknown) and is logged.
+    """
+    try:
+        cents = _actual_cents_from_client(client, dynamodb_resource, model_ids)
+        usage = getattr(client, "cumulative_usage", None)
+        input_tokens = output_tokens = None
+        if isinstance(usage, dict) and usage:
+            input_tokens = int(usage.get("input_tokens") or 0)
+            output_tokens = int(usage.get("output_tokens") or 0)
+        return reviews.actual_cost_fields(
+            cents, failed=failed, input_tokens=input_tokens, output_tokens=output_tokens
+        )
+    except Exception:
+        logger.exception("Could not price the actual cost of the client's usage")
+        return {}
 
 
 def run_mock_pipeline(review_id: str, payload: dict[str, Any], *,
@@ -985,6 +1061,80 @@ def _load_playbook_bundle(
     entry = playbook_registry.resolve_playbook(playbook_id)
     with open(entry.playbook_path, encoding="utf-8") as f:
         return json.load(f)
+
+
+_TOOL_SCHEMA_TOKENS: dict[str, int] = {}
+
+
+def _tool_schema_tokens(notes_mode: str = "external") -> int:
+    """Estimated input tokens of the forced-tool schema a pass sends (0 when
+    structured output is off and none is sent). The same call and the same
+    calibrated estimator `primary_review_pass.run_primary_pass` counts it
+    with; memoised because the schema is a static file."""
+    if not config.structured_output_enabled():
+        return 0
+    cached = _TOOL_SCHEMA_TOKENS.get(notes_mode)
+    if cached is None:
+        spec = model_output_schema.model_facing_output_schema(
+            primary_review_pass.OUTPUT_SCHEMA_PATH, notes_mode=notes_mode
+        )
+        cached = primary_review_pass.estimate_input_tokens(json.dumps(spec))
+        _TOOL_SCHEMA_TOKENS[notes_mode] = cached
+    return cached
+
+
+def review_prompt_basis(
+    playbook_id: str, dynamodb_resource: Any, s3_client: Any
+) -> reviews.PromptBasis | None:
+    """What `playbook_id`'s stored playbook fixes about a review's cost,
+    independent of the document -- `reviews.PromptBasis`, or None when it
+    cannot be derived (no such playbook, an artifact that no longer
+    validates, a store blip). A caller falls back to the policy constant on
+    None; an estimate must never be the reason a form fails.
+
+    Deterministic from the stored playbook: the very system blocks a review
+    of it would send (`review_spine._assemble_opf_system_blocks` for an OPF
+    artifact, `primary_review_pass.assemble_system_blocks` for a v1 bundle),
+    composed through the same per-version memo (`knowledge_memo`) the real
+    run uses, sized with the calibrated `estimate_input_tokens`, plus the
+    forced-tool schema. `floor_calls` is the number of Floor invariants the
+    judge will check (an OPF artifact only; a v1 bundle judges none).
+    """
+    try:
+        bundle = _load_playbook_bundle(playbook_id, dynamodb_resource, s3_client)
+        opf_bundle_v2 = bundle.get("opf_bundle_v2")
+        if opf_bundle_v2 is not None:
+            knowledge = review_knowledge.resolve_knowledge_memoized(
+                opf_bundle_v2.get("knowledge_memo"),
+                bundle_v2=opf_bundle_v2,
+                policy=None,
+                declared_mode=review_knowledge.MODE_PLAYBOOK_DIGEST,
+                accept_empty_posture=True,
+                accept_stub_basis=bool(opf_bundle_v2.get("accepted_stub_basis", False)),
+                entity_roster=entity_roster.resolve_entity_roster(dynamodb_resource),
+            )
+            blocks = review_spine._assemble_opf_system_blocks(knowledge)
+            floor_calls = len(
+                opf_prompt.resolve_floor_invariants(
+                    knowledge.opf_doc or {}, knowledge.overrides
+                )
+            )
+        else:
+            blocks = primary_review_pass.assemble_system_blocks(bundle)
+            floor_calls = 0
+        prefix = primary_review_pass.estimate_input_tokens(
+            primary_review_pass.render_system_prompt(blocks)
+        )
+        return reviews.PromptBasis(
+            prefix_tokens=prefix + _tool_schema_tokens(), floor_calls=floor_calls
+        )
+    except Exception:
+        logger.warning(
+            "review_prompt_basis: could not derive the prompt basis for a playbook; "
+            "the cost estimate falls back to the policy constant",
+            exc_info=True,
+        )
+        return None
 
 
 def _opf_lineage_for_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
@@ -1370,7 +1520,8 @@ def _write_real_terminal(review_id: str, result: dict[str, Any], output_s3_key: 
                           model_ids: dict[str, str] | None = None,
                           opf_lineage: dict[str, Any] | None = None,
                           floor_coverage: dict[str, Any] | None = None,
-                          failing_stage: str | None = None) -> None:
+                          failing_stage: str | None = None,
+                          actual_cost: dict[str, Any] | None = None) -> None:
     """Write the terminal reviews-row state from a ReviewResult dict
     (scripts/review_spine.py::run_review's return contract). Unlike
     reviews.record_stage_failure (used only for an actual raised
@@ -1405,6 +1556,13 @@ def _write_real_terminal(review_id: str, result: dict[str, Any], output_s3_key: 
     see WHICH invariant went unjudged, not just that one did). Omitted
     (never a null placeholder) for a v1 review or an OPF review with an
     empty Floor, identically to `opf_lineage` above.
+
+    `actual_cost` (`reviews.actual_cost_fields`' dict, default `None`) is what
+    this review settled at -- `actual_usd_cents`, `actual_cost_failed` and the
+    measured token totals -- written in the SAME update as the status so the
+    first poll that sees the terminal state sees its cost. Omitted keys are not
+    written (a pricing fault, or a caller with no client), which leaves the row
+    "unknown" rather than claiming $0.00.
 
     `normalization_notes` (issue #563), when `result` carries one, is
     written the SAME way `decision`/`summary`/`reason` are -- a simple,
@@ -1475,6 +1633,10 @@ def _write_real_terminal(review_id: str, result: dict[str, Any], output_s3_key: 
         placeholder = f":fc{index}"
         set_clauses.append(f"{field} = {placeholder}")
         values[placeholder] = coverage_value
+    for index, (field, cost_value) in enumerate(sorted((actual_cost or {}).items())):
+        placeholder = f":ac{index}"
+        set_clauses.append(f"{field} = {placeholder}")
+        values[placeholder] = cost_value
     # Issue #95: `decision` is only ever a legitimate fact about a `DONE` row
     # (`scripts/review_spine.py`'s `_terminal` -- "a SYSTEM status must never
     # carry a decision", the same invariant `frontend/src/outcome.ts` states
@@ -1704,7 +1866,13 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
             review_id, playbook_id, payload.get("release_bundle_hash") or "", dynamodb_resource
         )
         if not verify_result.get("verified", False):
-            _settle_reservation_safely(review_id, dynamodb_resource)
+            # Quarantined before any model call: it cost nothing, and said so
+            # explicitly (0, failed) rather than leaving the row "unknown".
+            _settle_reservation_safely(
+                review_id,
+                dynamodb_resource,
+                cost=reviews.actual_cost_fields(0, failed=True),
+            )
             return
 
         stage = "load_playbook"
@@ -2028,9 +2196,17 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
             failing_stage = "run_review"
         else:
             failing_stage = None
+        # What this review cost, priced BEFORE the terminal write and written
+        # with it: the History poll that first sees the terminal status must
+        # also see its cost, which a stamp written after settling would race.
+        # `failing_stage` is set exactly when `result` is a failure.
+        cost = _actual_cost_for_client(
+            client, dynamodb_resource, model_ids, failed=failing_stage is not None
+        )
         _write_real_terminal(
             review_id, result, output_s3_key, dynamodb_resource,
             analysis_s3_key=analysis_s3_key,
+            actual_cost=cost,
             # Issue #514: the row records the request side (`model_ids`) and
             # now the response side too. Merged rather than passed
             # separately because `_write_real_terminal` already writes this
@@ -2063,7 +2239,10 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
         # cumulative_usage across both passes (and every retry) -- instead
         # of the hardcoded $0 that only the mock pipeline should ever use.
         _settle_reservation_safely(
-            review_id, dynamodb_resource, _actual_cents_from_client(client, dynamodb_resource, model_ids)
+            review_id,
+            dynamodb_resource,
+            _settled_cents(cost, client, dynamodb_resource, model_ids),
+            cost=cost,
         )
     except ReviewCancelled:
         # Caught BEFORE the fail-closed handler below, and handled completely
@@ -2079,8 +2258,14 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
             "Review %s cancelled by its owner at stage %s; stopping.", review_id, stage
         )
         reviews.mark_cancelled(review_id, dynamodb_resource)
+        # A stop is not a failure: the tokens spent before it landed are real
+        # and are recorded, but the row is not marked `actual_cost_failed`.
+        cancelled_cost = _actual_cost_for_client(client, dynamodb_resource, model_ids)
         _settle_reservation_safely(
-            review_id, dynamodb_resource, _actual_cents_from_client(client, dynamodb_resource, model_ids)
+            review_id,
+            dynamodb_resource,
+            _settled_cents(cancelled_cost, client, dynamodb_resource, model_ids),
+            cost=cancelled_cost,
         )
     except Exception as exc:  # fail closed, never wedge PENDING/RUNNING
         # Still one catch-all -- failing closed is deliberate. What changes
@@ -2121,8 +2306,18 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
         # after -- so an ERROR row (e.g. `model_empty_content`,
         # `model_output_truncated`) still records WHICH models were in play,
         # the same provenance a successful row gets via `_write_real_terminal`.
+        # What the failed attempt still spent goes in the same update as the
+        # ERROR status (0 when no model call was made).
+        failed_cost = _actual_cost_for_client(
+            client, dynamodb_resource, model_ids, failed=True
+        )
         reviews.record_stage_failure(
-            review_id, recorded_stage, reason, dynamodb_resource, model_ids=model_ids
+            review_id,
+            recorded_stage,
+            reason,
+            dynamodb_resource,
+            model_ids=model_ids,
+            actual_cost=failed_cost,
         )
         # Issue #415: a review that burned primary-pass (and/or critic-pass)
         # tokens before failing still spent real money -- settle at whatever
@@ -2134,7 +2329,10 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
         # above already closed the client (when this call built it): it is a
         # plain instance attribute, not a transport call.
         _settle_reservation_safely(
-            review_id, dynamodb_resource, _actual_cents_from_client(client, dynamodb_resource, model_ids)
+            review_id,
+            dynamodb_resource,
+            _settled_cents(failed_cost, client, dynamodb_resource, model_ids),
+            cost=failed_cost,
         )
 
 
