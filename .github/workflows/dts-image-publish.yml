@@ -205,6 +205,16 @@ jobs:
         uses: sigstore/cosign-installer@v3
 
       - name: Sign the pushed digest (cosign, keyless)
+        # NON-BLOCKING until one signed run has passed. This step runs AFTER the
+        # push, so `:latest` has already moved: if the runner cannot reach
+        # Fulcio, Rekor or the OIDC endpoint, a failure here would turn the whole
+        # publish job red and skip `deploy` (`needs: [publish, ...]`) for an image
+        # that is already out. Remove this line once a signed run has succeeded
+        # (the step then blocks, as a security control should). Until then a
+        # failure is a warning annotation, and the box's AUTOPULL_COSIGN=warn
+        # default tolerates the unsigned digest. See RUNBOOK.md, "Coolify
+        # deployments and autopull".
+        continue-on-error: true
         env:
           # The image repository without a tag: cosign signs the digest, and a
           # tag in the reference only draws a warning (tags move).

@@ -717,6 +717,8 @@ class Wiring(unittest.TestCase):
         self.assertIn("EnvironmentFile=/etc/coolify-autopull.env", unit)
         self.assertIn("ExecStart=/usr/local/bin/coolify-autopull", unit)
         self.assertIn("StateDirectory=coolify-autopull", unit)
+        # cosign's trust cache needs $HOME, which a systemd service lacks.
+        self.assertIn("Environment=HOME=/root", unit)
         readme = README.read_text(encoding="utf-8")
         self.assertIn("/usr/local/bin/coolify-autopull", readme)
         self.assertIn("/etc/coolify-autopull.env", readme)

@@ -841,6 +841,12 @@ What an operator needs to know:
   `AUTOPULL_COSIGN=enforce` refuses the rollout like the check above; how to
   flip it is in
   [deploy/dts/README.md → Signature verification](deploy/dts/README.md#signature-verification-cosign).
+  The publish workflow's signing step runs after the push and is **non-blocking
+  until one signed run has passed** (`continue-on-error`): a failed signing step
+  (the runner cannot reach Fulcio, Rekor or the OIDC endpoint) shows as a warning
+  annotation, not a red publish job, and `:latest` is already out and unsigned
+  (fine in `warn`, refused under `enforce`). Remove that line from the workflow
+  once a signed run has succeeded.
   Otherwise it calls Coolify's restart endpoint on localhost, waits up to `AUTOPULL_VERIFY_SECONDS` (default 420)
   for healthy containers at the new revision, and rolls back to the previous
   digests if they never get there.

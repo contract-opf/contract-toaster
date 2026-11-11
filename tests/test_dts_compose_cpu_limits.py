@@ -3,14 +3,17 @@
 Both Docker Compose files cap each long-running container's CPU, generously
 and overridably (deploy/dts/README.md#container-cpu-limits).
 
-The cap is a CFS quota (`cpu_period` + `cpu_quota`), NOT `cpus:`. Docker
+The cap is a CFS quota (`cpu_quota`, against Docker's default 100000us period),
+NOT `cpus:`. Docker
 refuses a `cpus` value above the host's core count, so a "generous" `cpus: 4`
 would stop the whole stack starting on a 2-core box; a quota above the core
 count never throttles and never fails a start. This file pins:
 
-  1. backend, frontend, dynamodb-local and minio each carry `cpu_period:
-     100000` and a `cpu_quota` of the form `${NAME:-default}`, in BOTH files,
-     with the same variable name and default in each.
+  1. backend, frontend, dynamodb-local and minio each carry a `cpu_quota` of
+     the form `${NAME:-default}`, in BOTH files, with the same variable name
+     and default in each, and NO `cpu_period`: with the quota at 0 a service
+     then sets no CPU key at all, which is what a host that refuses CPU limits
+     (rootless Docker without cgroup CPU delegation) needs.
   2. The defaults are generous: the backend (which runs the review pipeline
      in-process) at least 2 CPUs, every other service at least 1. A tighter
      default throttles the pipeline and can make its healthcheck miss its
@@ -54,11 +57,11 @@ class CpuLimits(unittest.TestCase):
         self.assertIsNotNone(match, f"{file}: {service} cpu_quota must be ${{NAME:-default}}")
         return match.group(1), int(match.group(2))  # type: ignore[union-attr]
 
-    def test_every_long_running_service_has_a_period_and_an_overridable_quota(self) -> None:
+    def test_every_long_running_service_has_an_overridable_quota_and_no_period(self) -> None:
         for file in FILES:
             for service in MIN_CPUS:
                 with self.subTest(file=file, service=service):
-                    self.assertEqual(services(FILES[file])[service].get("cpu_period"), PERIOD)
+                    self.assertNotIn("cpu_period", services(FILES[file])[service])
                     self.quota(file, service)
 
     def test_both_files_agree_on_the_names_and_defaults(self) -> None:
@@ -86,6 +89,7 @@ class CpuLimits(unittest.TestCase):
                 with self.subTest(file=file, service=name):
                     self.assertNotIn("cpus", service)
                     self.assertNotIn("cpu_count", service)
+                    self.assertNotIn("cpu_period", service)
                     resources = (service.get("deploy") or {}).get("resources") or {}
                     self.assertNotIn("cpus", resources.get("limits") or {})
 
@@ -96,6 +100,10 @@ class CpuLimits(unittest.TestCase):
 
 
 class Documented(unittest.TestCase):
+    def test_the_readme_says_how_to_run_where_cpu_limits_are_refused(self) -> None:
+        text = README.read_text(encoding="utf-8")
+        self.assertIn("Rootless Docker without cgroup CPU delegation", text)
+
     def test_every_override_is_in_the_readme(self) -> None:
         text = README.read_text(encoding="utf-8")
         self.assertIn("Container CPU limits", text)

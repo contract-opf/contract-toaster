@@ -77,6 +77,16 @@ class PublishWorkflowSigns(unittest.TestCase):
         self.assertIn("@${{ steps.push.outputs.digest }}", subject)
         self.assertNotIn("steps.meta.outputs.sha", subject, "sign the digest, never a tag")
 
+    def test_the_sign_step_is_non_blocking_until_a_signed_run_has_passed(self) -> None:
+        # It runs after the push: failing the job would skip `deploy` for an image
+        # that is already out. Remove `continue-on-error` (and this test) once a
+        # signed run has succeeded; RUNBOOK.md says the same.
+        job = workflow()["jobs"]["publish"]
+        sign = next(s for s in job["steps"] if s.get("name", "").startswith("Sign the pushed digest"))
+        self.assertIs(sign.get("continue-on-error"), True)
+        self.assertIn("continue-on-error", PUBLISH.read_text(encoding="utf-8"))
+        self.assertIn("non-blocking", (REPO_ROOT / "RUNBOOK.md").read_text(encoding="utf-8"))
+
     def test_the_minio_job_is_not_signed(self) -> None:
         # Not watched by autopull; immutable release tag. Say so if that changes.
         job = workflow()["jobs"]["publish-minio"]
@@ -110,6 +120,18 @@ class AutopullExpectsThatSigner(unittest.TestCase):
         self.assertIn("Signature verification (cosign)", text)
         self.assertIn("AUTOPULL_COSIGN=enforce", text)
         self.assertIn("cosign verify", text)
+
+    def test_the_readme_hand_check_runs_under_the_units_environment(self) -> None:
+        text = README.read_text(encoding="utf-8")
+        self.assertIn("systemd-run --wait --pipe", text)
+        self.assertIn("-p EnvironmentFile=/etc/coolify-autopull.env", text)
+
+    def test_the_readme_states_what_enforce_does_not_guarantee(self) -> None:
+        text = README.read_text(encoding="utf-8")
+        self.assertIn("What `enforce` does and does not guarantee", text)
+        self.assertIn("best-effort", text)
+        self.assertIn("case-sensitively", text)
+        self.assertIn("deployed.bad", text)
 
 
 if __name__ == "__main__":
