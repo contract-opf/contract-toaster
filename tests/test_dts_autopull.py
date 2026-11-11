@@ -38,6 +38,14 @@ PATH, and pin:
      GitHub compare API answers `identical` or `behind`). Anything else, a
      malformed revision, or an unreachable API refuses the roll-out, keeps
      the previous images, and exits 1 so the heartbeat reports down.
+ 13. The keyless cosign signature of each NEW digest is checked. The default
+     (`AUTOPULL_COSIGN` unset = warn) must never stop an existing box from
+     rolling forward: an unsigned image, a failing verification, a missing
+     cosign binary or no signer identity each warn and carry on. `enforce`
+     refuses all four exactly like the revision-on-main check; `off` never
+     calls cosign; a typo in the value stops the run. Unchanged digests never
+     call cosign. The identity regexp and issuer reach cosign, and the digest
+     it verifies is the one this box pulled.
 
 Run: python3 tests/test_dts_autopull.py
 """
@@ -109,8 +117,22 @@ exit 0
 """
 
 
+FAKE_COSIGN = r"""#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FAKE/cosign.argv"
+if [ -e "$FAKE/cosign_fail" ]; then
+  echo "Error: no matching signatures" >&2
+  exit 1
+fi
+echo '[{"critical":{}}]'
+exit 0
+"""
+
+
 class Box:
-    """A fake box: PATH with fake docker/curl, a state dir and fixtures."""
+    """A fake box: PATH with fake docker/curl/cosign, a state dir and fixtures.
+
+    A fake `cosign` is ALWAYS on the PATH, so a test can never reach a real
+    one on the developer's machine (and the network behind it)."""
 
     def __init__(self, root: Path) -> None:
         self.root = root
@@ -119,7 +141,7 @@ class Box:
         self.state = root / "state" / "deployed"
         self.bin.mkdir()
         self.fake.mkdir()
-        for name, body in (("docker", FAKE_DOCKER), ("curl", FAKE_CURL)):
+        for name, body in (("docker", FAKE_DOCKER), ("curl", FAKE_CURL), ("cosign", FAKE_COSIGN)):
             path = self.bin / name
             path.write_text(body, encoding="utf-8")
             path.chmod(0o755)
@@ -176,6 +198,10 @@ class Box:
 
     def all_curl(self) -> list[str]:
         path = self.fake / "curl.argv"
+        return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+
+    def cosign_calls(self) -> list[str]:
+        path = self.fake / "cosign.argv"
         return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
 
     def tags(self) -> list[str]:
@@ -530,6 +556,154 @@ class AutopullRevisionOnMain(unittest.TestCase):
         result = self.box.run()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.compare_calls(), [])
+
+
+@unittest.skipUnless(BASH, "needs bash")
+class AutopullCosign(unittest.TestCase):
+    """The cosign signature check of a new digest (warn by default)."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.box = Box(Path(self._tmp.name))
+        self.box.publish(BACKEND, "sha256:b1", "a" * 40)
+        self.box.publish(FRONTEND, "sha256:f1", "a" * 40)
+        self.assertEqual(self.box.run().returncode, 0)
+        self.box.publish(BACKEND, "sha256:b2", "b" * 40)
+        self.box.publish(FRONTEND, "sha256:f2", "b" * 40)
+        self.box.serve("b" * 40)
+        (self.box.fake / "compare").write_text(compare_body("behind"), encoding="utf-8")
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def run_box(self, **extra: str) -> subprocess.CompletedProcess[str]:
+        return self.box.run(AUTOPULL_GITHUB_REPO=GITHUB_REPO, **extra)
+
+    def assert_rolled_forward(self, result: subprocess.CompletedProcess[str]) -> None:
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len(self.box.curl_calls()), 1)
+        self.assertIn("sha256:b2", self.box.state.read_text(encoding="utf-8"))
+
+    def assert_refused(self, result: subprocess.CompletedProcess[str]) -> None:
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("refusing to roll forward: cosign verification failed", result.stdout)
+        self.assertEqual(self.box.curl_calls(), [], "no restart for an unverified image")
+        self.assertEqual(
+            self.box.state.read_text(encoding="utf-8"),
+            f"{BACKEND} sha256:b1\n{FRONTEND} sha256:f1\n",
+        )
+        repo_b, repo_f = BACKEND.rsplit(":", 1)[0], FRONTEND.rsplit(":", 1)[0]
+        self.assertEqual(
+            self.box.tags(),
+            [f"{repo_b}@sha256:b1 {BACKEND}", f"{repo_f}@sha256:f1 {FRONTEND}"],
+            "the watched tags go back to the images last rolled out",
+        )
+
+    def test_default_verifies_the_pulled_digests_against_the_publish_workflow(self) -> None:
+        result = self.run_box()
+        self.assert_rolled_forward(result)
+        self.assertIn("cosign: every watched digest carries a valid signature", result.stdout)
+        calls = self.box.cosign_calls()
+        self.assertEqual(len(calls), 2)
+        repo_b, repo_f = BACKEND.rsplit(":", 1)[0], FRONTEND.rsplit(":", 1)[0]
+        identity = (
+            "^https://github\\.com/example/contract-toaster"
+            "/\\.github/workflows/dts-image-publish\\.yml@refs/heads/main$"
+        )
+        for call, ref in zip(calls, (f"{repo_b}@sha256:b2", f"{repo_f}@sha256:f2"), strict=True):
+            self.assertTrue(call.startswith("verify "), call)
+            self.assertIn(f"--certificate-identity-regexp {identity}", call)
+            self.assertIn(
+                "--certificate-oidc-issuer https://token.actions.githubusercontent.com", call
+            )
+            self.assertTrue(call.endswith(ref), f"{call!r} must end with the pulled digest {ref}")
+
+    def test_an_unsigned_image_warns_and_rolls_forward_by_default(self) -> None:
+        (self.box.fake / "cosign_fail").touch()
+        result = self.run_box()
+        self.assert_rolled_forward(result)
+        self.assertIn("WARNING: cosign verification failed", result.stdout)
+        self.assertIn("no valid signature from the publish workflow", result.stdout)
+        self.assertIn("AUTOPULL_COSIGN=warn", result.stdout)
+
+    def test_a_missing_cosign_binary_warns_and_rolls_forward_by_default(self) -> None:
+        result = self.run_box(AUTOPULL_COSIGN_BIN="cosign-that-is-not-installed")
+        self.assert_rolled_forward(result)
+        self.assertIn("WARNING: cosign verification failed", result.stdout)
+        self.assertIn("cosign-that-is-not-installed is not installed", result.stdout)
+        self.assertEqual(self.box.cosign_calls(), [])
+
+    def test_no_signer_identity_warns_and_rolls_forward_by_default(self) -> None:
+        result = self.box.run()  # no AUTOPULL_GITHUB_REPO, no identity regexp
+        self.assert_rolled_forward(result)
+        self.assertIn("no signer identity to check against", result.stdout)
+        self.assertEqual(self.box.cosign_calls(), [])
+
+    def test_explicit_warn_is_the_default(self) -> None:
+        (self.box.fake / "cosign_fail").touch()
+        self.assert_rolled_forward(self.run_box(AUTOPULL_COSIGN="warn"))
+
+    def test_enforce_rolls_forward_on_a_valid_signature(self) -> None:
+        result = self.run_box(AUTOPULL_COSIGN="enforce")
+        self.assert_rolled_forward(result)
+        self.assertEqual(len(self.box.cosign_calls()), 2)
+
+    def test_enforce_refuses_an_unsigned_image(self) -> None:
+        (self.box.fake / "cosign_fail").touch()
+        self.assert_refused(self.run_box(AUTOPULL_COSIGN="enforce"))
+
+    def test_enforce_refuses_when_cosign_is_missing(self) -> None:
+        result = self.run_box(
+            AUTOPULL_COSIGN="enforce", AUTOPULL_COSIGN_BIN="cosign-that-is-not-installed"
+        )
+        self.assert_refused(result)
+        self.assertIn("is not installed on this box", result.stdout)
+
+    def test_enforce_refuses_without_a_signer_identity(self) -> None:
+        self.assert_refused(self.box.run(AUTOPULL_COSIGN="enforce"))
+        self.assertEqual(self.box.cosign_calls(), [])
+
+    def test_a_custom_identity_and_issuer_reach_cosign(self) -> None:
+        result = self.box.run(
+            AUTOPULL_COSIGN="enforce",
+            AUTOPULL_COSIGN_IDENTITY_REGEXP="^signer@example\\.test$",
+            AUTOPULL_COSIGN_OIDC_ISSUER="https://issuer.example.test",
+        )
+        self.assert_rolled_forward(result)
+        for call in self.box.cosign_calls():
+            self.assertIn("--certificate-identity-regexp ^signer@example\\.test$", call)
+            self.assertIn("--certificate-oidc-issuer https://issuer.example.test", call)
+
+    def test_off_never_calls_cosign(self) -> None:
+        (self.box.fake / "cosign_fail").touch()
+        result = self.run_box(AUTOPULL_COSIGN="off")
+        self.assert_rolled_forward(result)
+        self.assertEqual(self.box.cosign_calls(), [])
+        self.assertNotIn("cosign", result.stdout)
+
+    def test_a_typo_in_the_mode_stops_the_run(self) -> None:
+        result = self.run_box(AUTOPULL_COSIGN="enforced")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("AUTOPULL_COSIGN must be warn, enforce or off", result.stdout)
+        self.assertEqual(self.box.curl_calls(), [])
+        self.assertEqual(self.box.cosign_calls(), [])
+
+    def test_the_revision_check_runs_before_cosign(self) -> None:
+        # The revision-on-main check runs first: a revision that is not on main
+        # is refused for THAT reason and cosign is never asked.
+        (self.box.fake / "compare").write_text(compare_body("ahead"), encoding="utf-8")
+        result = self.run_box(AUTOPULL_COSIGN="enforce")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("is not on", result.stdout)
+        self.assertEqual(self.box.cosign_calls(), [])
+
+    def test_unchanged_digests_never_call_cosign(self) -> None:
+        # Roll forward once, then run again with nothing new.
+        self.assert_rolled_forward(self.run_box(AUTOPULL_COSIGN="enforce"))
+        calls_after_rollout = len(self.box.cosign_calls())
+        result = self.run_box(AUTOPULL_COSIGN="enforce")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len(self.box.cosign_calls()), calls_after_rollout)
 
 
 class Wiring(unittest.TestCase):

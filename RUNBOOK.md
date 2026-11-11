@@ -835,8 +835,13 @@ What an operator needs to know:
   `main` of `AUTOPULL_GITHUB_REPO` (`identical` or `behind`). If it is not, or
   the check cannot be made, it **refuses**: it re-tags the images back to the
   last rolled-out digests and exits 1. Leave `AUTOPULL_GITHUB_REPO` unset and
-  this check is skipped, so set it. Otherwise it calls Coolify's restart
-  endpoint on localhost, waits up to `AUTOPULL_VERIFY_SECONDS` (default 420)
+  this check is skipped, so set it. It then checks the digests' keyless cosign
+  signature from the publish workflow: by default (`AUTOPULL_COSIGN=warn`) an
+  unsigned image or a box without cosign only logs a warning, and
+  `AUTOPULL_COSIGN=enforce` refuses the rollout like the check above; how to
+  flip it is in
+  [deploy/dts/README.md → Signature verification](deploy/dts/README.md#signature-verification-cosign).
+  Otherwise it calls Coolify's restart endpoint on localhost, waits up to `AUTOPULL_VERIFY_SECONDS` (default 420)
   for healthy containers at the new revision, and rolls back to the previous
   digests if they never get there.
 - **A rollout restarts in-flight reviews; there is no drain.** The restart

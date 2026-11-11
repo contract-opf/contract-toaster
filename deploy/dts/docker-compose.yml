@@ -80,6 +80,10 @@ services:
     # here is a fair trade for a one-line fix that works on both fresh and
     # already-chowned volumes. Do NOT drop this without also chowning /data.
     user: root
+    # CPU ceiling, same convention and reasoning as the backend's below
+    # (deploy/dts/README.md#container-cpu-limits).
+    cpu_period: 100000
+    cpu_quota: ${DYNAMODB_CPU_QUOTA:-200000}
     restart: unless-stopped
     volumes:
       - ddb-data:/data
@@ -112,6 +116,10 @@ services:
       timeout: 5s
       retries: 4
       start_period: 15s
+    # CPU ceiling, same convention and reasoning as the backend's below
+    # (deploy/dts/README.md#container-cpu-limits).
+    cpu_period: 100000
+    cpu_quota: ${MINIO_CPU_QUOTA:-200000}
     restart: unless-stopped
     volumes:
       - minio-data:/data
@@ -205,6 +213,16 @@ services:
       timeout: 5s
       retries: 4
       start_period: 40s
+    # CPU ceiling (see deploy/dts/README.md#container-cpu-limits). A CFS quota in
+    # microseconds per 100000us period, so 400000 is "up to 4 CPUs". Generous on
+    # purpose: a quota ABOVE the host's core count never throttles and never
+    # fails a start, which `cpus:` would (Docker refuses a value over the core
+    # count), and this file must come up on any host. Too tight is the real
+    # risk: the review pipeline runs inside the backend process, and a starved
+    # backend answers its healthcheck late, which autopull reads as a bad
+    # rollout. 0 removes the limit. Override in the host's environment.
+    cpu_period: 100000
+    cpu_quota: ${BACKEND_CPU_QUOTA:-400000}
     restart: unless-stopped
     ports:
       # Bound to loopback only (issue #469): container-to-container traffic
@@ -247,6 +265,10 @@ services:
       timeout: 5s
       retries: 4
       start_period: 15s
+    # CPU ceiling, same convention and reasoning as the backend's below
+    # (deploy/dts/README.md#container-cpu-limits).
+    cpu_period: 100000
+    cpu_quota: ${FRONTEND_CPU_QUOTA:-200000}
     restart: unless-stopped
     ports:
       - "8081:8080"

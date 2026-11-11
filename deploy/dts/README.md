@@ -366,12 +366,16 @@ skip rule gets past it on the free plan.
    not, or the API cannot be reached, it **refuses**: it re-tags the watched
    refs back to the digests last rolled out, does not restart, and exits 1
    (so the heartbeat reports `down`). The next run asks again.
-4. Then POSTs Coolify's
+4. Checks the new digests' cosign signatures against the publish workflow
+   (see [Signature verification](#signature-verification-cosign)). By default
+   a missing or failing check only **warns**; `AUTOPULL_COSIGN=enforce` refuses
+   the rollout exactly as step 3 does.
+5. Then POSTs Coolify's
    `/api/v1/services/<uuid>/restart?latest=true` on `127.0.0.1:8000`.
-5. Waits (`AUTOPULL_VERIFY_SECONDS`, default 420) until the service's backend
+6. Waits (`AUTOPULL_VERIFY_SECONDS`, default 420) until the service's backend
    and frontend containers run the new revision and report `healthy` (the
    compose healthchecks). Only then does it record the rollout.
-6. If they never get there, **rolls back**: it re-tags the watched refs to the
+7. If they never get there, **rolls back**: it re-tags the watched refs to the
    digests last rolled out, which are still in the box's image store, and
    restarts with `latest=false`, so Coolify recreates the containers from them
    without pulling. The bad digests go in `deployed.bad`. Later runs hold at the
@@ -434,8 +438,97 @@ Coolify sees for a request from the host itself: the Docker bridge gateway,
 usually `172.17.0.1`, or the `coolify` network's gateway. Otherwise the restart
 is refused with a 403, which the journal shows.
 
-`tests/test_dts_autopull.py` runs the script against fake `docker` and `curl`
-binaries.
+`tests/test_dts_autopull.py` runs the script against fake `docker`, `curl` and
+`cosign` binaries.
+
+### Signature verification (cosign)
+
+`dts-image-publish.yml` signs each pushed backend and frontend **digest** with
+cosign, keyless: the signature is bound to that workflow's GitHub OIDC identity
+(`.github/workflows/dts-image-publish.yml` on `refs/heads/main`), so there is no
+signing key to hold or rotate. Only the `publish` job gets the `id-token: write`
+permission. `:latest` and `:<short-sha>` are the same digest, so they share one
+signature. MinIO is not signed: it is built from upstream source under an
+immutable release tag and the box does not watch it.
+
+On the box, a run that finds a **new** digest (never an unchanged one) asks
+cosign to verify each watched `repo@digest` against that identity, after the
+revision-on-`main` check and before the restart. `AUTOPULL_COSIGN` decides what a
+failure means:
+
+| Value | Not signed, signature does not match, cosign missing, or no identity to check against |
+|---|---|
+| `warn` (**default**) | The journal says `WARNING: cosign verification failed (…)` and the rollout continues. |
+| `enforce` | The rollout is **refused**: the watched tags go back to the digests last rolled out, nothing restarts, the run exits 1 (heartbeat `down`). |
+| `off` | cosign is never called. |
+
+Any other value stops the run with an error, so a typo cannot leave the box on a
+weaker setting than intended. The default exists so that this change cannot stop
+an existing box from pulling: every image published before the workflow signed
+anything has no signature, and a box that has not installed cosign cannot check
+one.
+
+**Turning enforcement on** (once, after a signed digest exists; nothing in this
+repo does it for you):
+
+1. Merge the change that adds the signing step and let one green `main` publish.
+   The `Sign the pushed digest` step's log prints the exact `cosign verify`
+   command for what it signed. A publish from a branch other than `main`
+   (a manual dispatch) is signed with a different identity and will not pass
+   the default check.
+2. Install cosign on the box (a release binary from
+   <https://github.com/sigstore/cosign/releases>, on `PATH` for root, or point
+   `AUTOPULL_COSIGN_BIN` at it). cosign reads the registry login the box already
+   has (`/root/.docker/config.json`) and needs outbound HTTPS to the registry
+   and to Sigstore's public services.
+3. Verify by hand against the digest the box is running now, from a shell on the
+   box:
+
+   ```bash
+   cosign verify \
+     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+     --certificate-identity-regexp '^https://github\.com/<owner>/<repo>/\.github/workflows/dts-image-publish\.yml@refs/heads/main$' \
+     ghcr.io/<owner>/contract-toaster-dts-backend@sha256:<digest>
+   ```
+
+   Do the same for the frontend. Both must exit 0.
+4. Add `AUTOPULL_COSIGN=enforce` to `/etc/coolify-autopull.env`. The unit reads
+   the file on every run, so no restart or `daemon-reload` is needed. The next
+   new digest is then checked for real; the journal line
+   `cosign: every watched digest carries a valid signature` confirms it.
+5. To back out, set it to `warn` (or `off`), or delete the line.
+
+`AUTOPULL_COSIGN_IDENTITY_REGEXP` and `AUTOPULL_COSIGN_OIDC_ISSUER` override the
+signer to expect (for a fork that signs from another workflow);
+`AUTOPULL_COSIGN_BIN` names the binary. See `coolify-autopull.env.example`.
+
+## Container CPU limits
+
+Each long-running service in `docker-compose.yml` and `docker-compose.coolify.yml`
+(`backend`, `frontend`, `dynamodb-local`, `minio`) has a CPU ceiling so one of
+them cannot starve the others on a shared host. It is a CFS quota in
+microseconds per 100000 µs period, so the quota divided by 100000 is the number
+of CPUs:
+
+| Service | Variable | Default | CPUs |
+|---|---|---|---|
+| `backend` (runs the review pipeline in-process) | `BACKEND_CPU_QUOTA` | `400000` | 4 |
+| `frontend` (nginx) | `FRONTEND_CPU_QUOTA` | `200000` | 2 |
+| `dynamodb-local` | `DYNAMODB_CPU_QUOTA` | `200000` | 2 |
+| `minio` | `MINIO_CPU_QUOTA` | `200000` | 2 |
+
+The one-shot `bootstrap` container is not capped: it runs once and exits.
+Set a variable in `deploy/dts/.env`, or in the deploy host's environment for
+Coolify, to change it; `0` removes that service's limit.
+
+The defaults are deliberately generous, and the mechanism is a quota rather than
+`cpus:` on purpose: Docker refuses a `cpus` value above the host's core count,
+which would stop the stack starting on a small host, while a quota above the core
+count simply never throttles. **Do not set the backend's quota tight.** The
+review pipeline runs inside the backend process, so a quota near one CPU makes
+reviews slow, and a starved backend answers its 4-second healthcheck late, which
+the autopull script reads as a rollout that never came up healthy and rolls
+back. Raise it first if the box is busy.
 
 ## Not yet included (follow-ups)
 
