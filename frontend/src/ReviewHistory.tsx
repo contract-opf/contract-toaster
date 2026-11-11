@@ -104,6 +104,7 @@ import {
 // Design section's "and in History's expanded row"). See coverNote.ts's
 // module docstring for why a 502 degrades quietly instead of throwing.
 import { butterIt, formatCostUsdCents, COVER_NOTE_FAILURE_COPY } from './coverNote';
+import { describeRowCost } from './reviewCost';
 // "Run again" (issue #70) — the one-slot, in-memory hand-off to the Review
 // tab. No storage, no props: see that module's docstring.
 import { requestRunAgain } from './runAgainRequest';
@@ -189,6 +190,19 @@ export interface HistoryRow {
    * rather than a guessed "Medium".
    */
   markup_intensity?: string | null;
+  /**
+   * What the server quoted for this review when it was submitted, in cents.
+   * Absent on a row from before the field.
+   */
+  estimated_usd_cents?: number | null;
+  /**
+   * What the review settled at, in cents (`reviews.REVIEW_COST_ROW_FIELDS`).
+   * ABSENT on a row from before the field -- unknown, never rendered as
+   * $0.00 -- and a real `0` for a failed review that made no model call.
+   */
+  actual_usd_cents?: number | null;
+  /** The review failed and `actual_usd_cents` is what the attempt still spent. */
+  actual_cost_failed?: boolean | null;
 }
 
 /**
@@ -1084,6 +1098,17 @@ export default function ReviewHistory(): React.ReactElement {
                           </td>
                           <td data-testid={`history-outcome-${row.review_id}`}>
                             <CtChip variant={outcomeChip.variant}>{outcomeChip.label}</CtChip>
+                            {/* What it cost: estimated against actual, or just actual
+                                for a row with no recorded estimate, and nothing at all
+                                for a row with no recorded cost (unknown is not free).
+                                Plain text, never a title or a link. */}
+                            {describeRowCost(row) && (
+                              <div>
+                                <small data-testid={`history-cost-${row.review_id}`}>
+                                  {describeRowCost(row)}
+                                </small>
+                              </div>
+                            )}
                           </td>
                           {/*
                             Per-step model provenance. A row that predates the

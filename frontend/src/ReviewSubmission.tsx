@@ -139,6 +139,7 @@ import {
   timeRemaining as computeTimeRemaining,
   type DurationEstimate,
 } from './durationEstimate';
+import { actualCents, fetchCostEstimate, type CostEstimate } from './reviewCost';
 // The shared disposition capture (issue #486) — the POST call and the
 // vocabulary it is typed against. The console renders the choices and their
 // labels itself (issue #726), so only the transport and the type are needed
@@ -258,6 +259,15 @@ interface ReviewDetail {
   // playbook, or their document. Null on a review that didn't fail.
   failing_stage?: string | null;
   reason?: string | null;
+  // What this review cost, read off the owner's own detail (never anyone
+  // else's: the route is owner-or-admin). `actual_usd_cents` is what it
+  // settled at — a real 0 for a failed review that made no model call — and
+  // ABSENT on a review from before the field, which is unknown, not free.
+  // `actual_cost_failed` marks a review that failed and still spent.
+  // `estimated_usd_cents` is what the server quoted at submit time.
+  actual_usd_cents?: number | null;
+  actual_cost_failed?: boolean | null;
+  estimated_usd_cents?: number | null;
   // Issue #100: a structured sub-classification of `reason`, read off the
   // fail-closed `analysis_report` the same "absent, never a null
   // placeholder" way every other optional field here is — currently only
@@ -1811,15 +1821,25 @@ export default function ReviewSubmission(): React.ReactElement {
   // 2026-09-01 the number had to be computed by hand after the fact.
   //
   // Read from `/api/review-cost-estimate`, whose projection is an allowlist of
-  // two cost figures: it carries no instance-wide totals, no cap and no model
-  // ids — those stay admin-only on the Settings tab. A reviewer needs the price
+  // cost figures (the estimate, its range and basis, the reservation): it
+  // carries no instance-wide totals, no cap and no model ids — those stay
+  // admin-only on the Settings tab. A reviewer needs the price
   // of the thing they are about to do; they do not need the deployment's
   // ledger.
   //
   // Silent on failure, like the preferences load above: this panel's job is
   // toasting a contract, and an error banner because a price line could not be
   // fetched would be noise. The line simply does not render.
-  const [reviewCostUsdCents, setReviewCostUsdCents] = useState<number | null>(null);
+  //
+  // Input-aware (the cost-estimate change): the read is keyed on the selected
+  // playbook and the preflight word count, exactly as the duration estimate
+  // below is, so the figure and its range follow the document the reviewer
+  // actually chose. Before a playbook is selected or a document preflighted the
+  // route answers the document-blind figure, which is still a better line than
+  // none. The parsing — the strict "positive cents or nothing" rule that keeps
+  // "$NaN" and "$0.00" off a spend line — lives in `reviewCost.ts`.
+  const [costEstimate, setCostEstimate] = useState<CostEstimate | null>(null);
+  const reviewCostUsdCents = costEstimate?.cents ?? null;
   // The estimate CAPTURED for the review that was actually submitted (issue
   // #735, owner decision H2) — the same "freeze the submitted value" pattern as
   // `submittedPlaybookLabel` and `submittedFilename` above. The route this
@@ -1827,37 +1847,30 @@ export default function ReviewSubmission(): React.ReactElement {
   // showing what IT was quoted at rather than a number fetched afterwards for a
   // different document. `undefined` means nothing has been submitted yet;
   // `null` records a submit made with no estimate available, which is not the
-  // same thing and must not fall back to the live figure.
-  const [submittedEstimateCents, setSubmittedEstimateCents] = useState<
-    number | null | undefined
-  >(undefined);
+  // same thing and must not fall back to the live figure. The whole estimate
+  // (range and basis included) is frozen, not just its cents, so the range on
+  // screen always belongs to the figure on screen.
+  const [submittedEstimate, setSubmittedEstimate] = useState<CostEstimate | null | undefined>(
+    undefined,
+  );
+  const submittedEstimateCents: number | null | undefined =
+    submittedEstimate === undefined ? undefined : (submittedEstimate?.cents ?? null);
+  const costWords = preflight?.wordCount ?? 0;
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      try {
-        const response = await authorizedFetch('/api/review-cost-estimate');
-        if (!response.ok) return;
-        const body = (await response.json()) as { estimated_usd_cents?: unknown };
-        if (cancelled) return;
-        // Strict number check AND a positivity check. A backend older than
-        // this bundle answers this route with a 404 body, so
-        // `Number(undefined)` would render "$NaN" on a spend line; and the
-        // field is legitimately `null` on a provider carrying no per-review
-        // basis (the Bedrock path — see `reviews.estimate_review_usd_cents`),
-        // where "$0.00" would claim a review is free. Anything that is not a
-        // positive number of cents renders nothing at all, which is the
-        // honest answer and the one this line degrades to anyway.
-        if (typeof body.estimated_usd_cents === 'number' && body.estimated_usd_cents > 0) {
-          setReviewCostUsdCents(body.estimated_usd_cents);
-        }
-      } catch {
-        /* the price is a courtesy; the button works without it */
+      const estimate = await fetchCostEstimate(playbookId, costWords);
+      if (!cancelled) {
+        // Whatever the route said for THIS playbook and document, including
+        // nothing: a figure read for a different document must never linger
+        // beside the one now chosen.
+        setCostEstimate(estimate);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [playbookId, costWords]);
 
   // Issue #71 (2026-09-05 diagnostic G12): how long this is going to take.
   //
@@ -2708,8 +2721,8 @@ export default function ReviewSubmission(): React.ReactElement {
       // the price landed records, over the live figure. Without this the
       // register reads "Estimate unavailable" (or the PREVIOUS document's
       // price) on a screen with no review on it. The happy path is unchanged:
-      // the successful POST re-captures from `reviewCostUsdCents` below.
-      setSubmittedEstimateCents(undefined);
+      // the successful POST re-captures from `costEstimate` below.
+      setSubmittedEstimate(undefined);
       // Clear the previous completion handoff. The ref is keyed on review id
       // rather than simply "has run", and re-dropping the same file inside the
       // same idempotency bucket RESUMES the same review id — so without this
@@ -2784,7 +2797,7 @@ export default function ReviewSubmission(): React.ReactElement {
         setSubmittedFilename(file.name);
         // Issue #735: frozen only once the submission actually landed — a POST
         // that failed priced nothing, so there is nothing to capture for it.
-        setSubmittedEstimateCents(reviewCostUsdCents);
+        setSubmittedEstimate(costEstimate);
         setReviewId(submittedId);
         reviewIdRef.current = submittedId;
         // Issue #58: the ONLY place this key is ever written -- a review id
@@ -2924,7 +2937,7 @@ export default function ReviewSubmission(): React.ReactElement {
     // but the reverse order is just as ordinary a thing to do, and it sent
     // the wrong request. `browning` was already missing before #523 added
     // `notesMode` beside it; both are one and the same defect.
-    // `reviewCostUsdCents` (issue #735) is here for exactly the reason spelled
+    // `costEstimate` (issue #735) is here for exactly the reason spelled
     // out above: it is read inside, so without it this callback would freeze
     // whatever the estimate was when the callback was last rebuilt — which,
     // for a reviewer who picks a file before the price arrives, is `null`.
@@ -2934,7 +2947,7 @@ export default function ReviewSubmission(): React.ReactElement {
       notesMode,
       playbookId,
       playbooks,
-      reviewCostUsdCents,
+      costEstimate,
       stopPolling,
       toasterGuidance,
       clearReviewChannels,
@@ -3077,7 +3090,7 @@ export default function ReviewSubmission(): React.ReactElement {
     // pre-submission screen that has no review on it at the previous review's
     // number, or, after a `null` capture, read "Estimate unavailable" for the
     // rest of the session even once the live estimate has arrived.
-    setSubmittedEstimateCents(undefined);
+    setSubmittedEstimate(undefined);
     handedOffReviewRef.current = null;
     setPrefilledFromReview(false);
     setPrefillError(null);
@@ -3881,6 +3894,19 @@ export default function ReviewSubmission(): React.ReactElement {
     recommendedPlaybook,
     reviewCostUsdCents,
     capturedReviewCostUsdCents: submittedEstimateCents,
+    // The range belongs to whichever estimate is on screen: the captured one
+    // once a review has been submitted (even a captured `null`, which has no
+    // range), the live one before.
+    reviewCostRange: (() => {
+      const shown = submittedEstimate === undefined ? costEstimate : submittedEstimate;
+      return shown && shown.lowCents !== null && shown.highCents !== null
+        ? { lowCents: shown.lowCents, highCents: shown.highCents, basis: shown.basis }
+        : null;
+    })(),
+    // The settled cost of the review on screen, from its own detail. Absent
+    // stays absent: an unknown cost is never painted as $0.00.
+    actualReviewCostUsdCents: actualCents(detail),
+    actualReviewCostFailed: detail?.actual_cost_failed === true,
     coverNoteCostCents,
     coverNoteLastRealCostCents,
     coverNoteDraft,

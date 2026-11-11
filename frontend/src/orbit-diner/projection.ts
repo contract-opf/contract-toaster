@@ -208,6 +208,27 @@ export interface ReviewProjectionState {
    * different document.
    */
   capturedReviewCostUsdCents?: number | null;
+  /**
+   * The range and derivation behind whichever estimate is on screen (the
+   * captured one once a review has been submitted, the live one before).
+   * Already resolved by the app, so the console never chooses between the
+   * two. `basis` is the route's closed vocabulary; anything but `document` or
+   * `measured` is the document-blind typical figure.
+   */
+  reviewCostRange?: {
+    lowCents: number;
+    highCents: number;
+    basis: string | null;
+  } | null;
+  /**
+   * What the review on screen SETTLED at, once it has (`actual_usd_cents` off
+   * the owner's own detail). `undefined`/`null` is unknown — a row from before
+   * the field, or a review still running — and never becomes `$0.00`. A real
+   * `0` (a failed review that made no model call) is a number and is shown.
+   */
+  actualReviewCostUsdCents?: number | null;
+  /** The review failed and `actualReviewCostUsdCents` is what it still spent. */
+  actualReviewCostFailed?: boolean;
   /** `coverNoteCostCents` — kept separate; never folded into the review cost. */
   coverNoteCostCents?: number | null;
   /** The last NON-cached generation's cost — what a Regenerate press costs. */
@@ -379,13 +400,17 @@ function projectStatus(state: ReviewProjectionState): Status {
 // ---------------------------------------------------------------------------
 
 /**
- * Today's endpoint answers with a deployment-wide TYPICAL estimate, so that is
- * exactly what is claimed: `basis:'typical'`. `'document-model'` is reserved
- * for a backend estimate actually computed for this document and model policy
- * (#735), a hold is only ever an authorized server projection (never the
- * estimate multiplied by anything), and a non-positive estimate is
- * `unavailable` rather than an inferred `$0.00` — the same positivity check
- * `ReviewSubmission` already applies before it renders the figure at all.
+ * The estimate endpoint answers either a deployment-wide TYPICAL figure
+ * (`basis:'typical'`, no document or playbook was sent, or none could be
+ * priced) or one computed for this document and playbook
+ * (`basis:'document-model'`, the route's `document` / `measured` bases, with
+ * the low/high range it returned). A hold is only ever an authorized server
+ * projection (never the estimate multiplied by anything), and a non-positive
+ * estimate is `unavailable` rather than an inferred `$0.00` — the same
+ * positivity check `ReviewSubmission` already applies before it renders the
+ * figure at all. Once the server has settled the review, its own
+ * `actual_usd_cents` becomes a complete `settled` cost; it is never derived
+ * from the estimate.
  */
 function projectCost(state: ReviewProjectionState): Cost {
   // Owner decision H2 (#735): once something has been submitted, the figure on
@@ -398,10 +423,40 @@ function projectCost(state: ReviewProjectionState): Cost {
     state.capturedReviewCostUsdCents === undefined
       ? state.reviewCostUsdCents
       : state.capturedReviewCostUsdCents;
-  const cost: Cost =
+  const range = state.reviewCostRange;
+  const documentBased = range?.basis === 'document' || range?.basis === 'measured';
+  let cost: Cost =
     typeof cents === 'number' && cents > 0
-      ? { kind: 'estimated', cents, basis: 'typical' }
+      ? { kind: 'estimated', cents, basis: documentBased ? 'document-model' : 'typical' }
       : { kind: 'unavailable' };
+  // A range is shown only when it brackets the figure on screen, so a stale
+  // range for a different estimate can never sit beside this one.
+  if (
+    cost.kind === 'estimated' &&
+    range &&
+    typeof cost.cents === 'number' &&
+    range.lowCents <= cost.cents &&
+    cost.cents <= range.highCents
+  ) {
+    cost.lowCents = range.lowCents;
+    cost.highCents = range.highCents;
+  }
+  // What the review actually cost, once the server has settled it. This is
+  // the settlement projection the register's "Final review cost" label has
+  // always been waiting for (#735 H2): a number the server computed, never an
+  // inference from the estimate. Unknown (absent) stays whatever it was above.
+  const actual = state.actualReviewCostUsdCents;
+  if (typeof actual === 'number' && Number.isFinite(actual) && actual >= 0) {
+    cost = {
+      kind: 'settled',
+      cents: actual,
+      settlementComplete: true,
+      failed: state.actualReviewCostFailed === true,
+    };
+    if (typeof cents === 'number' && cents > 0) {
+      cost.estimatedCents = cents;
+    }
+  }
   if (typeof state.coverNoteCostCents === 'number') {
     cost.coverCents = state.coverNoteCostCents;
   }

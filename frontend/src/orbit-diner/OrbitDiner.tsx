@@ -18,6 +18,8 @@ import { createMotion, motionStyles, type MotionController } from "./motion";
 import {
   canDispose,
   canSubmit,
+  costNote,
+  costRangeText,
   costText,
   inferMotion,
   isManual,
@@ -1737,11 +1739,16 @@ export function OrbitDiner({
                 {m.browningReadback}
               </span>
             )}
-            {terminal && m.notesDisclosure && (
+            {terminal && (m.notesDisclosure || costNote(m.cost)) && (
               <div className="od-readback">
-                <p data-testid="review-notes-mode-internal-disclosure">
-                  {m.notesDisclosure}
-                </p>
+                {m.notesDisclosure && (
+                  <p data-testid="review-notes-mode-internal-disclosure">
+                    {m.notesDisclosure}
+                  </p>
+                )}
+                {costNote(m.cost) && (
+                  <p data-testid="review-cost-note">{costNote(m.cost)}</p>
+                )}
               </div>
             )}
             {!terminal && (
@@ -1781,6 +1788,14 @@ export function OrbitDiner({
                           ? "Based on this document and the active model policy."
                           : "Based on active models and typical document length. Longer documents may cost more."
                         : ""}
+                  {costRangeText(m.cost) && (
+                    <>
+                      {" "}
+                      <span data-testid="review-cost-range">
+                        {costRangeText(m.cost)}.
+                      </span>
+                    </>
+                  )}
                   {m.cost.coverCents != null &&
                     ` Cover note: ${money(m.cost.coverCents)}.`}
                 </p>
