@@ -330,7 +330,12 @@ calls the `/api/admin/playbooks/...` routes listed in
 1. In the playbook's version table, **Download** the active version.
 2. Edit it locally against `playbooks/schema.json`, and bump its version:
    patch for clarifications, minor for new topics or footnote templates,
-   major for structural changes.
+   major for structural changes. **Author in OPF 0.6.** A legacy v1 upload is
+   recorded and hashed but never executed: reviews use the playbook file
+   shipped in the image, so an active v1 version is honoured only while its
+   bytes are identical to that file, and reviews for the playbook are refused
+   (`503 no active playbook`) otherwise, even though the version table can read
+   "active". The upload response and the Playbooks tab say so.
 3. **Upload a new version.** The server parses and validates it, computes the
    content hash itself, and stores it as `draft`.
 4. Run the release gates that live outside the product: schema validation,

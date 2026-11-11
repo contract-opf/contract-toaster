@@ -271,6 +271,14 @@ const CATALOG_ERROR_COPY = "We couldn't load your playbooks. Please try again.";
 /** `playbook_versions.status` — the sole lifecycle authority (#79). */
 export type PlaybookVersionStatus = 'draft' | 'active' | 'retired';
 
+// QA 2026-10-31 item 13: what the Playbooks tab says after a legacy v1 upload.
+// A v1 version is recorded and hashed but never executed: the runner uses the
+// registry file shipped in the image, so reviews run it only while the bytes are
+// identical and are refused otherwise, even though the version trail can read
+// "active".
+const LEGACY_V1_NOTICE =
+  'This is a legacy v1 playbook: it is recorded, but reviews run it only if it is byte-for-byte the playbook file shipped with this deployment, and are refused otherwise. Author changes in OPF 0.6.';
+
 export interface PlaybookVersionRow {
   playbook_id: string;
   version: string;
@@ -963,6 +971,22 @@ export default function AdminPlaybooks(): React.ReactElement | null {
           );
         }
 
+        // QA 2026-10-31 item 13: the route sends a `warning` for a legacy v1
+        // document, which is recorded but never executed (the runner uses the
+        // registry's file). Only the PRESENCE of the field is read; the copy
+        // shown is this file's own constant, never server text.
+        let isLegacyV1 = false;
+        try {
+          const uploaded: unknown = await response.json();
+          isLegacyV1 =
+            typeof uploaded === 'object' &&
+            uploaded !== null &&
+            typeof (uploaded as { warning?: unknown }).warning === 'string' &&
+            (uploaded as { warning: string }).warning !== '';
+        } catch {
+          // The upload succeeded; an unreadable body only costs the notice.
+        }
+
         // The upload route records no note (the version row lands with an
         // empty one), so an entered note is a second, deliberate call to the
         // notes route rather than a field on the upload itself.
@@ -986,7 +1010,9 @@ export default function AdminPlaybooks(): React.ReactElement | null {
         }
 
         setUploadResult(
-          'Uploaded. It is a draft until you activate it — nothing about the live review flow has changed yet.',
+          isLegacyV1
+            ? `Uploaded. ${LEGACY_V1_NOTICE}`
+            : 'Uploaded. It is a draft until you activate it — nothing about the live review flow has changed yet.',
         );
         setUploadVersion('');
         setUploadNotes('');

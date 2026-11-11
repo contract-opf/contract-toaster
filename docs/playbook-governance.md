@@ -359,6 +359,16 @@ Gate 7 is now implementable step-by-step:
 4. The `release.content_hash` field in the JSON document is written at upload time (for audit
    trail purposes) — but the activation gate reads the **DB row**, not the document field.
 
+**Gate 7 does not make a v1 upload executable (QA 2026-10-31 item 13).** For a legacy v1 upload
+the hash in step 1 is the raw-bytes `sha256:<hex>` of the uploaded file (the OPF hash is
+different), and the runner never executes the uploaded document: it loads the registry's
+on-disk file for that `playbook_id`. So an active `artifact_kind: "v1"` row resolves for reviews
+only while its `content_hash`, the `playbooks` row's `active_release_bundle_hash` and the
+`sha256` of that registry file's raw bytes are all equal; any other v1 row, or one for an
+unregistered `playbook_id`, is refused exactly like a missing bundle (`503 "no active
+playbook"` at submission, `QUARANTINED` at execution start). Rows with no `artifact_kind`
+(seed rows) and OPF rows are unaffected. Author changes in OPF 0.6.
+
 **CI golden-hash gate.** `tests/gold-fixtures/canonicalize-golden-hash.json` records the
 expected hash of the registry's default playbook. If the canonical form or playbook content drifts,
 `tests/test_canonicalize.py::test_golden_hash_fixture` fails. After an intentional playbook-content

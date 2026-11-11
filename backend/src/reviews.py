@@ -1881,6 +1881,31 @@ NO_ACTIVE_PLAYBOOK_DETAIL = "no active playbook"
 QUARANTINE_REASON_SUBMISSION_TIME_BUNDLE_RETIRED = "submission_time_bundle_retired"
 
 
+def _v1_row_matches_registry_bytes(
+    playbook_id: str, active_version: dict[str, Any], active_hash: str
+) -> bool:
+    """QA 2026-10-31 item 13: True only when an ACTIVE `artifact_kind == "v1"`
+    row names exactly the bytes the runner will execute.
+
+    The runner never runs an uploaded v1 document: it reads the registry's
+    on-disk playbook file (`pipeline_runner._load_playbook_bundle`). So a v1
+    row is only honest to resolve as active when the row's `content_hash`, the
+    resolver's `active_hash`, and `"sha256:" + sha256(<the registry file's raw
+    bytes>)` are all the same value -- the RAW-bytes hash the upload route
+    records (`main.py`: `"sha256:" + hashlib.sha256(contents)`), not
+    `canonicalize.content_hash`. Anything else (different bytes, an unregistered
+    playbook_id, an unreadable file) is False.
+    """
+    if active_version.get("content_hash") != active_hash:
+        return False
+    try:
+        entry = playbook_registry.resolve_playbook(playbook_id)
+        raw = Path(entry.playbook_path).read_bytes()
+    except (playbook_registry.PlaybookNotRegisteredError, OSError):
+        return False
+    return active_hash == "sha256:" + hashlib.sha256(raw).hexdigest()
+
+
 def _read_active_release_bundle_hash(
     playbook_id: str,
     dynamodb_resource: Any,
@@ -1903,7 +1928,10 @@ def _read_active_release_bundle_hash(
         missing its `our_standard` standard-form text -- see
         `scripts/playbook_validation.py::load_and_validate_playbook`), OR
       - the active bundle IS an OPF artifact (issue #478's upload flow)
-        but its activation record is internally inconsistent (see below).
+        but its activation record is internally inconsistent (see below), OR
+      - the active version row is an uploaded v1 document (`artifact_kind ==
+        "v1"`, nothing else) whose bytes are not the bytes the runner will
+        actually execute (see the v1 section below).
 
     An invalid playbook must never resolve as active: fail closed to the
     exact same refusal a missing bundle produces, never a partial/invalid
@@ -1940,6 +1968,24 @@ def _read_active_release_bundle_hash(
     hash blind would be wrong), and it must name a `storage_key` a run can
     actually load from. Either check failing returns None, same as any
     other "cannot resolve an active bundle" outcome here.
+
+    ## v1 branch (QA 2026-10-31 item 13)
+
+    An uploaded v1 document is validated, hashed and stored, but the runner
+    never executes it: `pipeline_runner._load_playbook_bundle` reads the
+    registry's on-disk file for the playbook_id. Resolving such a row as active
+    would let a review record the uploaded version's hash as its governing
+    bundle while a different file ran. So for `artifact_kind == "v1"` (strictly
+    that value: seed rows and tests that write rows directly carry no
+    `artifact_kind` and behave exactly as before) the row resolves only when
+    its `content_hash`, `active_hash` and `"sha256:" + sha256(<registry file's
+    raw bytes>)` are all equal (`_v1_row_matches_registry_bytes`); otherwise
+    None, the same "no active bundle" signal as every other refusal here
+    (HTTP 503 at submission, QUARANTINED at execution start). An unregistered
+    playbook_id is also None. The hash is the RAW-bytes upload hash
+    (`main.py`), not `canonicalize.content_hash`. Authoring a change to a
+    registered v1 playbook therefore means shipping it in the image; a
+    deployment's own playbooks are authored as OPF 0.6.
 
     What this function deliberately does NOT do is re-fetch and re-validate
     the OPF artifact's bytes from S3 on every read (schema, `identity.
@@ -2009,6 +2055,10 @@ def _read_active_release_bundle_hash(
                 ):
                     return None
                 return active_hash
+            if artifact_kind == "v1" and not _v1_row_matches_registry_bytes(
+                playbook_id, active_version, active_hash
+            ):
+                return None
 
     try:
         playbook_validation.load_and_validate_playbook(playbook_id)
