@@ -85,6 +85,20 @@ export interface Cost {
   cents?: number;
   holdCents?: number;
   basis?: "typical" | "document-model";
+  /**
+   * The low and high end of an `estimated` figure's range, in cents. Present
+   * only when the app handed over a range that brackets the estimate; absent
+   * for the document-blind typical figure and for every other kind.
+   */
+  lowCents?: number;
+  highCents?: number;
+  /**
+   * On a `settled` cost: the estimate the review was quoted at (when one was
+   * recorded) so the receipt can show estimated against final, and whether the
+   * review FAILED — a failed attempt still spends, and its final cost says so.
+   */
+  estimatedCents?: number;
+  failed?: boolean;
   coverCents?: number;
   settlementComplete?: boolean;
   adminDaily?: {

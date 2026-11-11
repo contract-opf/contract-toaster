@@ -78,6 +78,7 @@ import os
 import sys
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -965,13 +966,308 @@ def estimate_review_usd_cents(dynamodb_resource: Any = None) -> int | None:
 # The ONLY fields a non-admin reviewer's estimate carries. An explicit tuple,
 # asserted against in tests, so a figure added to the admin ledger tomorrow
 # cannot reach this route by being appended to a shared dict.
+#
+#   estimated_usd_cents / estimated_low_usd_cents / estimated_high_usd_cents
+#       the expected cost and its range (see `estimate_review_cost`)
+#   estimate_basis
+#       how the figure was derived: "policy_default" (the constant, inputs
+#       missing), "document" (this document and this playbook's prompt, with a
+#       fixed band) or "measured" (the same, calibrated against this
+#       playbook's finished reviews) -- a closed vocabulary, never a model id
+#   sample_size
+#       how many finished reviews the measured range came from (0 otherwise)
+#   worst_case_reservation_usd_cents
+#       what the submission reserves against the daily cap
 REVIEW_COST_ESTIMATE_FIELDS = (
     "estimated_usd_cents",
+    "estimated_low_usd_cents",
+    "estimated_high_usd_cents",
+    "estimate_basis",
+    "sample_size",
     "worst_case_reservation_usd_cents",
 )
 
+# ---------------------------------------------------------------------------
+# The input-aware estimate.
+#
+# `estimate_review_usd_cents` above is ONE constant for every document and
+# every playbook (the policy artifact's `approx_tokens_per_review_*` basis).
+# The figure below is deterministic for a fixed (playbook version, document
+# size, model selection, measured history) and moves with each of them:
+#
+#   input  = the playbook's fixed prompt prefix (system blocks + the
+#            forced-tool schema, `PromptBasis.prefix_tokens`, sized at the
+#            calibrated 2.5 chars/token) + the document (words -> chars ->
+#            tokens at the prose ratio), priced per pass with the prompt-cache
+#            multipliers: the primary WRITES the prefix + document to the
+#            cache, the critic READS it when both passes run on one model (a
+#            split selection loses the reuse, so the critic writes its own
+#            copy), and the critic additionally reads the primary's findings
+#            (about as many tokens as the primary's output).
+#   floor  = one critic-model call per Floor invariant, each re-sending the
+#            whole document (`PromptBasis.floor_calls`).
+#   output = the median ledgered output of this playbook's finished reviews
+#            when at least REVIEW_COST_MIN_SAMPLE exist, else the policy's
+#            `approx_tokens_per_review_output` per role.
+#
+# The range is the p25-p75 of (actual / predicted) over those same finished
+# reviews when at least REVIEW_COST_MIN_SAMPLE usable ones exist; otherwise a
+# fixed, documented band around the formula.
+# ---------------------------------------------------------------------------
 
-def review_cost_estimate(dynamodb_resource: Any = None) -> dict[str, Any]:
+#: Below this many usable finished reviews (per playbook, current models) a
+#: measured figure is not offered -- the same five the duration estimate uses.
+REVIEW_COST_MIN_SAMPLE = 5
+
+#: A word is ~5 letters plus a separator in legal prose. Preflight reports
+#: words, never characters, so this is the one bridge to the token estimate.
+CHARS_PER_WORD_ESTIMATE = 6.0
+
+#: Document text is prose: the 4 chars/token English ratio
+#: (`primary_review_pass.CHARS_PER_TOKEN_ESTIMATE`, pinned equal by a test).
+#: The playbook prefix is JSON-heavy and is sized at the calibrated 2.5
+#: (`primary_review_pass.INPUT_CHARS_PER_TOKEN_ESTIMATE`) by
+#: `pipeline_runner.review_prompt_basis` instead.
+DOCUMENT_CHARS_PER_TOKEN_ESTIMATE = 4.0
+
+#: The per-pass role suffix (tasking + per-review control layer), in tokens.
+ROLE_SUFFIX_TOKENS = 1_500
+
+#: A Floor-judge call's own prompt beside the document it re-sends, in
+#: tokens. Its output (a verdict and a short quote) is small beside the rest
+#: and is not modelled separately.
+FLOOR_JUDGE_OVERHEAD_TOKENS = 1_500
+
+#: Multipliers on the expected figure for the low and high ends when there is
+#: no measured spread. Wider when the figure is the document-blind constant.
+DOCUMENT_ESTIMATE_BAND = (0.75, 1.5)
+POLICY_ESTIMATE_BAND = (0.5, 2.0)
+
+#: A single sampled ratio is clamped into this range so one bad row (a
+#: retried review, a ledger gap) cannot drag the range to zero or to the moon.
+COST_RATIO_CLAMP = (0.2, 5.0)
+
+
+@dataclass(frozen=True)
+class PromptBasis:
+    """What one playbook version fixes about the cost of reviewing under it,
+    independent of the document: the size of the prompt prefix every pass
+    sends (system blocks plus the forced-tool schema) and how many Floor
+    invariants the judge will check. Derived from the stored playbook by
+    `pipeline_runner.review_prompt_basis`."""
+
+    prefix_tokens: int
+    floor_calls: int
+
+
+def document_tokens_for_words(words: int) -> int:
+    """Estimated prompt tokens of a document of `words` words."""
+    return max(
+        1, math.ceil(words * CHARS_PER_WORD_ESTIMATE / DOCUMENT_CHARS_PER_TOKEN_ESTIMATE)
+    )
+
+
+def _percentile(sorted_values: list[float], fraction: float) -> float:
+    """Nearest-rank percentile of an already-sorted, non-empty list (the same
+    definition `_nearest_rank` uses, over floats)."""
+    rank = max(1, math.ceil(fraction * len(sorted_values)))
+    return sorted_values[min(rank, len(sorted_values)) - 1]
+
+
+def _expected_review_usd(
+    *,
+    document_tokens: int,
+    basis: PromptBasis,
+    output_tokens: tuple[int, int],
+    rates: tuple[float, float, float, float],
+    cache: tuple[tuple[float, float], tuple[float, float]],
+    shared_cache: bool,
+) -> float:
+    """The formula in the block comment above, in USD. Pure: no I/O, no clock."""
+    primary_in, primary_out, critic_in, critic_out = rates
+    (primary_write, _primary_read), (critic_write, critic_read) = cache
+    output_primary, output_critic = output_tokens
+    cacheable = basis.prefix_tokens + document_tokens
+
+    primary_usd = (cacheable * primary_write + ROLE_SUFFIX_TOKENS) * primary_in / 1_000_000
+    primary_usd += output_primary * primary_out / 1_000_000
+
+    critic_cache_multiplier = critic_read if shared_cache else critic_write
+    critic_usd = (
+        (cacheable * critic_cache_multiplier + ROLE_SUFFIX_TOKENS + output_primary)
+        * critic_in
+        / 1_000_000
+    )
+    critic_usd += output_critic * critic_out / 1_000_000
+
+    floor_usd = (
+        basis.floor_calls * (document_tokens + FLOOR_JUDGE_OVERHEAD_TOKENS) * critic_in
+    ) / 1_000_000
+    return primary_usd + critic_usd + floor_usd
+
+
+def _cents(usd: float) -> int:
+    """USD as whole cents, never 0 for a positive amount (a review is not
+    free) and 0 for none."""
+    return max(1, int(round(usd * 100))) if usd > 0 else 0  # noqa: RUF046
+
+
+def _banded(cents: int, band: tuple[float, float]) -> tuple[int, int]:
+    """`(low, high)` around `cents`, always bracketing it."""
+    return (
+        min(cents, _cents(cents / 100 * band[0])),
+        max(cents, _cents(cents / 100 * band[1])),
+    )
+
+
+def _row_cost_sample(row: dict[str, Any], effective: dict[str, str]) -> dict[str, int] | None:
+    """One finished review as a measurement, or None when it cannot be one.
+
+    Rows from before the cost fields existed carry none of them and are not
+    samples. A row that ran on a DIFFERENT model pair than the one in force
+    now is not a measurement of what the next review costs either -- the
+    rates it was billed at are not the rates the prediction uses -- and is
+    dropped."""
+    if row.get("primary_model_id") != effective.get("primary") or row.get(
+        "critic_model_id"
+    ) != effective.get("critic"):
+        return None
+    actual = _row_int(row.get("actual_usd_cents"))
+    if actual is None or actual <= 0 or row.get("actual_cost_failed"):
+        return None
+    sample = {"actual_usd_cents": actual}
+    words = _row_int(row.get("word_count"))
+    if words is not None and words > 0:
+        sample["word_count"] = words
+    out_tokens = _row_int(row.get("actual_output_tokens"))
+    if out_tokens is not None and out_tokens > 0:
+        sample["actual_output_tokens"] = out_tokens
+    return sample
+
+
+def _estimate_payload(
+    cents: int | None,
+    low: int | None,
+    high: int | None,
+    basis: str | None,
+    sample_size: int,
+    worst_case: int,
+) -> dict[str, Any]:
+    return {
+        "estimated_usd_cents": cents,
+        "estimated_low_usd_cents": low,
+        "estimated_high_usd_cents": high,
+        "estimate_basis": basis,
+        "sample_size": sample_size,
+        "worst_case_reservation_usd_cents": worst_case,
+    }
+
+
+def estimate_review_cost(
+    playbook_id: str,
+    words: int | None,
+    basis: PromptBasis | None,
+    dynamodb_resource: Any = None,
+) -> dict[str, Any]:
+    """The input-aware expected cost of reviewing a `words`-word document under
+    `playbook_id`, with a low/high range -- `REVIEW_COST_ESTIMATE_FIELDS`.
+
+    Fallbacks, each reported in `estimate_basis` so a caller can word it:
+
+      * No token basis (the Bedrock path): every figure is None, as before.
+      * `words`, `playbook_id` or `basis` missing: the policy constant
+        (`estimate_review_usd_cents`) with `POLICY_ESTIMATE_BAND`
+        -> "policy_default".
+      * Otherwise the formula above with the policy's output tokens (or the
+        measured median when >= REVIEW_COST_MIN_SAMPLE) and
+        `DOCUMENT_ESTIMATE_BAND` -> "document".
+      * With >= REVIEW_COST_MIN_SAMPLE usable finished reviews (this
+        playbook, this model pair, each with a cost and a word count) the
+        figure is the formula scaled by the median of actual/predicted and the
+        range is its p25-p75 -> "measured".
+
+    Never raises over a missing or unreadable sample: an estimate that fails
+    to compute is a missing line on a form, not an outage.
+    """
+    worst_case = compute_worst_case_reservation_usd_cents(dynamodb_resource)
+    constant = estimate_review_usd_cents(dynamodb_resource)
+    if constant is None:
+        return _estimate_payload(None, None, None, None, 0, worst_case)
+    if not playbook_id or not isinstance(words, int) or words <= 0 or basis is None:
+        low, high = _banded(constant, POLICY_ESTIMATE_BAND)
+        return _estimate_payload(constant, low, high, "policy_default", 0, worst_case)
+
+    policy = model_client.load_openrouter_policy()
+    effective = model_settings.resolve_openrouter_model_ids(dynamodb_resource)
+    rates = _active_provider_rates(dynamodb_resource)
+    cache = _active_cache_multipliers(dynamodb_resource)
+    shared_cache = effective["primary"] == effective["critic"]
+
+    samples: list[dict[str, int]] = []
+    try:
+        table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
+        for row in _sample_finished_reviews(table, playbook_id):
+            sample = _row_cost_sample(row, effective)
+            if sample is not None:
+                samples.append(sample)
+    except Exception:  # noqa: BLE001 - history refines the figure, it is never a dependency
+        logger.warning("review cost estimate: sample unavailable; using the formula alone")
+        samples = []
+
+    policy_out_primary = int(policy["models"]["primary"]["approx_tokens_per_review_output"])
+    policy_out_critic = int(policy["models"]["critic"]["approx_tokens_per_review_output"])
+    measured_outputs = sorted(
+        s["actual_output_tokens"] for s in samples if "actual_output_tokens" in s
+    )
+    if len(measured_outputs) >= REVIEW_COST_MIN_SAMPLE:
+        total = _nearest_rank(measured_outputs, 0.5)
+        share = policy_out_primary / (policy_out_primary + policy_out_critic)
+        output_primary = round(total * share)
+        output_tokens = (output_primary, total - output_primary)
+    else:
+        output_tokens = (policy_out_primary, policy_out_critic)
+
+    def predict(word_count: int) -> float:
+        return _expected_review_usd(
+            document_tokens=document_tokens_for_words(word_count),
+            basis=basis,
+            output_tokens=output_tokens,
+            rates=rates,
+            cache=cache,
+            shared_cache=shared_cache,
+        )
+
+    formula_usd = predict(words)
+    ratios: list[float] = []
+    for sample in samples:
+        if "word_count" not in sample:
+            continue
+        predicted_cents = predict(sample["word_count"]) * 100
+        if predicted_cents > 0:
+            ratio = sample["actual_usd_cents"] / predicted_cents
+            ratios.append(min(max(ratio, COST_RATIO_CLAMP[0]), COST_RATIO_CLAMP[1]))
+    if len(ratios) >= REVIEW_COST_MIN_SAMPLE:
+        ratios.sort()
+        return _estimate_payload(
+            _cents(formula_usd * _percentile(ratios, 0.5)),
+            _cents(formula_usd * _percentile(ratios, 0.25)),
+            _cents(formula_usd * _percentile(ratios, 0.75)),
+            "measured",
+            len(ratios),
+            worst_case,
+        )
+    cents = _cents(formula_usd)
+    low, high = _banded(cents, DOCUMENT_ESTIMATE_BAND)
+    return _estimate_payload(cents, low, high, "document", 0, worst_case)
+
+
+def review_cost_estimate(
+    dynamodb_resource: Any = None,
+    *,
+    playbook_id: str = "",
+    words: int | None = None,
+    basis: PromptBasis | None = None,
+) -> dict[str, Any]:
     """GET /api/review-cost-estimate — what the NEXT review costs, for the
     person about to submit one (issue #653 Scope item 2).
 
@@ -982,12 +1278,19 @@ def review_cost_estimate(dynamodb_resource: Any = None) -> dict[str, Any]:
     `GET /api/admin/spend`, so without this route the estimate would exist only
     for people who already have the whole ledger.
 
-    BOTH figures, because they answer different questions and neither
-    substitutes for the other:
+    The expected figure is `estimate_review_cost`: it follows the playbook and
+    the document (`playbook_id`, `words`, and that playbook's `basis`) and
+    falls back to the policy constant when any is missing, which is exactly
+    what a caller passing none of them gets -- the pre-existing behaviour. It
+    comes with a low/high range and the `estimate_basis` that says how it was
+    derived.
 
-      `estimated_usd_cents`               what a document of ordinary size is
-                                          expected to cost (None where the
-                                          provider carries no basis)
+    BOTH the expected figure and the reservation, because they answer
+    different questions and neither substitutes for the other:
+
+      `estimated_usd_cents`               what this document is expected to
+                                          cost (None where the provider
+                                          carries no basis)
       `worst_case_reservation_usd_cents`  what the submission RESERVES against
                                           the daily cap, and therefore what it
                                           can be refused for
@@ -1007,12 +1310,8 @@ def review_cost_estimate(dynamodb_resource: Any = None) -> dict[str, Any]:
     the ids are instance configuration. So the projection is an ALLOWLIST
     (`REVIEW_COST_ESTIMATE_FIELDS`), not a dict with the budget removed.
     """
-    return {
-        "estimated_usd_cents": estimate_review_usd_cents(dynamodb_resource),
-        "worst_case_reservation_usd_cents": compute_worst_case_reservation_usd_cents(
-            dynamodb_resource
-        ),
-    }
+    payload = estimate_review_cost(playbook_id, words, basis, dynamodb_resource)
+    return {field: payload[field] for field in REVIEW_COST_ESTIMATE_FIELDS}
 
 
 # ---------------------------------------------------------------------------
@@ -1524,6 +1823,100 @@ def settle_spend(
             ":zero": 0,
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# What a review ACTUALLY cost, on its own row.
+#
+# `settle_spend` reconciles each reservation against real ledgered usage, but
+# only the day's totals were ever visible (admin `/api/admin/spend`). The same
+# settled figure is now written onto the review's row, so the owner can read
+# what THIS review cost and the estimate can be calibrated against history.
+#
+# A row without these fields is UNKNOWN, not free: every review settled before
+# this existed, every Step Functions review (the Lambda mirrors settle a mock
+# pipeline at $0 and are deliberately untouched), and every mock-pipeline row.
+# Readers show nothing for them.
+# ---------------------------------------------------------------------------
+
+#: The per-review cost fields the owner's detail and History rows carry,
+#: appended to the explicit projections (`get_review_detail`,
+#: `_REVIEW_LIST_ITEM_FIELDS`) and asserted as an exact tuple in tests.
+#:   estimated_usd_cents  what the estimate said at submit time (may be absent)
+#:   actual_usd_cents     the settled cost; 0 for a review that made no model call
+#:   actual_cost_failed   True when the review ended in a failure and the cost
+#:                        is what the failed attempt still spent
+#: The token counts also written by `actual_cost_fields` are NOT in this tuple:
+#: they exist for the estimator's measured sample and no reader is shown them.
+REVIEW_COST_ROW_FIELDS = (
+    "estimated_usd_cents",
+    "actual_usd_cents",
+    "actual_cost_failed",
+)
+
+
+def actual_cost_fields(
+    actual_usd_cents: int,
+    *,
+    failed: bool = False,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+) -> dict[str, Any]:
+    """The attributes that record one review's settled cost -- the one place
+    their names and types are decided, shared by the terminal writers and
+    `record_actual_cost`. Token counts are included only when measured."""
+    fields: dict[str, Any] = {
+        "actual_usd_cents": max(0, int(actual_usd_cents)),
+        "actual_cost_failed": bool(failed),
+    }
+    if input_tokens is not None:
+        fields["actual_input_tokens"] = max(0, int(input_tokens))
+    if output_tokens is not None:
+        fields["actual_output_tokens"] = max(0, int(output_tokens))
+    return fields
+
+
+def record_actual_cost(
+    review_id: str,
+    dynamodb_resource: Any,
+    actual_usd_cents: int,
+    *,
+    failed: bool = False,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+) -> None:
+    """Stamp a review's settled cost onto its row, first write wins.
+
+    `if_not_exists` per attribute: the terminal write already carries the
+    figure on the paths that have it, and a later settle (or the cancel
+    route's ledger-priced settle racing the runner's own) must not replace a
+    measured figure with a second opinion. `attribute_exists(review_id)` keeps
+    `update_item` from creating a phantom row for an id that is gone.
+
+    Best effort by contract, like the settlement it accompanies: an accounting
+    stamp must never fail a review, so every error is logged and swallowed.
+    """
+    fields = actual_cost_fields(
+        actual_usd_cents, failed=failed, input_tokens=input_tokens, output_tokens=output_tokens
+    )
+    names = {f"#f{index}": field for index, field in enumerate(fields)}
+    values = {f":v{index}": value for index, value in enumerate(fields.values())}
+    expression = "SET " + ", ".join(
+        f"#f{index} = if_not_exists(#f{index}, :v{index})" for index in range(len(fields))
+    )
+    try:
+        table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
+        table.update_item(
+            Key={"review_id": review_id},
+            UpdateExpression=expression,
+            ConditionExpression="attribute_exists(review_id)",
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
+        )
+    except Exception as exc:
+        if _is_conditional_check_failed(exc):
+            return
+        logger.warning("Could not record the actual cost for review %s", review_id, exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -2273,8 +2666,15 @@ def submit_review(
     notes_mode: str = DEFAULT_NOTES_MODE,
     markup_intensity: str = DEFAULT_MARKUP_INTENSITY,
     word_count: int | None = None,
+    estimated_usd_cents: int | None = None,
 ) -> dict[str, Any]:
     """POST /api/reviews (stub is fine per issue #59 AC).
+
+    estimated_usd_cents (optional): the expected cost the server computed for
+    this document and playbook at submit time (`estimate_review_cost`),
+    recorded on the row so History can show estimated against actual. Ignored
+    on the resumed/duplicate path like `word_count`. Computed server-side by
+    the route, never accepted from the client.
 
     Creates a PENDING review through the submission record, reserves spend
     once, stores the upload pointer, ensures the execution is started, and
@@ -2433,6 +2833,7 @@ def submit_review(
         notes_mode=notes_mode,
         markup_intensity=markup_intensity,
         word_count=word_count,
+        estimated_usd_cents=estimated_usd_cents,
     )
 
     ensure_execution_started(submission, execution_input_json, dynamodb_resource, sfn_client)
@@ -3002,6 +3403,7 @@ def _create_review_row(
     notes_mode: str = DEFAULT_NOTES_MODE,
     markup_intensity: str = DEFAULT_MARKUP_INTENSITY,
     word_count: int | None = None,
+    estimated_usd_cents: int | None = None,
 ) -> None:
     table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
     now = str(int(time.time()))
@@ -3051,6 +3453,15 @@ def _create_review_row(
     # delayed or altered because the count failed.
     if isinstance(word_count, int) and not isinstance(word_count, bool) and word_count > 0:
         item["word_count"] = word_count
+    # What the server estimated for this review when it was submitted, so
+    # History can show it beside the settled actual. A cents integer, absent
+    # (never a null placeholder) when no estimate could be computed.
+    if (
+        isinstance(estimated_usd_cents, int)
+        and not isinstance(estimated_usd_cents, bool)
+        and estimated_usd_cents > 0
+    ):
+        item["estimated_usd_cents"] = estimated_usd_cents
     if notes_mode and notes_mode != DEFAULT_NOTES_MODE:
         item["notes_mode"] = notes_mode
     # Issue #54: the markup-intensity dial this review ran under, on the same
@@ -3122,8 +3533,14 @@ def record_stage_failure(
     dynamodb_resource: Any,
     now_epoch: float | None = None,
     model_ids: dict[str, str] | None = None,
+    actual_cost: dict[str, Any] | None = None,
 ) -> str:
     """Target-agnostic stage-failure recorder (issue #258).
+
+    `actual_cost` is `actual_cost_fields`' dict: what the failed review still
+    spent, written in the SAME update as the ERROR status so a reader that sees
+    the failure sees its cost. Omitted (the AWS error-handler Lambda, which has
+    no model client) it writes nothing, leaving the row as it always was.
 
     Both the AWS Step Functions error-handler Lambda (a Catch target invoked
     for every stage) and the Docker Compose in-process runner's per-stage `except`
@@ -3204,6 +3621,10 @@ def record_stage_failure(
         placeholder = f":m{index}"
         set_clauses.append(f"{field} = {placeholder}")
         values[placeholder] = model_id
+    for index, (field, cost_value) in enumerate(sorted((actual_cost or {}).items())):
+        placeholder = f":ac{index}"
+        set_clauses.append(f"{field} = {placeholder}")
+        values[placeholder] = cost_value
     try:
         table.update_item(
             Key={"review_id": review_id},
@@ -3530,6 +3951,12 @@ def get_review_detail(
         # Issue #54: same convention -- None on a review predating the field
         # or submitted at the default, never a back-filled "medium".
         "markup_intensity": item.get("markup_intensity"),
+        # What this review cost: the estimate shown when it was submitted and
+        # the settled actual (`REVIEW_COST_ROW_FIELDS`). The detail route is
+        # owner-or-admin scoped above -- a non-owner gets the 404 before this
+        # projection exists -- and None means "not recorded" (a row from
+        # before the fields), never $0.00.
+        **{field: item.get(field) for field in REVIEW_COST_ROW_FIELDS},
         "owner_sub": owner_sub,
         "created_at": item.get("created_at"),
         "updated_at": item.get("updated_at"),
@@ -3930,9 +4357,16 @@ def _actual_cents_from_ledger(review_id: str, dynamodb_resource: Any) -> int:
         return 0
 
 
-def settle_reservation_for_cancel(review_id: str, dynamodb_resource: Any) -> None:
+def settle_reservation_for_cancel(
+    review_id: str, dynamodb_resource: Any, *, failed: bool = False
+) -> None:
     """Credit back the unspent worst-case spend reservation for a cancelled
     review.
+
+    The ledger-priced figure is also stamped on the review row
+    (`record_actual_cost`, first write wins): a cancelled review's tokens were
+    real and its owner should see what they cost. `failed` is True for the
+    runner-restart recovery, which relabels the stranded review `ERROR`.
 
     On the AWS target the persist stage is what ordinarily settles the
     reservation, and an aborted execution never reaches it -- so without this
@@ -3962,6 +4396,7 @@ def settle_reservation_for_cancel(review_id: str, dynamodb_resource: Any) -> Non
     if submission.get("reservation_released"):
         return
     actual_usd_cents = _actual_cents_from_ledger(review_id, dynamodb_resource)
+    record_actual_cost(review_id, dynamodb_resource, actual_usd_cents, failed=failed)
     settle_spend(
         review_id,
         submission["spend_reservation_id"],
@@ -4037,6 +4472,12 @@ _REVIEW_LIST_ITEM_FIELDS = (
     # detail fetch. None for `medium` and for every row predating the field;
     # the UI renders no chip for None, never a guessed "Medium".
     "markup_intensity",
+    # What the review cost (`REVIEW_COST_ROW_FIELDS`): the estimate shown at
+    # submit and the settled actual. None on every row predating them -- the
+    # UI shows nothing for None, never a guessed $0.00. The listing is owner
+    # scoped (an admin sees all by design), so these reach the owner and an
+    # admin only; no cap, budget or model id is among them.
+    *REVIEW_COST_ROW_FIELDS,
 )
 
 

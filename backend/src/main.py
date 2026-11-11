@@ -99,10 +99,18 @@ Endpoints:
                       has no GET of its own — the cap is read off
                       /api/admin/spend beside the spend it bounds.
   GET  /api/review-cost-estimate — authenticated: what the NEXT review costs
-                      (#653) — the expected figure and the worst case it
-                      reserves, and nothing else. No instance-wide totals, no
+                      (#653) — the expected figure with a low/high range, how
+                      it was derived (`estimate_basis`), and the worst case it
+                      reserves, and nothing else. Optional `playbook_id` and
+                      `words` (the preflight word count) make it follow the
+                      playbook's prompt and the document's size; without them
+                      it is the policy constant. No instance-wide totals, no
                       cap, no model ids: it is the price of the caller's own
                       next action, which is why it is not admin-gated.
+                      The settled cost of a review is not here: it rides the
+                      owner's `GET /api/reviews/{id}` and History rows as
+                      `actual_usd_cents`/`actual_cost_failed` (plus the
+                      submit-time `estimated_usd_cents`), owner-or-admin only.
   GET  /api/review-duration-estimate — authenticated: how long a review of
                       this playbook has actually been taking (#71) — p50/p90
                       seconds and the sample's median word count, measured
@@ -1107,8 +1115,11 @@ async def post_admin_spend_cap(
 
 @app.get("/api/review-cost-estimate", include_in_schema=True)
 async def get_review_cost_estimate(
-    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    playbook_id: str | None = Query(None, min_length=1, max_length=256),
+    words: int | None = Query(None, ge=0, le=10_000_000),
+    _caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
     dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
+    s3_client: Any = Depends(get_s3_client),  # noqa: B008
 ) -> JSONResponse:
     """Authenticated: what the next review will cost (issue #653, epic #649).
 
@@ -1118,11 +1129,27 @@ async def get_review_cost_estimate(
     model ids — those stay on the admin-only /api/admin/spend, per
     `admin_dashboard`'s "instance-wide operational view" boundary.
 
-    Returns the expected cost and the worst case the submission reserves; see
-    `reviews.review_cost_estimate` for why both, and for the allowlist that
-    keeps a figure added to the admin ledger from arriving here by accident.
+    `playbook_id` and `words` (the caller's OWN preflight word count, the
+    same inputs `/api/review-duration-estimate` takes) make the figure follow
+    the playbook's prompt and the document's size. Either missing -- or a
+    playbook whose prompt cannot be derived -- gives the policy constant, so a
+    caller that sends neither gets exactly what this route returned before.
+
+    Returns the expected cost with its low/high range and basis, and the
+    worst case the submission reserves; see `reviews.review_cost_estimate`
+    for why both, and for the allowlist that keeps a figure added to the admin
+    ledger from arriving here by accident.
     """
-    return JSONResponse(content=review_cost_estimate(dynamodb_resource))
+    basis = (
+        pipeline_runner.review_prompt_basis(playbook_id, dynamodb_resource, s3_client)
+        if playbook_id and words
+        else None
+    )
+    return JSONResponse(
+        content=review_cost_estimate(
+            dynamodb_resource, playbook_id=playbook_id or "", words=words, basis=basis
+        )
+    )
 
 
 @app.get("/api/review-duration-estimate", include_in_schema=True)

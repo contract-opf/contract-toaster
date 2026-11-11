@@ -1,4 +1,4 @@
-import type { ReviewModel, Stage, MotionEvent } from "./types";
+import type { Cost, ReviewModel, Stage, MotionEvent } from "./types";
 export const stages: Record<
   Stage,
   { step: number; label: string; caption: string; filter: string }
@@ -74,6 +74,28 @@ export function costText(m: ReviewModel) {
   if (c.kind === "settled")
     return c.settlementComplete && c.cents != null ? money(c.cents) : "Pending";
   return c.cents == null ? "—" : money(c.cents);
+}
+/** "Range $0.60–$1.10" for an `estimated` cost that carries one, else null.
+ *  Worded as an expectation, never a ceiling. */
+export function costRangeText(c: Cost): string | null {
+  if (c.kind !== "estimated" || c.lowCents == null || c.highCents == null)
+    return null;
+  return `Range ${money(c.lowCents)}–${money(c.highCents)}`;
+}
+/** The sentence under a FINISHED review's register: what it settled at, beside
+ *  the estimate it was quoted at when one was recorded, and — for a review
+ *  that failed — that the attempt still cost what it cost. Null unless the
+ *  server settled it (a complete `settled` cost), so an unknown cost says
+ *  nothing rather than something invented. */
+export function costNote(c: Cost): string | null {
+  if (c.kind !== "settled" || !c.settlementComplete || c.cents == null)
+    return null;
+  const estimate =
+    c.estimatedCents != null ? ` It was estimated at ${money(c.estimatedCents)}.` : "";
+  const failed = c.failed
+    ? " This review failed; that is what the attempt still cost."
+    : "";
+  return `Final cost ${money(c.cents)}.${estimate}${failed}`;
 }
 export const money = (cents: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
