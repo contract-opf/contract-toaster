@@ -62,8 +62,7 @@ shape unchanged):
     "decision": "REQUEST_CHANGE" | null,
     "reason": null | "playbook_coming_soon" | "unknown_playbook",
     "output_s3_key": null | "outputs/<review_id>/out.docx",
-    "summary": "...",
-    "watermark": "..."
+    "summary": "..."
   }
 
 Environment variables:
