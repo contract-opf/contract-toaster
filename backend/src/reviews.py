@@ -127,6 +127,15 @@ def _is_conditional_check_failed(exc: Exception) -> bool:
         return False
     return resp.get("Error", {}).get("Code") == "ConditionalCheckFailedException"
 
+
+def _is_table_not_found(exc: Exception) -> bool:
+    """True for a DynamoDB ResourceNotFoundException (the table does not
+    exist), with the same duck-typed `response` convention as above."""
+    resp = getattr(exc, "response", None)
+    if not isinstance(resp, dict):
+        return False
+    return resp.get("Error", {}).get("Code") == "ResourceNotFoundException"
+
 # ---------------------------------------------------------------------------
 # Idempotency-key derivation constants.
 # ---------------------------------------------------------------------------
@@ -1901,7 +1910,9 @@ def _v1_row_matches_registry_bytes(
     try:
         entry = playbook_registry.resolve_playbook(playbook_id)
         raw = Path(entry.playbook_path).read_bytes()
-    except (playbook_registry.PlaybookNotRegisteredError, OSError):
+    except (playbook_registry.PlaybookNotRegisteredError, OSError, TypeError):
+        # TypeError: a registry entry with no `playbook_path`. This helper
+        # never raises; every failure to read the bytes is "cannot vouch".
         return False
     return active_hash == "sha256:" + hashlib.sha256(raw).hexdigest()
 
@@ -2044,7 +2055,22 @@ def _read_active_release_bundle_hash(
             active_version = playbook_versions.get_active_version_record(
                 playbook_id, dynamodb_resource
             )
-        except ClientError:
+        except ClientError as exc:
+            # Only "the table is not provisioned" means "this layer is not in
+            # use here". Any other failure (a throttle, a missing
+            # `dynamodb:Query` grant) means the row that says whether the
+            # active artifact is an unverified v1 upload could not be read, so
+            # the bytes cannot be vouched for: refuse, the same "no active
+            # bundle" signal every other refusal uses, rather than resolve the
+            # hash a divergent v1 row would have been refused for (QA item 13).
+            if not _is_table_not_found(exc):
+                logger.warning(
+                    "active playbook version row unreadable for %s (%s); "
+                    "refusing to resolve a bundle hash it cannot verify",
+                    playbook_id,
+                    getattr(exc, "response", {}).get("Error", {}).get("Code", "unknown"),
+                )
+                return None
             active_version = None
         if active_version is not None:
             artifact_kind = active_version.get("artifact_kind") or ""

@@ -72,7 +72,7 @@ The first deploy of an environment requires steps that won't be needed again.
 
 9. **Verify Cognito.** Visit the Amplify URL, sign in with a `@company.com` Google account, confirm successful sign-in and that a row exists in DynamoDB `users`.
 
-10. **Install the first playbook.** The image ships with one brand-free sample playbook, `synthetic-nda-sample` ("Synthetic NDA Sample"). **On this AWS path it is NOT installed for you** — the seed that installs it (`backend/src/sample_playbooks.py::seed_shipped_playbook`) runs only from the Docker Compose deploy bootstrap (`deploy/dts/bootstrap.py`, the container `deploy/dts/docker-compose.yml` starts), which App Runner does not run. Here, install a playbook the ordinary way: upload a version and activate it through the admin playbook routes. There is no bespoke one-click sample activation any more (issue #433 retired it), so nothing about the shipped sample is a special case — it installs and activates through the same `record_playbook_version_upload` / `activate_playbook_version` functions as anything else. Verify either way with `GET /api/playbooks` (the playbook you installed should read `active`); until something is active, submissions are correctly refused with `503 no active playbook`. To run your own tenant playbook, upload your playbook JSON (authored per `playbooks/schema.json`) as a **draft** version through the normal admin UI and activate the release bundle: playbook hash, prompt hash, canonical standard-form hash, anchor-map hash, model-policy hash, corpus snapshot, evaluation run ID, and Legal approval. (Once we have a corpus, seed it as a draft corpus snapshot and activate only after curation and retrieval regression checks pass.)
+10. **Install the first playbook.** The image ships with one brand-free sample playbook, `synthetic-nda-sample` ("Synthetic NDA Sample"). **On this AWS path it is NOT installed for you** — the seed that installs it (`backend/src/sample_playbooks.py::seed_shipped_playbook`) runs only from the Docker Compose deploy bootstrap (`deploy/dts/bootstrap.py`, the container `deploy/dts/docker-compose.yml` starts), which App Runner does not run. Here, install a playbook the ordinary way: upload a version and activate it through the admin playbook routes. There is no bespoke one-click sample activation any more (issue #433 retired it), so nothing about the shipped sample is a special case — it installs and activates through the same `record_playbook_version_upload` / `activate_playbook_version` functions as anything else. Verify either way with `GET /api/playbooks` (the playbook you installed should read `active`); until something is active, submissions are correctly refused with `503 no active playbook`. To run your own tenant playbook, upload your playbook JSON (an OPF 0.6 document, authored against `playbooks/opf/playbook.schema-0.6.json`; a legacy v1 file runs only if it is byte-identical to the shipped sample) as a **draft** version through the normal admin UI and activate the release bundle: playbook hash, prompt hash, canonical standard-form hash, anchor-map hash, model-policy hash, corpus snapshot, evaluation run ID, and Legal approval. (Once we have a corpus, seed it as a draft corpus snapshot and activate only after curation and retrieval regression checks pass.)
 
 11. **Verify alarm delivery (bootstrap acceptance — required before declaring prod operable).** An unconfirmed SNS email subscription receives no alarm mail — silent monitoring failure is the exact defect this step closes. Two sub-steps, both required:
 
@@ -328,14 +328,16 @@ calls the `/api/admin/playbooks/...` routes listed in
 [ARCHITECTURE.md → Routes](ARCHITECTURE.md#routes).
 
 1. In the playbook's version table, **Download** the active version.
-2. Edit it locally against `playbooks/schema.json`, and bump its version:
+2. Edit it locally against the OPF 0.6 schema (`playbooks/opf/playbook.schema-0.6.json`), and bump its version:
    patch for clarifications, minor for new topics or footnote templates,
    major for structural changes. **Author in OPF 0.6.** A legacy v1 upload is
-   recorded and hashed but never executed: reviews use the playbook file
-   shipped in the image, so an active v1 version is honoured only while its
-   bytes are identical to that file, and reviews for the playbook are refused
-   (`503 no active playbook`) otherwise, even though the version table can read
-   "active". The upload response and the Playbooks tab say so.
+   recorded and hashed, but the uploaded copy is never what runs: reviews use
+   the playbook file shipped in the image, so an active v1 version is honoured
+   only while its bytes are identical to that file, and reviews for the
+   playbook are refused (`503 no active playbook`) otherwise, even though the
+   version table can read "active". The upload response and the Playbooks tab
+   say so. If you hit that 503, roll back to the previous version or activate
+   an OPF version of the playbook.
 3. **Upload a new version.** The server parses and validates it, computes the
    content hash itself, and stores it as `draft`.
 4. Run the release gates that live outside the product: schema validation,

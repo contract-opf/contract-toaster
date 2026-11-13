@@ -33,6 +33,8 @@ submission, QUARANTINED at execution start).
      503 "no active playbook".
   7. The upload route's v1 `warning` says what a v1 upload does (the route-level
      assertions are in the two upload test files).
+  8. A failed read of the versions row (anything but "table not found") refuses
+     rather than skipping the guard.
 
 Exit codes: 0 = all pass, 1 = one or more failed.
 """
@@ -45,6 +47,8 @@ import os
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = REPO_ROOT / "backend"
@@ -62,6 +66,7 @@ os.environ.setdefault("AWS_ACCESS_KEY_ID", "testing")
 os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
 
 import boto3  # noqa: E402, I001
+from botocore.exceptions import ClientError  # noqa: E402
 from fastapi import HTTPException  # noqa: E402
 from moto import mock_aws  # noqa: E402
 
@@ -169,6 +174,23 @@ class TestV1RowBoundToTheRegistryBytes(V1LineageBase):
         self.activate(UNREGISTERED_ID, row_hash=_registry_raw_hash())
         self.assertIsNone(self.resolve(UNREGISTERED_ID))
 
+    def test_the_helper_alone_refuses_an_unregistered_id(self) -> None:
+        # The resolver-level case above is also refused by the existing
+        # playbook validation, so it cannot show the guard's own branch. Call
+        # the helper directly: even with a self-consistent row it says no.
+        h = _registry_raw_hash()
+        self.assertFalse(
+            reviews_module._v1_row_matches_registry_bytes(UNREGISTERED_ID, {"content_hash": h}, h)
+        )
+
+    def test_the_helper_never_raises_on_a_registry_entry_without_a_path(self) -> None:
+        h = _registry_raw_hash()
+        broken = SimpleNamespace(playbook_path=None)
+        with mock.patch.object(playbook_registry, "resolve_playbook", return_value=broken):
+            self.assertFalse(
+                reviews_module._v1_row_matches_registry_bytes(REGISTERED_ID, {"content_hash": h}, h)
+            )
+
     def test_the_canonical_hash_is_not_the_raw_bytes_hash(self) -> None:
         # What seeds record (`canonicalize.content_hash`) is a different value
         # from the upload route's raw-bytes hash, and it must not satisfy a "v1"
@@ -184,6 +206,37 @@ class TestV1RowBoundToTheRegistryBytes(V1LineageBase):
             reviews_module.resolve_active_release_bundle_hash(REGISTERED_ID, self.ddb)
         self.assertEqual(caught.exception.status_code, 503)
         self.assertEqual(caught.exception.detail, reviews_module.NO_ACTIVE_PLAYBOOK_DETAIL)
+
+
+def _client_error(code: str) -> ClientError:
+    return ClientError({"Error": {"Code": code, "Message": "x"}}, "Query")
+
+
+class TestAnUnreadableVersionRowFailsClosed(V1LineageBase):
+    """If the row that says whether the active artifact is an unverified v1
+    upload cannot be read, the bytes cannot be vouched for: refuse. Only a
+    missing table (callers that never provision it) keeps the old fall-through."""
+
+    def _resolve_with_read_error(self, code: str) -> str | None:
+        with mock.patch(
+            "src.playbook_versions.get_active_version_record",
+            side_effect=_client_error(code),
+        ):
+            return self.resolve()
+
+    def test_a_throttled_read_of_a_divergent_v1_row_is_refused(self) -> None:
+        other = "sha256:" + "ab" * 32
+        self.activate(row_hash=other, active_hash=other)
+        self.assertIsNone(self._resolve_with_read_error("ProvisionedThroughputExceededException"))
+
+    def test_an_access_denied_read_is_refused(self) -> None:
+        self.activate(row_hash=_registry_raw_hash())
+        self.assertIsNone(self._resolve_with_read_error("AccessDeniedException"))
+
+    def test_a_missing_versions_table_keeps_the_old_fall_through(self) -> None:
+        raw_hash = _registry_raw_hash()
+        self.activate(row_hash=raw_hash, artifact_kind=None)
+        self.assertEqual(self._resolve_with_read_error("ResourceNotFoundException"), raw_hash)
 
 
 class TestRowsWithoutArtifactKindBehaveAsToday(V1LineageBase):
@@ -232,7 +285,7 @@ class TestUploadWarningText(unittest.TestCase):
 
     def test_the_warning_says_what_a_v1_upload_does(self) -> None:
         text = backend_main.V1_UPLOAD_WARNING
-        self.assertIn("recorded but not executed", text)
+        self.assertIn("never what runs", text)
         self.assertIn("identical", text)
         self.assertIn("OPF 0.6", text)
 

@@ -502,10 +502,10 @@ _START_TIME: float = time.monotonic()
 #: (`reviews._v1_row_matches_registry_bytes`). Pointer text only, no document
 #: content.
 V1_UPLOAD_WARNING: str = (
-    "Legacy v1 playbooks are recorded but not executed: a v1 version runs only if "
-    "its bytes are identical to the playbook file shipped in this deployment's "
-    "registry. Otherwise reviews for this playbook are refused. Author changes in "
-    "OPF 0.6."
+    "A legacy v1 upload is recorded, but the uploaded copy is never what runs: "
+    "reviews execute the playbook file shipped in this deployment's registry. A v1 "
+    "version stays usable only if its bytes are identical to that file; otherwise "
+    "reviews for this playbook are refused. Author changes in OPF 0.6."
 )
 
 

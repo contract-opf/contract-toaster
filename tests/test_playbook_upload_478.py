@@ -713,7 +713,7 @@ class TestLegacyV1StillWorks(PlaybookUploadTestBase):
         self.assertIsNone(body["opf_content_hash"])
         self.assertFalse(body["accepted_stub_basis"])
         # QA 2026-10-31 item 13: only a v1 upload carries the warning.
-        self.assertIn("recorded but not executed", body["warning"])
+        self.assertIn("never what runs", body["warning"])
 
     def test_legacy_v1_upload_not_subject_to_agreement_type_check(self):
         """v1 playbooks carry no agreement_type/identity block; the
