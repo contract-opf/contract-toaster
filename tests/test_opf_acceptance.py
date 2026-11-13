@@ -16,6 +16,8 @@ not vacuous:
      `our_standard` part is our own wording rendered by design, not a leak.
   4. `--stage` reports exactly the named stage: REVIEW passing does not make a
      stage that is still PENDING pass.
+  5. Stage 8 (PRESERVE) runs its gate, tests/redline/test_inbound_comments_
+     preserved.py, instead of failing on a file the cutover deleted.
 
 pytest-collectable (tests/README.md §2): each check is a no-argument `test_*`
 function that raises AssertionError. Run standalone with
@@ -50,6 +52,7 @@ def _run(*args: str) -> subprocess.CompletedProcess:
         text=True,
         cwd=REPO_ROOT,
         check=False,
+        timeout=900,
     )
 
 
@@ -112,7 +115,74 @@ def test_stage_reports_only_the_named_stage() -> None:
     )
 
 
+def test_preserve_stage_runs_its_gate_instead_of_failing_on_a_missing_file() -> None:
+    """Stage 8 used to import a preservation test that the cutover deleted with
+    the in-place patcher it tested, so it reported `FAIL FileNotFoundError` for
+    every bundle. It now runs tests/redline/test_inbound_comments_preserved.py
+    against the block-mode redline and says which run shapes it covered."""
+    assert (REPO_ROOT / "tests" / "redline" / "test_inbound_comments_preserved.py").is_file()
+    proc = _run(str(FIXTURE.relative_to(REPO_ROOT)), "--stage", "PRESERVE")
+    line = next((line for line in proc.stdout.splitlines() if " PRESERVE " in line), "")
+    assert "FileNotFoundError" not in line, f"stage 8 still cannot find its gate: {line.strip()!r}"
+    assert proc.returncode == 0 and "STAGE PRESERVE: PASS" in proc.stdout, (
+        f"--stage PRESERVE exited {proc.returncode}: {line.strip()!r}"
+    )
+    assert "Word run shapes" in line and "zero orphaned" in line, (
+        f"PRESERVE passed without saying what it checked: {line.strip()!r}"
+    )
+
+
+def _gate(tmp_path_dir: Path, body: str) -> Path:
+    path = tmp_path_dir / "gate.py"
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def test_preserve_stage_fails_loudly_when_its_gate_is_broken() -> None:
+    """Stage 8 must be FAIL, never PASS or PENDING, for every way the gate can
+    be unusable: absent, not importable, raising, empty, or reporting failures."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        cases = {
+            "a missing file": tmp_path / "does_not_exist.py",
+            "an import error": _gate(tmp_path, "import module_that_does_not_exist\nSHAPES = {'A': 1}\n"),
+            "no run shapes": _gate(tmp_path, "SHAPES = {}\ndef run_all():\n    return []\n"),
+            "run_all raising": _gate(tmp_path, "SHAPES = {'A': 1}\ndef run_all():\n    raise RuntimeError('boom')\n"),
+            "a reported failure": _gate(tmp_path, "SHAPES = {'A': 1}\ndef run_all():\n    return ['[A] [anchors] lost']\n"),
+        }
+        for label, path in cases.items():
+            status, detail = opf_acceptance.run_preserve_gate(path)
+            assert status == opf_acceptance.FAIL, f"{label} reported {status}: {detail!r}"
+        ok = _gate(tmp_path, "SHAPES = {'A': 1, 'B': 2}\ndef run_all():\n    return []\n")
+        status, detail = opf_acceptance.run_preserve_gate(ok)
+        assert status == opf_acceptance.PASS and "2 Word run shapes" in detail, (status, detail)
+
+
+def test_the_preservation_gate_refuses_to_run_gutted() -> None:
+    """Emptying its shape list must make the gate itself fail, not pass over zero."""
+    gate_path = REPO_ROOT / "tests" / "redline" / "test_inbound_comments_preserved.py"
+    sys.path.insert(0, str(gate_path.parent))
+    try:
+        import importlib
+
+        gate = importlib.import_module("test_inbound_comments_preserved")
+    finally:
+        sys.path.pop(0)
+    saved = dict(gate.SHAPES)
+    try:
+        gate.SHAPES.clear()
+        failures = gate.run_all()
+    finally:
+        gate.SHAPES.update(saved)
+    assert failures and "gutted" in failures[0], failures
+
+
 TESTS = [
+    test_preserve_stage_fails_loudly_when_its_gate_is_broken,
+    test_the_preservation_gate_refuses_to_run_gutted,
+    test_preserve_stage_runs_its_gate_instead_of_failing_on_a_missing_file,
     test_review_stage_passes_on_the_fixture_and_the_engine_example,
     test_the_wholesale_evidence_detector_is_not_vacuous,
     test_a_precedent_text_inside_another_clauses_standard_part_is_not_a_leak,

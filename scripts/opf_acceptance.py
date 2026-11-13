@@ -160,6 +160,35 @@ def _extract_only(path: Path) -> tuple[dict, str]:
     return json.loads(text), "read as bare .opf.json"
 
 
+def run_preserve_gate(gate_path: Path) -> tuple[str, str]:
+    """Stage 8's result: load the preservation gate at `gate_path` and run it.
+
+    Anything that is not a clean, non-empty pass is FAIL: a missing file, an
+    import error, an exception inside the gate, a gate with no run shapes, or any
+    reported failure. (It is never PENDING and never a vacuous PASS.)"""
+    try:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("_preserve_gate", gate_path)
+        if spec is None or spec.loader is None:
+            return FAIL, f"cannot load the preservation gate at {gate_path}"
+        gate = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gate)
+
+        shapes = sorted(gate.SHAPES)
+        if not shapes:
+            return FAIL, "the preservation gate declares no Word run shapes, so it proves nothing"
+        failures = gate.run_all()
+        if failures:
+            return FAIL, f"{len(failures)} failure(s); first: {failures[0].strip()}"
+        return PASS, (
+            f"all inbound comment anchors and bodies survive the block redline "
+            f"across {len(shapes)} Word run shapes ({', '.join(shapes)}); zero orphaned"
+        )
+    except Exception as exc:  # noqa: BLE001
+        return FAIL, f"{type(exc).__name__}: {exc}"
+
+
 def run(
     bundle_path: Path,
     contract_path: Path | None,
@@ -270,47 +299,16 @@ def run(
 
     # --- Stage 8: PRESERVE --------------------------------------------------
     # Runs the real preservation gate (tests/redline/test_inbound_comments_preserved.py)
-    # rather than re-asserting anything here: that gate drives the actual
-    # in-place patcher over every comment run shape Word emits, and checks the
-    # ANCHORS in the output document. Deliberately NOT a comments.xml
-    # byte-identity check -- byte-identity reported True for a comment that was
-    # already orphaned, which is how this stage came to overstate PR #363.
-    try:
-        import importlib.util
-
-        gate_path = REPO_ROOT / "tests" / "redline" / "test_inbound_comments_preserved.py"
-        spec = importlib.util.spec_from_file_location("_preserve_gate", gate_path)
-        gate = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(gate)
-
-        failures = []
-        for check in (
-            gate.check_1_every_inbound_comment_body_survives,
-            gate.check_2_comment_anchors_survive,
-            gate.check_3_redline_still_applied,
-            gate.check_4_no_text_duplicated_by_a_mixed_run,
-            gate.check_5_no_comment_range_collapsed,
-            gate.check_6_no_orphans_reported,
-            gate.check_7_other_parts_untouched,
-        ):
-            failures.extend(check())
-
-        shapes = sorted({shape for shape, _ in gate.SHAPES.values()})
-        if failures:
-            by_name["PRESERVE"].status = FAIL
-            by_name["PRESERVE"].detail = (
-                f"{len(failures)} failure(s); first: {failures[0].strip()}"
-            )
-        else:
-            by_name["PRESERVE"].status = PASS
-            by_name["PRESERVE"].detail = (
-                f"all inbound comment anchors survive the redline in the output "
-                f"document across {len(shapes)} Word run shapes ({', '.join(shapes)}); "
-                f"zero orphaned"
-            )
-    except Exception as exc:  # noqa: BLE001
-        by_name["PRESERVE"].status = FAIL
-        by_name["PRESERVE"].detail = f"{type(exc).__name__}: {exc}"
+    # rather than re-asserting anything here: that gate drives the block-mode
+    # redline (`redline_generate.generate_redline_from_blocks`, the path every
+    # review delivers through) over the comment run shapes Word emits, and
+    # checks the ANCHORS in the output document id by id. Deliberately NOT a
+    # comments.xml byte-identity check -- byte-identity reports True for a
+    # comment that is already orphaned. The gate is independent of the bundle
+    # under test: it runs on its own synthetic documents.
+    by_name["PRESERVE"].status, by_name["PRESERVE"].detail = run_preserve_gate(
+        REPO_ROOT / "tests" / "redline" / "test_inbound_comments_preserved.py"
+    )
 
     # --- Stages 5-10: wired by later PRs ------------------------------------
     pending_owner = {
