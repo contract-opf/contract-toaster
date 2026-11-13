@@ -160,6 +160,35 @@ def _extract_only(path: Path) -> tuple[dict, str]:
     return json.loads(text), "read as bare .opf.json"
 
 
+def run_preserve_gate(gate_path: Path) -> tuple[str, str]:
+    """Stage 8's result: load the preservation gate at `gate_path` and run it.
+
+    Anything that is not a clean, non-empty pass is FAIL: a missing file, an
+    import error, an exception inside the gate, a gate with no run shapes, or any
+    reported failure. (It is never PENDING and never a vacuous PASS.)"""
+    try:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("_preserve_gate", gate_path)
+        if spec is None or spec.loader is None:
+            return FAIL, f"cannot load the preservation gate at {gate_path}"
+        gate = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gate)
+
+        shapes = sorted(gate.SHAPES)
+        if not shapes:
+            return FAIL, "the preservation gate declares no Word run shapes, so it proves nothing"
+        failures = gate.run_all()
+        if failures:
+            return FAIL, f"{len(failures)} failure(s); first: {failures[0].strip()}"
+        return PASS, (
+            f"all inbound comment anchors and bodies survive the block redline "
+            f"across {len(shapes)} Word run shapes ({', '.join(shapes)}); zero orphaned"
+        )
+    except Exception as exc:  # noqa: BLE001
+        return FAIL, f"{type(exc).__name__}: {exc}"
+
+
 def run(
     bundle_path: Path,
     contract_path: Path | None,
@@ -277,30 +306,9 @@ def run(
     # comments.xml byte-identity check -- byte-identity reports True for a
     # comment that is already orphaned. The gate is independent of the bundle
     # under test: it runs on its own synthetic documents.
-    try:
-        import importlib.util
-
-        gate_path = REPO_ROOT / "tests" / "redline" / "test_inbound_comments_preserved.py"
-        spec = importlib.util.spec_from_file_location("_preserve_gate", gate_path)
-        gate = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(gate)
-
-        failures = gate.run_all()
-        shapes = sorted(gate.SHAPES)
-        if failures:
-            by_name["PRESERVE"].status = FAIL
-            by_name["PRESERVE"].detail = (
-                f"{len(failures)} failure(s); first: {failures[0].strip()}"
-            )
-        else:
-            by_name["PRESERVE"].status = PASS
-            by_name["PRESERVE"].detail = (
-                f"all inbound comment anchors and bodies survive the block redline "
-                f"across {len(shapes)} Word run shapes ({', '.join(shapes)}); zero orphaned"
-            )
-    except Exception as exc:  # noqa: BLE001
-        by_name["PRESERVE"].status = FAIL
-        by_name["PRESERVE"].detail = f"{type(exc).__name__}: {exc}"
+    by_name["PRESERVE"].status, by_name["PRESERVE"].detail = run_preserve_gate(
+        REPO_ROOT / "tests" / "redline" / "test_inbound_comments_preserved.py"
+    )
 
     # --- Stages 5-10: wired by later PRs ------------------------------------
     pending_owner = {
