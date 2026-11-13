@@ -495,6 +495,19 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 _START_TIME: float = time.monotonic()
 
+#: QA 2026-10-31 item 13: returned (as `warning`) by the playbook-version upload
+#: route for a legacy v1 document. A v1 upload is validated, hashed and stored,
+#: but the runner executes the registry's file on disk, so the row resolves as
+#: active only while its bytes equal that file's
+#: (`reviews._v1_row_matches_registry_bytes`). Pointer text only, no document
+#: content.
+V1_UPLOAD_WARNING: str = (
+    "A legacy v1 upload is recorded, but the uploaded copy is never what runs: "
+    "reviews execute the playbook file shipped in this deployment's registry. A v1 "
+    "version stays usable only if its bytes are identical to that file; otherwise "
+    "reviews for this playbook are refused. Author changes in OPF 0.6."
+)
+
 
 # ---------------------------------------------------------------------------
 # DynamoDB resource dependency — lazily constructed so import-time (e.g. unit
@@ -2178,22 +2191,26 @@ async def post_admin_playbook_version_upload(
         )
     except PlaybookVersionConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    return JSONResponse(
-        content={
-            "playbook_id": result.get("playbook_id"),
-            "version": result.get("version"),
-            "status": result.get("status"),
-            "content_hash": result.get("content_hash"),
-            "artifact_kind": result.get("artifact_kind"),
-            "opf_content_hash": result.get("opf_content_hash"),
-            "storage_key": result.get("storage_key"),
-            "accepted_stub_basis": result.get("accepted_stub_basis", False),
-            "uploaded_by": result.get("uploaded_by"),
-            "uploaded_at": (
-                int(result["uploaded_at"]) if result.get("uploaded_at") is not None else None
-            ),
-        }
-    )
+
+    response: dict[str, Any] = {
+        "playbook_id": result.get("playbook_id"),
+        "version": result.get("version"),
+        "status": result.get("status"),
+        "content_hash": result.get("content_hash"),
+        "artifact_kind": result.get("artifact_kind"),
+        "opf_content_hash": result.get("opf_content_hash"),
+        "storage_key": result.get("storage_key"),
+        "accepted_stub_basis": result.get("accepted_stub_basis", False),
+        "uploaded_by": result.get("uploaded_by"),
+        "uploaded_at": (
+            int(result["uploaded_at"]) if result.get("uploaded_at") is not None else None
+        ),
+    }
+    if result.get("artifact_kind") == "v1":
+        # QA 2026-10-31 item 13: a v1 document is recorded and hashed but never
+        # executed; reviews use the registry's file on disk.
+        response["warning"] = V1_UPLOAD_WARNING
+    return JSONResponse(content=response)
 
 
 @app.get(

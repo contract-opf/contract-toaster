@@ -251,6 +251,7 @@ class TestOpfHtmlBundleUpload(PlaybookUploadTestBase):
         self.assertEqual(resp.status_code, 200, resp.text)
         body = resp.json()
         self.assertEqual(body["artifact_kind"], "opf-0.6")
+        self.assertNotIn("warning", body, "only a legacy v1 upload carries the item 13 warning")
         self.assertEqual(body["status"], pv.STATUS_DRAFT)
         self.assertIsNotNone(body["storage_key"])
         self.assertTrue(body["storage_key"].startswith(f"playbooks/{PLAYBOOK_ID}/"))
@@ -711,6 +712,8 @@ class TestLegacyV1StillWorks(PlaybookUploadTestBase):
         self.assertEqual(body["artifact_kind"], "v1")
         self.assertIsNone(body["opf_content_hash"])
         self.assertFalse(body["accepted_stub_basis"])
+        # QA 2026-10-31 item 13: only a v1 upload carries the warning.
+        self.assertIn("never what runs", body["warning"])
 
     def test_legacy_v1_upload_not_subject_to_agreement_type_check(self):
         """v1 playbooks carry no agreement_type/identity block; the
