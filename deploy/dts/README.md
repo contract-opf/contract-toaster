@@ -427,10 +427,12 @@ Then set the repository variable `DTS_DEPLOY_MODE=pull`. The workflow's
   only see the edge's sign-in page.
 
 **Upgrade the script** the same way you installed it: re-run the three
-`install` lines from a fresh checkout. Leave the env file and the state files
-as they are, except to add `AUTOPULL_GITHUB_REPO=<owner>/<repo>` to an env file
-written before that setting existed; without it the revision-on-`main` check
-is skipped.
+`install` lines from a fresh checkout, then `systemctl daemon-reload` (the unit
+file changes between releases; the current one sets `HOME=/root`, which cosign
+needs). Leave the env file and the state files as they are, except to add
+`AUTOPULL_GITHUB_REPO=<owner>/<repo>` to an env file written before that
+setting existed; without it the revision-on-`main` check is skipped. An older
+script ignores `AUTOPULL_COSIGN` entirely, so upgrade before you set it.
 
 **Coolify API access.** The script authenticates with a bearer token. If
 Coolify's API is limited to listed IPs (Settings → API), allow the address
@@ -477,12 +479,19 @@ repo does it for you):
    open that step's log and look for `Signed ...` (a failure shows only as a
    warning annotation). Then remove `continue-on-error` from the workflow so a
    later signing failure blocks, as a security control should. The step's log
-   prints the exact `cosign verify` command for what it signed. A publish from a branch other than `main`
-   (a manual dispatch) is signed with a different identity and will not pass
-   the default check.
-2. Install cosign on the box (a release binary from
+   prints the exact `cosign verify` command for what it signed. The workflow
+   pushes `:latest` only after that step, so the tag the box watches is never
+   live and unsigned because of the ordering (a failed signing step still
+   releases it). A publish from a branch other than `main` (a manual dispatch)
+   is signed with a different identity and will not pass the default check.
+2. **Upgrade the script and the unit on the box first** (see "Upgrade the
+   script" above, including `systemctl daemon-reload`), then confirm it took:
+   `systemctl show coolify-autopull.service -p Environment` must list
+   `HOME=/root`. Install cosign `v2.4.1`, the release the workflow signs with
+   (`cosign-release` in `dts-image-publish.yml`; a different major is not
+   guaranteed to verify it): a release binary from
    <https://github.com/sigstore/cosign/releases>, on `PATH` for root, or point
-   `AUTOPULL_COSIGN_BIN` at it). cosign reads the registry login the box already
+   `AUTOPULL_COSIGN_BIN` at it. cosign reads the registry login the box already
    has (`/root/.docker/config.json`) and needs outbound HTTPS to the registry
    and to Sigstore's public services.
 3. Verify by hand against the digest the box is running now, **under the unit's
@@ -498,8 +507,10 @@ repo does it for you):
        ghcr.io/<owner>/contract-toaster-dts-backend@sha256:<digest>
    ```
 
-   Do the same for the frontend. Both must exit 0. Why not just run `cosign
-   verify` in a shell: a root login shell has `HOME`, a writable home and root's
+   Do the same for the frontend. Both must exit 0. The `HOME` injected above
+   only mimics the unit, so it cannot show that the installed unit has it: that
+   is what the `systemctl show` check in step 2 is for. Why not just run
+   `cosign verify` in a shell: a root login shell has `HOME`, a writable home and root's
    docker login, and a systemd service has only what its unit gives it (the unit
    sets `HOME=/root`, and `PrivateTmp`/`ProtectSystem` apply). cosign's trust
    cache needs that `HOME`, so a check that passes in a shell can still fail
@@ -515,7 +526,10 @@ repo does it for you):
 
 `AUTOPULL_COSIGN_IDENTITY_REGEXP` and `AUTOPULL_COSIGN_OIDC_ISSUER` override the
 signer to expect (for a fork that signs from another workflow);
-`AUTOPULL_COSIGN_BIN` names the binary. See `coolify-autopull.env.example`.
+`AUTOPULL_COSIGN_BIN` names the binary. **Anchor an override with `^` and `$`**:
+an unanchored one such as `dts-image-publish\.yml` accepts a workflow of that
+name from any repository (the script logs a warning when an override is not
+anchored). See `coolify-autopull.env.example`.
 
 **What `enforce` does and does not guarantee.** It gates the autopull path only,
 and it is best-effort, not a proof of what runs:
@@ -532,9 +546,18 @@ and it is best-effort, not a proof of what runs:
 
 Smaller things to know:
 
-- `AUTOPULL_GITHUB_REPO` is matched **case-sensitively**, both by the GitHub
-  compare call and in the default signer identity; use the repository's exact
-  casing (`Owner/repo` as GitHub shows it).
+- `AUTOPULL_GITHUB_REPO` is matched **case-sensitively** in the default signer
+  identity (cosign's regular expression); GitHub's compare call is not
+  case-sensitive, so a wrong casing passes that check and then fails here. Use
+  the repository's exact casing (`Owner/repo` as GitHub shows it).
+- **The unverified digest is on the tag while it is checked.** The pull moves
+  the watched tags before the signature is verified, and verification is up to
+  two `cosign verify` calls, each bounded at 90 seconds (about three minutes at
+  worst, against about twenty seconds for the revision check alone). Anything
+  that recreates the containers from the tag in that window, a Coolify
+  redeploy or a host reboot, runs the unverified image. A refusal puts the
+  previous images back on the tags. Verifying before the tags move is what the
+  follow-up issue for the post-rollout digest comparison is for.
 - Under `enforce` a refusal writes no `deployed.bad` marker (that is for rollouts
   that came up unhealthy), so every five-minute run pulls again and repeats the
   verification: up to two `cosign verify` calls, each bounded at 90 seconds when
@@ -563,17 +586,23 @@ Coolify, to change it; `0` removes that service's limit. The files set no
 `cpu_period` (Docker's default is the 100000 µs the table assumes), so with a
 quota at `0` a service carries no CPU key at all.
 
-**Rootless Docker without cgroup CPU delegation** refuses containers that set a
-CPU limit, so the compose files would not start there. Set all four variables to
-`0` on such a host (`systemctl --user show` or `docker info` shows whether the
-`cpu` controller is delegated). A quota above the host's core count is not the
-problem: it never throttles and never fails a start.
+**Rootless Docker without cgroup CPU delegation** may ignore a CPU quota with a
+warning or refuse the container, depending on the Docker version, so on such a
+host the limits either do nothing or the stack does not start. Set all four
+variables to `0` there (`docker info` warns when the limit is unsupported, and
+`systemctl --user show` shows whether the `cpu` controller is delegated). A
+quota above the host's core count is not the problem: it never throttles and
+never fails a start.
+
+**The unit is microseconds, not CPUs.** A value must be `0` or at least `1000`
+(the daemon's minimum). `BACKEND_CPU_QUOTA=4` passes `docker compose config` but
+is 4 µs, and the container will not start; four CPUs is `400000`.
 
 The defaults are deliberately generous, and the mechanism is a quota rather than
 `cpus:` on purpose: Docker refuses a `cpus` value above the host's core count,
 which would stop the stack starting on a small host, while a quota above the core
-count simply never throttles. (The one host class that refuses any CPU limit is
-the rootless case above.) **Do not set the backend's quota tight.** The
+count simply never throttles. (The one host class where a CPU limit can fail
+outright is the rootless case above.) **Do not set the backend's quota tight.** The
 review pipeline runs inside the backend process, so a quota near one CPU makes
 reviews slow, and a starved backend answers its 4-second healthcheck late, which
 the autopull script reads as a rollout that never came up healthy and rolls

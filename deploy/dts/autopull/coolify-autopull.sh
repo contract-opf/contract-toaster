@@ -299,6 +299,12 @@ signatures_ok() {
     cosign_problem="${COSIGN_BIN} is not installed on this box"
     return 1
   fi
+  if [ -n "${regexp}" ]; then
+    case "${regexp}" in
+      ^*'$') ;;
+      *) log "WARNING: AUTOPULL_COSIGN_IDENTITY_REGEXP is not anchored with ^ and \$; it can match another repository's workflow of the same name" ;;
+    esac
+  fi
   if [ -z "${regexp}" ]; then
     if [ -z "${GITHUB_REPO}" ]; then
       cosign_problem="no signer identity to check against (set AUTOPULL_GITHUB_REPO or AUTOPULL_COSIGN_IDENTITY_REGEXP)"
@@ -311,7 +317,7 @@ signatures_ok() {
     ref="$(repo_of "${image}")@${digest}"
     if ! err="$(with_timeout "${COSIGN_BIN}" verify \
           --certificate-identity-regexp "${regexp}" \
-          --certificate-oidc-issuer "${COSIGN_ISSUER}" "${ref}" 2>&1 >/dev/null)"; then
+          --certificate-oidc-issuer "${COSIGN_ISSUER}" "${ref}" 2>&1 >/dev/null </dev/null)"; then
       cosign_problem="no valid signature from the publish workflow on ${ref}: $(head -c 200 <<<"${err}" | tr -s ' \n' ' ')"
       return 1
     fi

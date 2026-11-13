@@ -99,7 +99,7 @@ services:
     # then serves HTTP while every real request hangs, and bootstrap times out
     # with a misleading "not ready within 60s". Bites on any fresh volume.
     user: root
-    # CPU ceiling, same convention and reasoning as the backend's below
+    # CPU ceiling, same convention and reasoning as the backend's above
     # (deploy/dts/README.md#container-cpu-limits).
     cpu_quota: ${DYNAMODB_CPU_QUOTA:-200000}
     restart: unless-stopped
@@ -129,7 +129,7 @@ services:
       timeout: 5s
       retries: 4
       start_period: 15s
-    # CPU ceiling, same convention and reasoning as the backend's below
+    # CPU ceiling, same convention and reasoning as the backend's above
     # (deploy/dts/README.md#container-cpu-limits).
     cpu_quota: ${MINIO_CPU_QUOTA:-200000}
     restart: unless-stopped
@@ -246,7 +246,7 @@ services:
       timeout: 5s
       retries: 4
       start_period: 15s
-    # CPU ceiling, same convention and reasoning as the backend's below
+    # CPU ceiling, same convention and reasoning as the backend's above
     # (deploy/dts/README.md#container-cpu-limits).
     cpu_quota: ${FRONTEND_CPU_QUOTA:-200000}
     restart: unless-stopped

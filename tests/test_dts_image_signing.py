@@ -71,11 +71,38 @@ class PublishWorkflowSigns(unittest.TestCase):
         self.assertEqual(steps[push].get("id"), "push")
         self.assertIn("digest=${digest}", steps[push]["run"])
         self.assertTrue(steps[install]["uses"].startswith("sigstore/cosign-installer@"))
-        self.assertIn("cosign sign --yes", steps[sign]["run"])
+        run = steps[sign]["run"]
+        self.assertIn('cosign sign --yes "${SUBJECT}"', run, "the command signs the digest reference")
         subject = steps[sign]["env"]["SUBJECT"]
         self.assertIn("steps.meta.outputs.image", subject)
         self.assertIn("@${{ steps.push.outputs.digest }}", subject)
         self.assertNotIn("steps.meta.outputs.sha", subject, "sign the digest, never a tag")
+
+    def test_latest_is_pushed_only_after_the_digest_is_signed(self) -> None:
+        job = workflow()["jobs"]["publish"]
+        steps = job["steps"]
+        names = step_names(job)
+        push = next(i for i, n in enumerate(names) if n.startswith("Push image"))
+        sign = next(i for i, n in enumerate(names) if n.startswith("Sign the pushed digest"))
+        move = next(i for i, n in enumerate(names) if n.startswith("Move :latest"))
+        self.assertLess(sign, move)
+        pushed_in_push_step = [
+            line for line in steps[push]["run"].splitlines() if line.strip().startswith("docker push")
+        ]
+        self.assertTrue(pushed_in_push_step)
+        for line in pushed_in_push_step:
+            self.assertNotIn(":latest", line, "the push step must not publish the tag the box watches")
+        self.assertIn('docker push "${{ steps.meta.outputs.image }}:latest"', steps[move]["run"])
+        pushing = [st for st in steps if "docker push" in (st.get("run") or "")]
+        self.assertEqual(len(pushing), 2, "exactly the sha push and the late :latest push")
+
+    def test_cosign_is_pinned_and_the_readme_names_the_same_release(self) -> None:
+        job = workflow()["jobs"]["publish"]
+        install = next(s for s in job["steps"] if s.get("name") == "Install cosign")
+        release = install["with"]["cosign-release"]
+        self.assertRegex(release, r"^v2\.\d+\.\d+$")
+        self.assertIn(release, README.read_text(encoding="utf-8"))
+        self.assertTrue(install.get("continue-on-error"), "non-blocking like the sign step")
 
     def test_the_sign_step_is_non_blocking_until_a_signed_run_has_passed(self) -> None:
         # It runs after the push: failing the job would skip `deploy` for an image
@@ -125,6 +152,10 @@ class AutopullExpectsThatSigner(unittest.TestCase):
         text = README.read_text(encoding="utf-8")
         self.assertIn("systemd-run --wait --pipe", text)
         self.assertIn("-p EnvironmentFile=/etc/coolify-autopull.env", text)
+        # The injected HOME only mimics the unit, so the README must also tell
+        # the operator to check the installed unit, and to upgrade it first.
+        self.assertIn("systemctl show coolify-autopull.service -p Environment", text)
+        self.assertIn("systemctl daemon-reload", text)
 
     def test_the_readme_states_what_enforce_does_not_guarantee(self) -> None:
         text = README.read_text(encoding="utf-8")

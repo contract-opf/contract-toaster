@@ -119,7 +119,12 @@ exit 0
 
 FAKE_COSIGN = r"""#!/usr/bin/env bash
 printf '%s\n' "$*" >> "$FAKE/cosign.argv"
+if [ -e "$FAKE/cosign_reads_stdin" ]; then cat >/dev/null; fi
 if [ -e "$FAKE/cosign_fail" ]; then
+  echo "Error: no matching signatures" >&2
+  exit 1
+fi
+if [ -e "$FAKE/cosign_fail_on" ] && grep -qF -- "$(cat "$FAKE/cosign_fail_on")" <<<"$*"; then
   echo "Error: no matching signatures" >&2
   exit 1
 fi
@@ -651,6 +656,25 @@ class AutopullCosign(unittest.TestCase):
     def test_enforce_refuses_an_unsigned_image(self) -> None:
         (self.box.fake / "cosign_fail").touch()
         self.assert_refused(self.run_box(AUTOPULL_COSIGN="enforce"))
+
+    def test_enforce_refuses_when_only_the_second_image_fails(self) -> None:
+        (self.box.fake / "cosign_fail_on").write_text("sha256:f2", encoding="utf-8")
+        self.assert_refused(self.run_box(AUTOPULL_COSIGN="enforce"))
+        self.assertEqual(len(self.box.cosign_calls()), 2, "the first passes, the second is asked and fails")
+
+    def test_a_cosign_that_reads_stdin_does_not_swallow_the_second_image(self) -> None:
+        # `cosign verify` runs inside `while read ... <<<"${current}"`; a binary
+        # that reads stdin would eat the remaining images and the log would
+        # still claim every digest was checked.
+        (self.box.fake / "cosign_reads_stdin").touch()
+        self.assert_rolled_forward(self.run_box(AUTOPULL_COSIGN="enforce"))
+        self.assertEqual(len(self.box.cosign_calls()), 2)
+
+    def test_an_unanchored_identity_override_is_warned_about(self) -> None:
+        result = self.run_box(AUTOPULL_COSIGN_IDENTITY_REGEXP="dts-image-publish[.]yml")
+        self.assertIn("is not anchored", result.stdout)
+        anchored = self.run_box(AUTOPULL_COSIGN_IDENTITY_REGEXP="^https://example[.]test/signer$")
+        self.assertNotIn("is not anchored", anchored.stdout)
 
     def test_enforce_refuses_when_cosign_is_missing(self) -> None:
         result = self.run_box(

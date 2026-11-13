@@ -183,10 +183,13 @@ jobs:
             -t "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.sha }}" \
             .
 
-      - name: Push image (:latest and :<short-sha>)
+      - name: Push image (:<short-sha> only; :latest moves after signing)
         id: push
         run: |
-          docker push "${{ steps.meta.outputs.image }}:latest"
+          # `:latest` is what the deploy box watches, so it is pushed LAST, after
+          # the digest is signed (the "Move :latest" step below): pushing it here
+          # would leave a live, unsigned `:latest` for as long as the sign step
+          # takes, and permanently if signing fails.
           docker push "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.sha }}"
           # IMAGE_DIGEST is only knowable AFTER the push — it is the digest of
           # the pushed manifest, so the build cannot bake it in (doing so would
@@ -202,18 +205,23 @@ jobs:
           echo "digest=${digest}" >> "$GITHUB_OUTPUT"
 
       - name: Install cosign
+        # Non-blocking for the same reason as the sign step below. The release
+        # is pinned, and deploy/dts/README.md names the same one for the box, so
+        # the signer and the verifier agree.
+        continue-on-error: true
         uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: "v2.4.1"
 
       - name: Sign the pushed digest (cosign, keyless)
-        # NON-BLOCKING until one signed run has passed. This step runs AFTER the
-        # push, so `:latest` has already moved: if the runner cannot reach
-        # Fulcio, Rekor or the OIDC endpoint, a failure here would turn the whole
-        # publish job red and skip `deploy` (`needs: [publish, ...]`) for an image
-        # that is already out. Remove this line once a signed run has succeeded
-        # (the step then blocks, as a security control should). Until then a
-        # failure is a warning annotation, and the box's AUTOPULL_COSIGN=warn
-        # default tolerates the unsigned digest. See RUNBOOK.md, "Coolify
-        # deployments and autopull".
+        # NON-BLOCKING until one signed run has passed: if the runner cannot
+        # reach Fulcio, Rekor or the OIDC endpoint, a failure here would turn the
+        # whole publish job red and skip `deploy` (`needs: [publish, ...]`).
+        # Remove this line, and the one on "Install cosign", once a signed run
+        # has succeeded (the steps then block, as a security control should).
+        # Until then a failure is a warning annotation, `:latest` still moves
+        # (next step), and the box's AUTOPULL_COSIGN=warn default tolerates the
+        # unsigned digest. See RUNBOOK.md, "Coolify deployments and autopull".
         continue-on-error: true
         env:
           # The image repository without a tag: cosign signs the digest, and a
@@ -233,6 +241,14 @@ jobs:
           echo "  cosign verify --certificate-oidc-issuer https://token.actions.githubusercontent.com \\"
           echo "    --certificate-identity-regexp '^https://github\\.com/${{ github.repository }}/\\.github/workflows/dts-image-publish\\.yml@refs/heads/main\$' \\"
           echo "    ${SUBJECT}"
+
+      - name: Move :latest to the pushed digest (after signing)
+        # The same local image as the :<short-sha> push, so the same digest:
+        # only the manifest is written, the layers are already there. Runs after
+        # a sign failure too (the sign steps are non-blocking), so `:latest`
+        # never depends on Sigstore being reachable.
+        run: |
+          docker push "${{ steps.meta.outputs.image }}:latest"
 
   publish-minio:
     name: Build and push MinIO (once per release)

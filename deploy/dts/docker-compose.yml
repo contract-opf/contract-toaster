@@ -80,7 +80,7 @@ services:
     # here is a fair trade for a one-line fix that works on both fresh and
     # already-chowned volumes. Do NOT drop this without also chowning /data.
     user: root
-    # CPU ceiling, same convention and reasoning as the backend's below
+    # CPU ceiling, same convention and reasoning as the backend's above
     # (deploy/dts/README.md#container-cpu-limits).
     cpu_quota: ${DYNAMODB_CPU_QUOTA:-200000}
     restart: unless-stopped
@@ -115,7 +115,7 @@ services:
       timeout: 5s
       retries: 4
       start_period: 15s
-    # CPU ceiling, same convention and reasoning as the backend's below
+    # CPU ceiling, same convention and reasoning as the backend's above
     # (deploy/dts/README.md#container-cpu-limits).
     cpu_quota: ${MINIO_CPU_QUOTA:-200000}
     restart: unless-stopped
@@ -266,7 +266,7 @@ services:
       timeout: 5s
       retries: 4
       start_period: 15s
-    # CPU ceiling, same convention and reasoning as the backend's below
+    # CPU ceiling, same convention and reasoning as the backend's above
     # (deploy/dts/README.md#container-cpu-limits).
     cpu_quota: ${FRONTEND_CPU_QUOTA:-200000}
     restart: unless-stopped
