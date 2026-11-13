@@ -80,6 +80,9 @@ services:
     # here is a fair trade for a one-line fix that works on both fresh and
     # already-chowned volumes. Do NOT drop this without also chowning /data.
     user: root
+    # CPU ceiling, same convention and reasoning as the backend's above
+    # (deploy/dts/README.md#container-cpu-limits).
+    cpu_quota: ${DYNAMODB_CPU_QUOTA:-200000}
     restart: unless-stopped
     volumes:
       - ddb-data:/data
@@ -112,6 +115,9 @@ services:
       timeout: 5s
       retries: 4
       start_period: 15s
+    # CPU ceiling, same convention and reasoning as the backend's above
+    # (deploy/dts/README.md#container-cpu-limits).
+    cpu_quota: ${MINIO_CPU_QUOTA:-200000}
     restart: unless-stopped
     volumes:
       - minio-data:/data
@@ -205,6 +211,19 @@ services:
       timeout: 5s
       retries: 4
       start_period: 40s
+    # CPU ceiling (see deploy/dts/README.md#container-cpu-limits). A CFS quota in
+    # microseconds per Docker's default 100000us period, so 400000 is "up to 4
+    # CPUs". No `cpu_period:` on purpose: with the quota at 0 this service then
+    # sets no CPU key at all. Generous on
+    # purpose: a quota ABOVE the host's core count never throttles and never
+    # fails a start, which `cpus:` would (Docker refuses a value over the core
+    # count). One host class still refuses ANY CPU limit: rootless Docker without
+    # cgroup CPU delegation. There, set the *_CPU_QUOTA variables to 0 (no limit;
+    # deploy/dts/README.md#container-cpu-limits). Too tight is the real
+    # risk: the review pipeline runs inside the backend process, and a starved
+    # backend answers its healthcheck late, which autopull reads as a bad
+    # rollout. 0 removes the limit. Override in the host's environment.
+    cpu_quota: ${BACKEND_CPU_QUOTA:-400000}
     restart: unless-stopped
     ports:
       # Bound to loopback only (issue #469): container-to-container traffic
@@ -247,6 +266,9 @@ services:
       timeout: 5s
       retries: 4
       start_period: 15s
+    # CPU ceiling, same convention and reasoning as the backend's above
+    # (deploy/dts/README.md#container-cpu-limits).
+    cpu_quota: ${FRONTEND_CPU_QUOTA:-200000}
     restart: unless-stopped
     ports:
       - "8081:8080"

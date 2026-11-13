@@ -46,6 +46,18 @@
 # packages are created PRIVATE by default; flipping them to Public is a separate
 # deliberate step done outside this workflow.
 #
+# SIGNING. After the push, the publish job signs the pushed backend and frontend
+# digests with cosign, keyless: the signature is bound to this workflow's GitHub
+# OIDC identity (`id-token: write`, granted to that one job only), so nobody holds
+# a signing key. deploy/dts/autopull/coolify-autopull.sh can then verify, on the
+# box, that a new digest was signed by THIS workflow on main
+# (deploy/dts/README.md#signature-verification-cosign). The box warns by default
+# and refuses only when its AUTOPULL_COSIGN=enforce, so this step starting to
+# sign changes nothing there until an operator flips that switch. The signed
+# subject is the digest, not a tag, so :latest and :<short-sha> share one
+# signature. MinIO is not signed: it is built from upstream source under an
+# immutable release tag and is not one of the images the box's autopull watches.
+#
 # Runs on the self-hosted runner (vars.CI_RUNS_ON) while GitHub-hosted Actions
 # is unavailable; falls back to ubuntu-latest if the variable is unset. A
 # pull_request event always gets ubuntu-latest, the same rule as
@@ -87,6 +99,12 @@ jobs:
         github.event.workflow_run.head_branch == 'main' &&
         github.event.workflow_run.head_repository.full_name == github.repository )
     runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    # A job-level block replaces the workflow's, so it restates both of those and
+    # adds the OIDC token the keyless signature needs. Only this job gets it.
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     outputs:
       sha: ${{ steps.meta.outputs.sha }}
     env:
@@ -165,9 +183,13 @@ jobs:
             -t "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.sha }}" \
             .
 
-      - name: Push image (:latest and :<short-sha>)
+      - name: Push image (:<short-sha> only; :latest moves after signing)
+        id: push
         run: |
-          docker push "${{ steps.meta.outputs.image }}:latest"
+          # `:latest` is what the deploy box watches, so it is pushed LAST, after
+          # the digest is signed (the "Move :latest" step below): pushing it here
+          # would leave a live, unsigned `:latest` for as long as the sign step
+          # takes, and permanently if signing fails.
           docker push "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.sha }}"
           # IMAGE_DIGEST is only knowable AFTER the push — it is the digest of
           # the pushed manifest, so the build cannot bake it in (doing so would
@@ -180,6 +202,53 @@ jobs:
             "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.sha }}" \
             | cut -d@ -f2)"
           echo "Pushed image digest: ${digest}"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+
+      - name: Install cosign
+        # Non-blocking for the same reason as the sign step below. The release
+        # is pinned, and deploy/dts/README.md names the same one for the box, so
+        # the signer and the verifier agree.
+        continue-on-error: true
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: "v2.4.1"
+
+      - name: Sign the pushed digest (cosign, keyless)
+        # NON-BLOCKING until one signed run has passed: if the runner cannot
+        # reach Fulcio, Rekor or the OIDC endpoint, a failure here would turn the
+        # whole publish job red and skip `deploy` (`needs: [publish, ...]`).
+        # Remove this line, and the one on "Install cosign", once a signed run
+        # has succeeded (the steps then block, as a security control should).
+        # Until then a failure is a warning annotation, `:latest` still moves
+        # (next step), and the box's AUTOPULL_COSIGN=warn default tolerates the
+        # unsigned digest. See RUNBOOK.md, "Coolify deployments and autopull".
+        continue-on-error: true
+        env:
+          # The image repository without a tag: cosign signs the digest, and a
+          # tag in the reference only draws a warning (tags move).
+          SUBJECT: ${{ steps.meta.outputs.image }}@${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          case "${SUBJECT}" in
+            *@sha256:*) ;;
+            *) echo "::error::no pushed digest to sign (got '${SUBJECT}')"; exit 1 ;;
+          esac
+          # The signature lands in the same registry, next to the image; the
+          # docker/login-action step above is the credential cosign pushes with.
+          cosign sign --yes "${SUBJECT}"
+          echo "Signed ${SUBJECT}"
+          echo "Verify with:"
+          echo "  cosign verify --certificate-oidc-issuer https://token.actions.githubusercontent.com \\"
+          echo "    --certificate-identity-regexp '^https://github\\.com/${{ github.repository }}/\\.github/workflows/dts-image-publish\\.yml@refs/heads/main\$' \\"
+          echo "    ${SUBJECT}"
+
+      - name: Move :latest to the pushed digest (after signing)
+        # The same local image as the :<short-sha> push, so the same digest:
+        # only the manifest is written, the layers are already there. Runs after
+        # a sign failure too (the sign steps are non-blocking), so `:latest`
+        # never depends on Sigstore being reachable.
+        run: |
+          docker push "${{ steps.meta.outputs.image }}:latest"
 
   publish-minio:
     name: Build and push MinIO (once per release)

@@ -25,6 +25,10 @@
 #      on that repository's main (GitHub compare API). If it is not, or that
 #      cannot be confirmed, refuse: re-tag the watched refs back to the
 #      digests last rolled out and exit 1 without restarting.
+#      Then verify the keyless cosign signature that dts-image-publish.yml puts
+#      on each watched digest (AUTOPULL_COSIGN: `warn` by default, which
+#      reports a missing or failing verification and carries on; `enforce`
+#      refuses exactly like the main check above; `off` skips it).
 #      Then POST Coolify's services restart endpoint with `latest=true`
 #      (the API twin of "Restart (pull latest)"). A refused call is retried on
 #      the next run.
@@ -55,6 +59,23 @@
 #                            revision must be on before it rolls out
 #   AUTOPULL_GITHUB_TOKEN    optional; a read-only token for that check (a
 #                            private repository, or the API's rate limit)
+#   AUTOPULL_COSIGN          warn (default) | enforce | off; what to do with
+#                            the cosign signature check of each NEW digest.
+#                            warn: say so in the journal and roll forward
+#                            anyway, whether cosign is missing, the digest is
+#                            unsigned, or the signature does not match.
+#                            enforce: refuse the rollout (re-tag, exit 1), as
+#                            the main check does. off: do not check. Anything
+#                            else is an error. Flip warn -> enforce only once
+#                            a signed digest is deployed: see
+#                            deploy/dts/README.md#signature-verification-cosign
+#   AUTOPULL_COSIGN_IDENTITY_REGEXP
+#                            optional; the signer identity a signature must
+#                            carry. Default, derived from AUTOPULL_GITHUB_REPO:
+#                            that repository's dts-image-publish.yml on main.
+#   AUTOPULL_COSIGN_OIDC_ISSUER
+#                            default https://token.actions.githubusercontent.com
+#   AUTOPULL_COSIGN_BIN      default cosign (a name on PATH, or a full path)
 #   AUTOPULL_HEARTBEAT_URL   optional; an Uptime Kuma push URL (or anything
 #                            that takes ?status=up|down&msg=). Every run
 #                            reports up or down, so a stopped timer shows as
@@ -80,6 +101,10 @@ VERIFY_INTERVAL="${AUTOPULL_VERIFY_INTERVAL:-10}"
 HEARTBEAT_URL="${AUTOPULL_HEARTBEAT_URL:-}"
 GITHUB_REPO="${AUTOPULL_GITHUB_REPO:-}"
 GITHUB_TOKEN="${AUTOPULL_GITHUB_TOKEN:-}"
+COSIGN_MODE="${AUTOPULL_COSIGN:-warn}"
+COSIGN_BIN="${AUTOPULL_COSIGN_BIN:-cosign}"
+COSIGN_ISSUER="${AUTOPULL_COSIGN_OIDC_ISSUER:-https://token.actions.githubusercontent.com}"
+COSIGN_IDENTITY_REGEXP="${AUTOPULL_COSIGN_IDENTITY_REGEXP:-}"
 REVISION_LABEL="org.opencontainers.image.revision"
 
 last_msg="ok"
@@ -99,6 +124,13 @@ on_exit() {
   fi
 }
 trap on_exit EXIT
+
+# A typo here must not quietly leave the box on a weaker setting than the
+# operator meant, so an unknown value stops the run (and the heartbeat says so).
+case "${COSIGN_MODE}" in
+  warn|enforce|off) ;;
+  *) log "AUTOPULL_COSIGN must be warn, enforce or off (got '${COSIGN_MODE}')"; exit 1 ;;
+esac
 
 mkdir -p "$(dirname "${STATE_FILE}")"
 
@@ -244,6 +276,65 @@ if [ -n "${GITHUB_REPO}" ] && ! revision_is_on_main; then
   # so a restart from anywhere else keeps running what was last rolled out.
   retag_previous || log "could not re-tag the previous images"
   exit 1
+fi
+
+# Defence in depth, part two: the keyless cosign signature that
+# .github/workflows/dts-image-publish.yml puts on each pushed digest, made by
+# that workflow on main. It is checked only here, on a NEW digest (once per
+# rollout, not every run), against the exact digest this box just pulled.
+#
+# Rolling this out must not stop an existing box from pulling: an image
+# published before the workflow signed anything has no signature, and a box
+# without cosign cannot check one. So the default is `warn`: say so in the
+# journal and carry on. `enforce` is the switch to flip once a signed digest is
+# running (deploy/dts/README.md#signature-verification-cosign).
+cosign_problem=""
+with_timeout() {
+  # `timeout` is coreutils: absent on a developer's Mac, present on the box.
+  if command -v timeout >/dev/null 2>&1; then timeout 90 "$@"; else "$@"; fi
+}
+signatures_ok() {
+  local image digest ref err regexp="${COSIGN_IDENTITY_REGEXP}"
+  if ! command -v "${COSIGN_BIN}" >/dev/null 2>&1; then
+    cosign_problem="${COSIGN_BIN} is not installed on this box"
+    return 1
+  fi
+  if [ -n "${regexp}" ]; then
+    case "${regexp}" in
+      ^*'$') ;;
+      *) log "WARNING: AUTOPULL_COSIGN_IDENTITY_REGEXP is not anchored with ^ and \$; it can match another repository's workflow of the same name" ;;
+    esac
+  fi
+  if [ -z "${regexp}" ]; then
+    if [ -z "${GITHUB_REPO}" ]; then
+      cosign_problem="no signer identity to check against (set AUTOPULL_GITHUB_REPO or AUTOPULL_COSIGN_IDENTITY_REGEXP)"
+      return 1
+    fi
+    regexp="^https://github\\.com/${GITHUB_REPO//./\\.}/\\.github/workflows/dts-image-publish\\.yml@refs/heads/main\$"
+  fi
+  while read -r image digest; do
+    [ -n "${image}" ] || continue
+    ref="$(repo_of "${image}")@${digest}"
+    if ! err="$(with_timeout "${COSIGN_BIN}" verify \
+          --certificate-identity-regexp "${regexp}" \
+          --certificate-oidc-issuer "${COSIGN_ISSUER}" "${ref}" 2>&1 >/dev/null </dev/null)"; then
+      cosign_problem="no valid signature from the publish workflow on ${ref}: $(head -c 200 <<<"${err}" | tr -s ' \n' ' ')"
+      return 1
+    fi
+  done <<<"${current}"
+  return 0
+}
+
+if [ "${COSIGN_MODE}" != off ]; then
+  if signatures_ok; then
+    log "cosign: every watched digest carries a valid signature from the publish workflow"
+  elif [ "${COSIGN_MODE}" = enforce ]; then
+    log "refusing to roll forward: cosign verification failed: ${cosign_problem}"
+    retag_previous || log "could not re-tag the previous images"
+    exit 1
+  else
+    log "WARNING: cosign verification failed (${cosign_problem}); rolling forward anyway because AUTOPULL_COSIGN=warn"
+  fi
 fi
 
 log "new images at revision ${revision:-unknown}; asking Coolify to pull and restart"
