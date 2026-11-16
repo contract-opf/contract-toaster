@@ -431,8 +431,11 @@ function projectCost(state: ReviewProjectionState): Cost {
       : { kind: 'unavailable' };
   // A range is shown only when it brackets the figure on screen, so a stale
   // range for a different estimate can never sit beside this one.
+  // The document-blind policy figure carries no range (see types.ts), so the
+  // range is attached only to a document-based estimate.
   if (
     cost.kind === 'estimated' &&
+    documentBased &&
     range &&
     typeof cost.cents === 'number' &&
     range.lowCents <= cost.cents &&

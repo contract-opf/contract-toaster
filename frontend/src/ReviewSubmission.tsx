@@ -1853,8 +1853,19 @@ export default function ReviewSubmission(): React.ReactElement {
   const [submittedEstimate, setSubmittedEstimate] = useState<CostEstimate | null | undefined>(
     undefined,
   );
+  // A review reopened or re-adopted after a reload never went through this
+  // component's submit, so nothing was captured. Its own row still records what
+  // the server quoted at submit time; use that rather than the live estimate,
+  // which answers for the NEXT review and may be for another playbook or
+  // document. The row carries no range, so none is shown for it.
+  const detailEstimateCents: number | undefined =
+    typeof detail?.estimated_usd_cents === 'number' && detail.estimated_usd_cents > 0
+      ? detail.estimated_usd_cents
+      : undefined;
   const submittedEstimateCents: number | null | undefined =
-    submittedEstimate === undefined ? undefined : (submittedEstimate?.cents ?? null);
+    submittedEstimate === undefined
+      ? detailEstimateCents
+      : (submittedEstimate?.cents ?? null);
   const costWords = preflight?.wordCount ?? 0;
   useEffect(() => {
     let cancelled = false;
@@ -3898,6 +3909,7 @@ export default function ReviewSubmission(): React.ReactElement {
     // once a review has been submitted (even a captured `null`, which has no
     // range), the live one before.
     reviewCostRange: (() => {
+      if (submittedEstimate === undefined && detailEstimateCents !== undefined) return null;
       const shown = submittedEstimate === undefined ? costEstimate : submittedEstimate;
       return shown && shown.lowCents !== null && shown.highCents !== null
         ? { lowCents: shown.lowCents, highCents: shown.highCents, basis: shown.basis }

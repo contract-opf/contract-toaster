@@ -119,7 +119,7 @@ export function describeEstimateRange(estimate: CostEstimate | null | undefined)
   if (!estimate || estimate.lowCents === null || estimate.highCents === null) {
     return null;
   }
-  return `Range ${formatCostUsdCents(estimate.lowCents)}–${formatCostUsdCents(estimate.highCents)}`;
+  return `Typically ${formatCostUsdCents(estimate.lowCents)}–${formatCostUsdCents(estimate.highCents)}`;
 }
 
 /** The cost fields a review row or detail may carry. All optional, all unknown

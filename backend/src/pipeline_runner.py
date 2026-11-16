@@ -561,7 +561,15 @@ def _settled_cents(
     cents = cost.get("actual_usd_cents")
     if isinstance(cents, int):
         return cents
-    return _actual_cents_from_client(client, dynamodb_resource, model_ids)
+    try:
+        return _actual_cents_from_client(client, dynamodb_resource, model_ids)
+    except Exception:
+        # Pricing is accounting, not the review (#446): by the time this runs
+        # the result is written, so a pricing fault must neither re-terminate
+        # the review nor stop the reservation from being settled. Settle at 0
+        # and leave the reservation row to reconcile.
+        logger.exception("Could not price the spend settle; settling at 0")
+        return 0
 
 
 def _settle_reservation_safely(

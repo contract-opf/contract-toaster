@@ -23,6 +23,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
 import ReviewHistory, { type HistoryRow } from '../ReviewHistory';
 import { OrbitDiner } from '../orbit-diner/OrbitDiner';
+import { INFLIGHT_REVIEW_STORAGE_KEY } from '../inflightReview';
 import { costNote, costRangeText } from '../orbit-diner/state';
 import { toReviewModel, type ReviewProjectionState } from '../orbit-diner/projection';
 import type { Cost, Playbook, ReviewModel } from '../orbit-diner/types';
@@ -112,7 +113,7 @@ describe('parseCostEstimate', () => {
 describe('describeEstimateRange', () => {
   it('words the range as an expectation, never a ceiling', () => {
     const text = describeEstimateRange(parseCostEstimate(DOCUMENT_ESTIMATE));
-    expect(text).toBe('Range $0.60–$1.10');
+    expect(text).toBe('Typically $0.60–$1.10');
     expect((text ?? '').toLowerCase()).not.toMatch(/up to|maximum|at most/);
   });
 
@@ -270,6 +271,26 @@ describe('the projected cost', () => {
         }),
       ).cost.basis,
     ).toBe('typical');
+    // The document-blind figure carries no range, even one that brackets it.
+    const blind = toReviewModel(
+      baseState({
+        reviewCostUsdCents: 98,
+        reviewCostRange: { lowCents: 49, highCents: 196, basis: 'policy_default' },
+      }),
+    ).cost;
+    expect(blind.lowCents).toBeUndefined();
+    expect(blind.highCents).toBeUndefined();
+    // A reopened review shows what ITS row was quoted, not the live estimate
+    // for a different document, and no range.
+    const reopened = toReviewModel(
+      baseState({
+        reviewCostUsdCents: 300,
+        capturedReviewCostUsdCents: 75,
+        reviewCostRange: null,
+      }),
+    ).cost;
+    expect(reopened.cents).toBe(75);
+    expect(reopened.lowCents).toBeUndefined();
   });
 
   it('never shows a range that does not bracket the figure on screen', () => {
@@ -340,7 +361,7 @@ describe('the projected cost', () => {
 describe('the console copy', () => {
   it('words the range, and only for an estimate that carries one', () => {
     expect(costRangeText({ kind: 'estimated', cents: 80, lowCents: 60, highCents: 110 })).toBe(
-      'Range $0.60–$1.10',
+      'Typically $0.60–$1.10',
     );
     expect(costRangeText({ kind: 'estimated', cents: 80 })).toBeNull();
     expect(costRangeText({ kind: 'settled', cents: 80, lowCents: 60, highCents: 110 })).toBeNull();
@@ -414,7 +435,7 @@ describe('the rendered console', () => {
     expect(screen.getByTestId('review-cost-estimate').querySelector('output')?.textContent).toBe(
       '$0.80',
     );
-    expect(screen.getByTestId('review-cost-range').textContent).toBe('Range $0.60–$1.10.');
+    expect(screen.getByTestId('review-cost-range').textContent).toBe('Typically $0.60–$1.10.');
     expect(document.body.textContent).toContain('Based on this document and the active model policy.');
     const text = (document.body.textContent ?? '').toLowerCase();
     expect(text).not.toContain('up to');
@@ -641,7 +662,7 @@ describe('the Review tab, end to end', () => {
       expect(screen.getByTestId('review-cost-estimate').textContent).toContain('$0.80'),
     );
     await waitFor(() =>
-      expect(screen.getByTestId('review-cost-range').textContent).toBe('Range $0.60–$1.10.'),
+      expect(screen.getByTestId('review-cost-range').textContent).toBe('Typically $0.60–$1.10.'),
     );
   });
 
@@ -680,6 +701,24 @@ describe('the Review tab, end to end', () => {
     expect(screen.getByTestId('review-cost-note').textContent).toBe(
       'Final cost $0.95. It was estimated at $0.80.',
     );
+  });
+
+  it('shows what a re-adopted review was quoted at, not the live estimate', async () => {
+    const routes = panelRoutes({ status: 'RUNNING', decision: null, estimated_usd_cents: 55 });
+    // The live endpoint answers for the NEXT review, with a different figure.
+    routes['GET /api/review-cost-estimate'] = DOCUMENT_ESTIMATE;
+    const adoptedId = '11111111-1111-4111-8111-111111111111';
+    routes[`GET /api/reviews/${adoptedId}`] = routes['GET /api/reviews/rev-c1'];
+    sessionStorage.setItem(INFLIGHT_REVIEW_STORAGE_KEY, adoptedId);
+    stubFetch(routes);
+    render(<ReviewSubmission />);
+    await waitFor(() =>
+      expect(screen.getByTestId('review-cost-estimate').querySelector('output')?.textContent).toBe(
+        '$0.55',
+      ),
+    );
+    expect(screen.queryByTestId('review-cost-range')).toBeNull();
+    sessionStorage.removeItem(INFLIGHT_REVIEW_STORAGE_KEY);
   });
 
   it('shows a failed review’s cost and says it failed', async () => {

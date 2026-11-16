@@ -80,7 +80,7 @@ export function costText(m: ReviewModel) {
 export function costRangeText(c: Cost): string | null {
   if (c.kind !== "estimated" || c.lowCents == null || c.highCents == null)
     return null;
-  return `Range ${money(c.lowCents)}–${money(c.highCents)}`;
+  return `Typically ${money(c.lowCents)}–${money(c.highCents)}`;
 }
 /** The sentence under a FINISHED review's register: what it settled at, beside
  *  the estimate it was quoted at when one was recorded, and — for a review

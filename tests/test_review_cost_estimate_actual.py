@@ -640,7 +640,7 @@ class TestActualCostIsPersisted(OpenRouterBase):
     def test_a_pricing_fault_leaves_the_row_unknown_and_does_not_fail_the_review(self):
         with patch.object(
             pipeline_runner, "_actual_cents_from_client", side_effect=RuntimeError("policy gone")
-        ), patch.object(pipeline_runner, "_settled_cents", return_value=0):
+        ):
             row = self._drive(
                 _Usage(1, 1),
                 lambda *a, **k: {"status": "OK", "decision": "ACCEPT", "summary": "fine"},
