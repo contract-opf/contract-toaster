@@ -10,6 +10,12 @@ Type=oneshot
 # Root, because it uses the box's docker socket and root's existing GHCR
 # login (/root/.docker/config.json), the same ones Coolify pulls with.
 EnvironmentFile=/etc/coolify-autopull.env
+# cosign keeps its Sigstore trust root (TUF) cache under $HOME (or $TUF_ROOT),
+# and a systemd service has no HOME unless the unit sets one: without this every
+# `cosign verify` can fail under the timer while the same command passes from a
+# root shell. Root's docker login (/root/.docker/config.json) is found through
+# it too.
+Environment=HOME=/root
 ExecStart=/usr/local/bin/coolify-autopull
 StateDirectory=coolify-autopull
 NoNewPrivileges=yes
