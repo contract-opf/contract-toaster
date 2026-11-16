@@ -23,7 +23,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
 import ReviewHistory, { type HistoryRow } from '../ReviewHistory';
 import { OrbitDiner } from '../orbit-diner/OrbitDiner';
-import { INFLIGHT_REVIEW_STORAGE_KEY } from '../inflightReview';
+import { clearInflightReviewId, writeInflightReviewId } from '../inflightReview';
 import { costNote, costRangeText } from '../orbit-diner/state';
 import { toReviewModel, type ReviewProjectionState } from '../orbit-diner/projection';
 import type { Cost, Playbook, ReviewModel } from '../orbit-diner/types';
@@ -709,7 +709,7 @@ describe('the Review tab, end to end', () => {
     routes['GET /api/review-cost-estimate'] = DOCUMENT_ESTIMATE;
     const adoptedId = '11111111-1111-4111-8111-111111111111';
     routes[`GET /api/reviews/${adoptedId}`] = routes['GET /api/reviews/rev-c1'];
-    sessionStorage.setItem(INFLIGHT_REVIEW_STORAGE_KEY, adoptedId);
+    writeInflightReviewId(adoptedId);
     stubFetch(routes);
     render(<ReviewSubmission />);
     await waitFor(() =>
@@ -718,7 +718,7 @@ describe('the Review tab, end to end', () => {
       ),
     );
     expect(screen.queryByTestId('review-cost-range')).toBeNull();
-    sessionStorage.removeItem(INFLIGHT_REVIEW_STORAGE_KEY);
+    clearInflightReviewId();
   });
 
   it('shows a failed review’s cost and says it failed', async () => {
