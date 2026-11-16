@@ -18,11 +18,14 @@ requires-python = ">=3.13,<3.14"
 # gate then refuses NEW ones. Nothing below reformats or rewrites code, so the
 # baseline commits carry no behaviour change.
 #
-# `ruff format --check` is deliberately NOT wired up yet: a whole-repo reformat
-# collides with the in-flight #50-#59 series. Follow-up issue #90 turns it on
-# once that series has landed. tests/test_lint_gates_65.py asserts it is absent
-# from lint.yml and scripts/check.sh, so "not yet" cannot drift into "never
-# noticed".
+# `ruff format --check` runs beside `ruff check` (issue #90) in lint.yml,
+# scripts/check.sh and scripts/land.sh, over the same four roots, after a
+# one-time reformat whose commit is listed in .git-blame-ignore-revs. The
+# reformat carried the baseline with it: moving a line moves its trailing
+# `# noqa`, so the directives were re-seated rather than regenerated, and the
+# per-code counts below are unchanged apart from the ones the formatter itself
+# resolved. tests/test_lint_gates_65.py check 7 asserts the formatter is
+# invoked and green and pins `[tool.ruff.format] exclude`.
 # ---------------------------------------------------------------------------
 [tool.ruff]
 line-length = 100

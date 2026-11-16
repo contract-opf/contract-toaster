@@ -18,9 +18,9 @@ repos:
       # from requirements-dev.txt (where ruff is pinned) rather than letting
       # pre-commit build a second, differently-versioned environment.
       #
-      # DELIBERATELY NOT `ruff format`. A whole-tree reformat collides with the
-      # in-flight #50-#59 series; follow-up issue #90 enables it, and
-      # tests/test_lint_gates_65.py check 7 asserts it stays absent until then.
+      # `ruff format` is a CHECK-only hook just below (issue #90): a pre-commit
+      # hook must never rewrite code on its way into a commit, and `ruff format
+      # --check` names the files, so the fix is one command.
       #
       # SCOPE: the same four roots scripts/check.sh and lint.yml lint. #65
       # baselined `backend scripts tests infra/lambda` and nothing else, so
@@ -31,6 +31,14 @@ repos:
       - id: ruff
         name: ruff (no NEW lint violations in the staged Python)
         entry: ruff check --force-exclude
+        language: system
+        types_or: [python, pyi]
+        files: ^(backend|scripts|tests|infra/lambda)/
+        require_serial: true
+        verbose: true
+      - id: ruff-format
+        name: ruff format --check (the staged Python is already formatted)
+        entry: ruff format --check --force-exclude
         language: system
         types_or: [python, pyi]
         files: ^(backend|scripts|tests|infra/lambda)/
@@ -61,6 +69,19 @@ repos:
         entry: frontend/scripts/eslint-staged.sh
         language: system
         files: ^frontend/(src|scripts)/.*\.(ts|tsx|js|jsx|mjs)$
+        exclude: ^frontend/vendor/
+        require_serial: true
+        verbose: true
+      # Issue #90. `prettier --check` over the staged frontend files, the same
+      # check `npm run format:check` runs over the whole of frontend/. A CHECK
+      # only: this hook must never rewrite a file on its way into a commit
+      # (CLAUDE.md: no gate here can see a stylesheet). Fix a red hook with
+      # `npm run format -- <the paths it names>` in frontend/.
+      - id: prettier-frontend
+        name: prettier --check (the staged frontend files are already formatted)
+        entry: frontend/scripts/prettier-staged.sh
+        language: system
+        files: ^frontend/(src|scripts)/.*\.(ts|tsx|js|jsx|mjs|css|md)$
         exclude: ^frontend/vendor/
         require_serial: true
         verbose: true

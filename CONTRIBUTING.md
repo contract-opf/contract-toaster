@@ -88,8 +88,9 @@ python3 tests/lint-counterparty-names.py  # no counterparty identity, ever
 python3 tests/lint-publication-markers.py # no internal-only marker or private local path
 python3 tools/docs_sync.py audit          # docs/INDEX.md still true
 ruff check backend scripts tests infra/lambda   # lint  (issue #65)
+ruff format --check backend scripts tests infra/lambda   # format (issue #90)
 mypy                                      # types (issue #65)
-cd frontend && npm run lint && npm run typecheck
+cd frontend && npm run lint && npm run format:check && npm run typecheck
 ```
 
 ### Lint and types are baseline-then-ratchet (issue #65)
@@ -129,11 +130,29 @@ in `frontend/package.json`. Both run in `.github/workflows/lint.yml`, as a fast
 pre-step in `scripts/check.sh` and `scripts/check-frontend.sh`, and as
 `scripts/land.sh`'s first gate.
 
-The FORMATTERS are configured but deliberately not enforced: `ruff format` and
-`prettier --check` would reformat the whole tree, which collides with the
-in-flight audit series, and `frontend/vitest.config.ts` runs jsdom with
-`css: false` so no gate here can see a stylesheet. Issue #90 enables them
-afterwards. `npm run format -- <paths>` is available meanwhile.
+The FORMATTERS are enforced (issue #90), as checks, never rewrites:
+`ruff format --check` over the same four roots (in `lint.yml`,
+`scripts/check.sh` and `scripts/land.sh`) and `prettier --check .`, run as
+`npm run format:check` in `frontend/` (in `lint.yml` and
+`scripts/check-frontend.sh`). Fix a red run with `ruff format <paths>` or `npm run format -- <paths>`.
+
+Two things bite once. **A reformat can strand a `# noqa`.** Reflowing a line
+moves its trailing directive onto whichever line the comment ended up on, so a
+suppressed finding can reappear and the old directive turn up as an unused
+`RUF100`; after `ruff format`, run `ruff check` and move the directive onto the
+line ruff now reports. **`git blame` and the reformat.** The one commit that
+reformatted the tree is listed in `.git-blame-ignore-revs`, which GitHub
+honours automatically; locally run
+`git config blame.ignoreRevsFile .git-blame-ignore-revs` once.
+
+What the formatters skip is short and named. `ruff` skips
+`scripts/pre-push-confidentiality.py` (byte-identical to the engine copy it is
+vendored from) and Markdown; `prettier` skips what `frontend/.prettierignore` lists:
+`vendor/orbit-diner`, `src/orbit-diner` (our copy of that kit, merged against
+the supplier's by diff, so a reformat would bury our local edits), build
+output, and the `src/aws-exports.ts` stub the deploy-time generator overwrites. `frontend/vitest.config.ts` still runs jsdom
+with `css: false`, so no gate here can see a stylesheet: read the diff of any
+`.css` change yourself, formatted or not.
 
 Optional git hooks for both live in `.pre-commit-config.yaml` (`pre-commit
 install`). They are pre-commit hooks, not husky: husky would claim git's
@@ -248,7 +267,7 @@ bash scripts/land.sh
 ```
 
 `scripts/land.sh` is the whole flow: it refuses to run on `main`, runs
-`ruff check … && mypy` (first, because it is the cheapest),
+`ruff check … && ruff format --check … && mypy` (first, because it is the cheapest),
 `cd frontend && npm test`, `bash scripts/check.sh` (with `SKIP_INFRA=1` unless
 the branch touches `infra/`) and `python3 tests/lint-brand-free.py`, and on the
 first red gate prints that gate's name and exits 1 **without pushing**. All

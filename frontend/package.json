@@ -22,6 +22,7 @@
     "lint": "eslint .",
     "lint:baseline": "node scripts/eslint-baseline.mjs",
     "format": "prettier --write",
+    "format:check": "prettier --check .",
     "test": "node scripts/run-vitest.mjs"
   },
   "dependencies": {

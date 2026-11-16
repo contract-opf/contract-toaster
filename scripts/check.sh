@@ -366,9 +366,11 @@ fi
 #   already existed carry `# noqa` comments (ruff) and per-module
 #   `[[tool.mypy.overrides]] ignore_errors = true` entries mirrored in
 #   mypy-baseline.txt (mypy), which tests/test_lint_gates_65.py only ever lets
-#   shrink. `ruff format --check` is NOT run here — a whole-tree reformat
-#   collides with the in-flight #50-#59 series; follow-up issue #90 turns it on
-#   afterwards, and that same test asserts it is absent until then.
+#   shrink. `ruff format --check` runs here too (issue #90) over the same four
+#   roots, right after `ruff check`; tests/test_lint_gates_65.py check 7 asserts
+#   it is invoked and green. A reflowed line can strand its `# noqa`, so after
+#   `ruff format <paths>` re-run `ruff check` and move the directive onto the
+#   line ruff now reports.
 #
 # NOT fail-open on a missing TOOL. An absent ruff/mypy is a red gate with an
 # install line, never a silent skip: a lint gate that disappears when the tool
@@ -396,6 +398,13 @@ if [ -f pyproject.toml ] && grep -q '^\[tool\.ruff\]' pyproject.toml; then
   echo "CHECK: lint (ruff) …"
   if ! ruff check backend scripts tests infra/lambda; then
     echo "CHECK: FAIL - ruff reported NEW violations (the pre-#65 ones carry # noqa)." >&2
+    exit 1
+  fi
+
+  echo "CHECK: format (ruff format --check) …"
+  if ! ruff format --check backend scripts tests infra/lambda; then
+    echo "CHECK: FAIL - ruff would reformat the files above. Run: ruff format <those paths>" >&2
+    echo "CHECK:        then re-run ruff check (a reflowed line can strand its # noqa)." >&2
     exit 1
   fi
 

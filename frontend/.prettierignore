@@ -1,8 +1,9 @@
-# Prettier is available (`npm run format -- <paths>`) but is deliberately NOT a
-# gate yet — issue #65. A whole-tree reformat collides with the in-flight
-# #50-#59 series, exactly as `ruff format --check` does on the Python side, and
-# CLAUDE.md warns that no gate in this repo can see a stylesheet. Follow-up
-# issue #90 turns both on together, once that series has landed.
+# Prettier is a gate (issue #90): `npm run format:check` (`prettier --check .`)
+# runs in scripts/check-frontend.sh and in .github/workflows/lint.yml, and
+# `npm run format -- <paths>` fixes a red run. This file is the ONLY list of what
+# it skips; tests/test_lint_gates_65.py check 7 asserts vendor/orbit-diner and
+# src/orbit-diner are still on it. CLAUDE.md still warns that no gate in this repo can see a
+# stylesheet, so a formatter pass over .css is read by a person.
 dist
 node_modules
 public
