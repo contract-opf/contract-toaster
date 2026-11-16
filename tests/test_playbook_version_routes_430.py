@@ -291,6 +291,8 @@ class TestUpload(PlaybookVersionRoutesTestBase):
         self.assertEqual(body["status"], pv.STATUS_DRAFT)
         self.assertEqual(body["content_hash"], _expected_hash(content))
         self.assertEqual(body["artifact_kind"], "v1")
+        # QA 2026-10-31 item 13: a v1 upload says it is recorded, not executed.
+        self.assertEqual(body["warning"], backend_main.V1_UPLOAD_WARNING)
         self.assertEqual(body["uploaded_by"], ADMIN_SUB)
         self.assertIsInstance(body["uploaded_at"], int)
 

@@ -425,6 +425,62 @@ describe('AdminPlaybooks — upload', () => {
     });
   });
 
+  it('says so when the upload route flags a legacy v1 document (QA item 13)', async () => {
+    stubRoutes([
+      {
+        method: 'POST',
+        suffix: '/synthetic-nda-sample/versions',
+        status: 200,
+        body: {
+          playbook_id: 'synthetic-nda-sample',
+          version: 'v4.0.0',
+          artifact_kind: 'v1',
+          warning: 'SERVER-WARNING-TEXT-THAT-MUST-NOT-RENDER',
+        },
+      },
+    ]);
+    await renderPanel();
+    await openUpload();
+
+    fireEvent.change(screen.getByTestId('admin-playbooks-upload-playbook'), {
+      target: { value: 'synthetic-nda-sample' },
+    });
+    fireEvent.change(screen.getByTestId('admin-playbooks-upload-version'), {
+      target: { value: 'v4.0.0' },
+    });
+    fireEvent.change(screen.getByTestId('admin-playbooks-upload-file'), {
+      target: { files: [new File(['{}'], 'playbook.json', { type: 'application/json' })] },
+    });
+    fireEvent.click(screen.getByTestId('admin-playbooks-upload-submit'));
+
+    const success = await screen.findByTestId('admin-playbooks-upload-success');
+    expect(success.textContent).toContain('legacy v1 playbook');
+    expect(success.textContent).toContain('refused otherwise');
+    // The server's own `warning` text is never rendered: only its presence is read.
+    expect(success.textContent).not.toContain('SERVER-WARNING-TEXT-THAT-MUST-NOT-RENDER');
+  });
+
+  it('keeps the ordinary success copy for an OPF upload', async () => {
+    stubRoutes();
+    await renderPanel();
+    await openUpload();
+
+    fireEvent.change(screen.getByTestId('admin-playbooks-upload-playbook'), {
+      target: { value: 'synthetic-nda-sample' },
+    });
+    fireEvent.change(screen.getByTestId('admin-playbooks-upload-version'), {
+      target: { value: 'v4.0.0' },
+    });
+    fireEvent.change(screen.getByTestId('admin-playbooks-upload-file'), {
+      target: { files: [new File(['{}'], 'playbook.opf.json', { type: 'application/json' })] },
+    });
+    fireEvent.click(screen.getByTestId('admin-playbooks-upload-submit'));
+
+    const success = await screen.findByTestId('admin-playbooks-upload-success');
+    expect(success.textContent).toContain('It is a draft until you activate it');
+    expect(success.textContent).not.toContain('legacy v1');
+  });
+
   it('sends a typed note as its own notes call, since the upload route records none', async () => {
     stubRoutes();
     await renderPanel();
