@@ -225,16 +225,12 @@ NUMERIC_BOUND_TIMEOUT_S = 2.0
 # Fixed issue wording. External text says what happened without naming a rule
 # or quoting a clause; the internal footnote names the rule and the reason.
 _CHANGE_SUMMARY = (
-    "The agreement does not contain this required protection in a form that "
-    "could be verified."
+    "The agreement does not contain this required protection in a form that could be verified."
 )
 _EXTERNAL_RATIONALE_INSERTED = (
-    "This protection was not found in the agreement, so the standard language "
-    "has been inserted."
+    "This protection was not found in the agreement, so the standard language has been inserted."
 )
-_EXTERNAL_RATIONALE_FLAG_ONLY = (
-    "This protection was not found in the agreement and must be added."
-)
+_EXTERNAL_RATIONALE_FLAG_ONLY = "This protection was not found in the agreement and must be added."
 #: Issue #169: an inserting ledger issue's `analysis_report.changes_not_applied`
 #: row when stage 5 refused its insertion (a compile failure), in place of
 #: `_EXTERNAL_RATIONALE_INSERTED`, which would claim a change the document
@@ -344,7 +340,9 @@ def build_ledger(opf_doc: dict[str, Any] | None) -> list[dict[str, Any]]:
                 "title": titles.get(clause_id) if clause_id else None,
                 "condition": condition if condition is not None else CONDITION_JUDGED,
                 "reference_title": reference_title,
-                "fallback_language": fallback if isinstance(fallback, str) and fallback.strip() else None,
+                "fallback_language": fallback
+                if isinstance(fallback, str) and fallback.strip()
+                else None,
                 "order": orders.get(clause_id) if clause_id else None,
                 "sections": sections,
                 "status": STATUS_UNPROVEN,
@@ -451,7 +449,11 @@ def anomaly_rule_ids(opf_doc: dict[str, Any] | None, block_map: dict[str, Any] |
     for rule in manifest.get("hard_rules") or []:
         if not isinstance(rule, dict) or rule.get("required_presence") is True:
             continue
-        rule_id, clause_id, condition = rule.get("rule_id"), rule.get("clause_id"), rule.get("condition")
+        rule_id, clause_id, condition = (
+            rule.get("rule_id"),
+            rule.get("clause_id"),
+            rule.get("condition"),
+        )
         if not isinstance(rule_id, str) or not rule_id or rule_id in fired:
             continue
         if not isinstance(condition, dict) or not isinstance(clause_id, str):
@@ -462,7 +464,9 @@ def anomaly_rule_ids(opf_doc: dict[str, Any] | None, block_map: dict[str, Any] |
         text = _section_text(block_map, title)
         if text is None:
             continue
-        reference = condition.get("clause_id") if condition.get("type") == "cross_reference" else None
+        reference = (
+            condition.get("clause_id") if condition.get("type") == "cross_reference" else None
+        )
         entry = {
             "condition": condition,
             "reference_title": titles.get(reference) if isinstance(reference, str) else None,
@@ -531,7 +535,7 @@ def render_critic_ledger_block(ledger: Sequence[dict[str, Any]]) -> str:
         "For EVERY entry, add exactly one object to critic_delta.ledger_dispositions:",
         '  - "CLEARED" when you found it: give "block_id" (the id in square brackets '
         'at the start of the paragraph it is in) and "span" (the exact words of that '
-        'paragraph that establish it, copied verbatim, not the whole paragraph), and '
+        "paragraph that establish it, copied verbatim, not the whole paragraph), and "
         'a one-line "reason".',
         '  - "ASSERT" when it is missing or inadequate: give a one-line "reason", and '
         '"block_id" of the paragraph where it belongs if the agreement has one.',
@@ -631,9 +635,7 @@ def evaluate_predicate(entry: dict[str, Any], text: str) -> bool | None:
     kind = condition.get("type")
     haystack = _predicate_form(text)
     if kind == "required_phrases":
-        phrases = [
-            _predicate_form(p) for p in condition.get("phrases") or [] if isinstance(p, str)
-        ]
+        phrases = [_predicate_form(p) for p in condition.get("phrases") or [] if isinstance(p, str)]
         phrases = [p for p in phrases if p]
         if not phrases:
             return None
@@ -1065,7 +1067,9 @@ def _issue_for(entry: dict[str, Any], key: str, outcome: str) -> dict[str, Any]:
             if outcome == OUTCOME_INSERTED
             else _EXTERNAL_RATIONALE_FLAG_ONLY
         ),
-        "internal_rationale_for_footnote": internal_note(entry["rule_id"], entry["reason"], outcome),
+        "internal_rationale_for_footnote": internal_note(
+            entry["rule_id"], entry["reason"], outcome
+        ),
         "playbook_topic_id": topic,
         "internal_precedent_citation": None,
         "provenance": PROVENANCE_PREFIX + entry["rule_id"],
@@ -1156,9 +1160,7 @@ def enforce(
                 }
             )
             inserted_clauses.add(clause_key)
-        outcome = (
-            OUTCOME_INSERTED if insert else OUTCOME_COVERED if covered else OUTCOME_FLAG_ONLY
-        )
+        outcome = OUTCOME_INSERTED if insert else OUTCOME_COVERED if covered else OUTCOME_FLAG_ONLY
         issues.append(_issue_for(entry, key, outcome))
         record_entry.update(
             {"inserted": insert, "anchor_block_id": anchor if insert else None, "issue_key": key}
@@ -1192,7 +1194,11 @@ def _verdict_summary(reconciled: dict[str, Any], asserted: int, inserted: int) -
     summary = reconciled.get("verdict_summary")
     if note is None:
         return summary
-    if reconciled.get("decision") == "REQUEST_CHANGE" and isinstance(summary, str) and summary.strip():
+    if (
+        reconciled.get("decision") == "REQUEST_CHANGE"
+        and isinstance(summary, str)
+        and summary.strip()
+    ):
         return f"{summary.rstrip()} {note}"
     return f"Changes are requested: {note}"
 

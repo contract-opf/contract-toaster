@@ -87,7 +87,16 @@ import { UserFacingError, toUserMessage } from './userMessage';
 // color from the same field separately — one shared source now drives both.
 import { describeOutcome } from './outcome';
 import { explainFailure, UNCLASSIFIED_REASON } from './ReviewSubmission';
-import { CtBanner, CtButton, CtCard, CtChip, CtIconButton, CtProgress, CtTable, CtToolbar } from './ui/react';
+import {
+  CtBanner,
+  CtButton,
+  CtCard,
+  CtChip,
+  CtIconButton,
+  CtProgress,
+  CtTable,
+  CtToolbar,
+} from './ui/react';
 
 // ---------------------------------------------------------------------------
 // Types — mirror backend/src/reviews.py's `_RECENT_FAILURE_FIELDS` exactly.
@@ -187,9 +196,7 @@ export function criticAttemptsDetail(failure: RecentFailure): string | null {
 }
 
 type LoadState<T> =
-  | { status: 'loading' }
-  | { status: 'ready'; data: T }
-  | { status: 'failed'; message: string };
+  { status: 'loading' } | { status: 'ready'; data: T } | { status: 'failed'; message: string };
 
 // How many rows to ask for. The backend clamps this into its own hard range
 // (`reviews.RECENT_FAILURES_MAX_LIMIT`) — the value here is a display choice,
@@ -340,8 +347,7 @@ export default function AdminDiagnostics(): React.ReactElement | null {
     } catch (err) {
       setLoad({
         status: 'failed',
-        message:
-          toUserMessage(err, "We couldn't load recent failures. Please try again."),
+        message: toUserMessage(err, "We couldn't load recent failures. Please try again."),
       });
     }
   }, []);
@@ -396,45 +402,49 @@ export default function AdminDiagnostics(): React.ReactElement | null {
           importantly — what it is not, so nobody reads a short list as
           "nothing else ever went wrong" or comes here looking for logs. */}
       <CtBanner variant="muted" data-testid="admin-diagnostics-scope-note">
-        The most recent failed reviews across this deployment, newest first, up to{' '}
-        {REQUESTED_LIMIT}. Each row says what went wrong and who can fix it. This is not a log
-        view: no document text, review content, application logs, or exception output is shown
-        here, and nothing on this screen re-runs a review. A “Detector” line names the safety
-        check that stopped a review — the check’s own name, never anything it matched.
+        The most recent failed reviews across this deployment, newest first, up to {REQUESTED_LIMIT}
+        . Each row says what went wrong and who can fix it. This is not a log view: no document
+        text, review content, application logs, or exception output is shown here, and nothing on
+        this screen re-runs a review. A “Detector” line names the safety check that stopped a review
+        — the check’s own name, never anything it matched.
       </CtBanner>
 
-      {load.status === 'ready' && (() => {
-        const incident = detectConsecutiveIncidents(load.data);
-        if (!incident) return null;
-        return (
-          <CtBanner variant="danger" data-testid="diagnostics-incident-banner">
-            <div
-              className="ct-row"
-              style={{
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                width: '100%',
-                flexWrap: 'wrap',
-                gap: '0.5rem',
-              }}
-            >
-              <span>
-                <strong>Incident Alert:</strong> {incident.count} consecutive failures detected in{' '}
-                {incident.type === 'reason' ? `reason "${incident.value}"` : `stage "${incident.value}"`}.
-              </span>
-              <CtButton
-                type="button"
-                variant="secondary"
-                size="sm"
-                data-testid="diagnostics-filter-incident-btn"
-                onClick={() => setSearchQuery(incident.value)}
+      {load.status === 'ready' &&
+        (() => {
+          const incident = detectConsecutiveIncidents(load.data);
+          if (!incident) return null;
+          return (
+            <CtBanner variant="danger" data-testid="diagnostics-incident-banner">
+              <div
+                className="ct-row"
+                style={{
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  width: '100%',
+                  flexWrap: 'wrap',
+                  gap: '0.5rem',
+                }}
               >
-                {`Filter to this ${incident.type}`}
-              </CtButton>
-            </div>
-          </CtBanner>
-        );
-      })()}
+                <span>
+                  <strong>Incident Alert:</strong> {incident.count} consecutive failures detected in{' '}
+                  {incident.type === 'reason'
+                    ? `reason "${incident.value}"`
+                    : `stage "${incident.value}"`}
+                  .
+                </span>
+                <CtButton
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  data-testid="diagnostics-filter-incident-btn"
+                  onClick={() => setSearchQuery(incident.value)}
+                >
+                  {`Filter to this ${incident.type}`}
+                </CtButton>
+              </div>
+            </CtBanner>
+          );
+        })()}
 
       {load.status === 'failed' && (
         <div className="ct-stack">
@@ -465,7 +475,9 @@ export default function AdminDiagnostics(): React.ReactElement | null {
               const q = searchQuery.trim().toLowerCase();
               const matchId = failure.review_id.toLowerCase().includes(q);
               const matchReason = failure.reason ? failure.reason.toLowerCase().includes(q) : false;
-              const matchStage = failure.failing_stage ? failure.failing_stage.toLowerCase().includes(q) : false;
+              const matchStage = failure.failing_stage
+                ? failure.failing_stage.toLowerCase().includes(q)
+                : false;
               return matchId || matchReason || matchStage;
             });
             return (
@@ -484,119 +496,130 @@ export default function AdminDiagnostics(): React.ReactElement | null {
                   <tbody>
                     {load.data.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="ct-table__empty" data-testid="admin-diagnostics-empty">
+                        <td
+                          colSpan={6}
+                          className="ct-table__empty"
+                          data-testid="admin-diagnostics-empty"
+                        >
                           No recent failures.
                         </td>
                       </tr>
                     ) : filteredFailures.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="ct-table__empty" data-testid="admin-diagnostics-no-matches">
+                        <td
+                          colSpan={6}
+                          className="ct-table__empty"
+                          data-testid="admin-diagnostics-no-matches"
+                        >
                           No failures match "{searchQuery}".
                         </td>
                       </tr>
                     ) : (
                       filteredFailures.map((failure) => {
-                    // The SAME resolution the Review tab runs: the #442 token
-                    // first, the failing stage as fallback. Never re-derived
-                    // here (see this file's header).
-                    const explanation = explainFailure(failure);
-                    const outcomeChip = describeOutcome(failure.status);
-                    // Issue #616: present only on a leakage block; null
-                    // everywhere else, so no other row grows an empty label.
-                    const detector = detectorDetail(failure);
-                    // Issue #665: present only on a critic-pass failure;
-                    // null everywhere else, same as `detector` above.
-                    const criticAttempts = criticAttemptsDetail(failure);
-                    return (
-                      <tr
-                        key={failure.review_id}
-                        data-testid={`failure-row-${failure.review_id}`}
-                      >
-                        <td className="ct-table__mono">
-                          <div className="ct-row" style={{ alignItems: 'center', gap: 'var(--ct-space-1)' }}>
-                            <span data-testid={`review-id-text-${failure.review_id}`}>
-                              {failure.review_id}
-                            </span>{' '}
-                            <CtIconButton
-                              type="button"
-                              label={`Copy review id ${failure.review_id}`}
-                              data-testid={`copy-review-id-${failure.review_id}`}
-                              onClick={() => copyReviewId(failure.review_id)}
-                            >
-                              {copiedReviewId === failure.review_id ? '✓' : '⧉'}
-                            </CtIconButton>
-                          </div>
-                          <div style={{ marginTop: 'var(--ct-space-1)' }}>
-                            <CtButton
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              data-testid={`failure-details-btn-${failure.review_id}`}
-                              onClick={() => setSelectedFailure(failure)}
-                            >
-                              Details
-                            </CtButton>
-                          </div>
-                        </td>
-                        {/* Issue #472: the real failure timestamp, when one was
+                        // The SAME resolution the Review tab runs: the #442 token
+                        // first, the failing stage as fallback. Never re-derived
+                        // here (see this file's header).
+                        const explanation = explainFailure(failure);
+                        const outcomeChip = describeOutcome(failure.status);
+                        // Issue #616: present only on a leakage block; null
+                        // everywhere else, so no other row grows an empty label.
+                        const detector = detectorDetail(failure);
+                        // Issue #665: present only on a critic-pass failure;
+                        // null everywhere else, same as `detector` above.
+                        const criticAttempts = criticAttemptsDetail(failure);
+                        return (
+                          <tr
+                            key={failure.review_id}
+                            data-testid={`failure-row-${failure.review_id}`}
+                          >
+                            <td className="ct-table__mono">
+                              <div
+                                className="ct-row"
+                                style={{ alignItems: 'center', gap: 'var(--ct-space-1)' }}
+                              >
+                                <span data-testid={`review-id-text-${failure.review_id}`}>
+                                  {failure.review_id}
+                                </span>{' '}
+                                <CtIconButton
+                                  type="button"
+                                  label={`Copy review id ${failure.review_id}`}
+                                  data-testid={`copy-review-id-${failure.review_id}`}
+                                  onClick={() => copyReviewId(failure.review_id)}
+                                >
+                                  {copiedReviewId === failure.review_id ? '✓' : '⧉'}
+                                </CtIconButton>
+                              </div>
+                              <div style={{ marginTop: 'var(--ct-space-1)' }}>
+                                <CtButton
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  data-testid={`failure-details-btn-${failure.review_id}`}
+                                  onClick={() => setSelectedFailure(failure)}
+                                >
+                                  Details
+                                </CtButton>
+                              </div>
+                            </td>
+                            {/* Issue #472: the real failure timestamp, when one was
                             recorded, falling back to created_at for a row
                             written before this field existed (or whose
                             terminal write never went through
                             record_stage_failure / _fail_review) rather than
                             regressing to a blank cell it didn't have before. */}
-                        <td className="ct-table__mono">
-                          {formatFailureTime(failure.failed_at ?? failure.created_at)}
-                        </td>
-                        <td>
-                          <CtChip variant={outcomeChip.variant}>{outcomeChip.label}</CtChip>
-                        </td>
-                        <td className="ct-table__mono">{failure.failing_stage || '—'}</td>
-                        <td data-testid={`failure-cause-${failure.review_id}`}>
-                          {explanation
-                            ? explanation.cause
-                            : 'The review stopped before it could finish, and no cause was recorded.'}
-                          {/* Issue #616: the leakage detector that actually
+                            <td className="ct-table__mono">
+                              {formatFailureTime(failure.failed_at ?? failure.created_at)}
+                            </td>
+                            <td>
+                              <CtChip variant={outcomeChip.variant}>{outcomeChip.label}</CtChip>
+                            </td>
+                            <td className="ct-table__mono">{failure.failing_stage || '—'}</td>
+                            <td data-testid={`failure-cause-${failure.review_id}`}>
+                              {explanation
+                                ? explanation.cause
+                                : 'The review stopped before it could finish, and no cause was recorded.'}
+                              {/* Issue #616: the leakage detector that actually
                               fired, under the reader-facing cause. Labelled
                               and set in the id/digest mono face so it reads
                               as operator diagnostic detail rather than as
                               more prose — the cause sentence above is the
                               same copy the submitter sees; this line is not.
                               Rendered only when the row carries it. */}
-                          {detector !== null && (
-                            <div
-                              className="ct-table__mono"
-                              data-testid={`failure-detector-${failure.review_id}`}
-                            >
-                              Detector: {detector}
-                            </div>
-                          )}
-                          {/* Issue #665: the retry budget the critic pass
+                              {detector !== null && (
+                                <div
+                                  className="ct-table__mono"
+                                  data-testid={`failure-detector-${failure.review_id}`}
+                                >
+                                  Detector: {detector}
+                                </div>
+                              )}
+                              {/* Issue #665: the retry budget the critic pass
                               spent — above its baseline means it also ran
                               out of output room on the way. Same labelled,
                               mono, operator-only treatment as the detector
                               line. Rendered only when the row carries a
                               count. */}
-                          {criticAttempts !== null && (
-                            <div
-                              className="ct-table__mono"
-                              data-testid={`failure-critic-attempts-${failure.review_id}`}
-                            >
-                              Critic: {criticAttempts}
-                            </div>
-                          )}
-                        </td>
-                        <td data-testid={`failure-fix-${failure.review_id}`}>
-                          {explanation
-                            ? explanation.fix
-                            : 'Ask the person who submitted it to try again, and check the model account and key under “Models” if it keeps happening.'}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </CtTable>
+                              {criticAttempts !== null && (
+                                <div
+                                  className="ct-table__mono"
+                                  data-testid={`failure-critic-attempts-${failure.review_id}`}
+                                >
+                                  Critic: {criticAttempts}
+                                </div>
+                              )}
+                            </td>
+                            <td data-testid={`failure-fix-${failure.review_id}`}>
+                              {explanation
+                                ? explanation.fix
+                                : 'Ask the person who submitted it to try again, and check the model account and key under “Models” if it keeps happening.'}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </CtTable>
             );
           })()}
         </CtCard>
@@ -644,7 +667,9 @@ export default function AdminDiagnostics(): React.ReactElement | null {
                       <tr>
                         <th>Recorded failure</th>
                         <td className="ct-table__mono">
-                          {formatFailureTime(selectedFailure.failed_at ?? selectedFailure.created_at)}
+                          {formatFailureTime(
+                            selectedFailure.failed_at ?? selectedFailure.created_at,
+                          )}
                         </td>
                       </tr>
                       <tr>
@@ -670,9 +695,7 @@ export default function AdminDiagnostics(): React.ReactElement | null {
                       {detectorDetail(selectedFailure) && (
                         <tr>
                           <th>Detector</th>
-                          <td className="ct-table__mono">
-                            {detectorDetail(selectedFailure)}
-                          </td>
+                          <td className="ct-table__mono">{detectorDetail(selectedFailure)}</td>
                         </tr>
                       )}
                       {criticAttemptsDetail(selectedFailure) && (

@@ -122,6 +122,7 @@ def _all_infra_ts_text() -> str:
 # Check A -- state machine defined, no SQS on the entry path
 # ---------------------------------------------------------------------------
 
+
 def check_a_state_machine_no_sqs() -> list[str]:
     print("\nCheck A: Step Functions state machine defined; NO SQS on the entry path …")
     failures: list[str] = []
@@ -167,6 +168,7 @@ def check_a_state_machine_no_sqs() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check B -- stage skeleton + mock review task
 # ---------------------------------------------------------------------------
+
 
 def check_b_stage_skeleton_mock_task() -> list[str]:
     print("\nCheck B: stage skeleton (extract..audit) + mock review task …")
@@ -221,7 +223,9 @@ def check_b_stage_skeleton_mock_task() -> list[str]:
         failures += _assert(
             bool(re.search(r"s3_key|s3://|bucket", mock_text, re.IGNORECASE))
             and not bool(
-                re.search(r"doc_text|document_content|document_body|full_text", mock_text, re.IGNORECASE)
+                re.search(
+                    r"doc_text|document_content|document_body|full_text", mock_text, re.IGNORECASE
+                )
             ),
             "mock_review handler payload is pointer-only (S3 keys, not inline document text)",
         )
@@ -232,6 +236,7 @@ def check_b_stage_skeleton_mock_task() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check C -- per-stage timeout/retry + Catch-all -> ERROR
 # ---------------------------------------------------------------------------
+
 
 def check_c_timeout_retry_catch() -> list[str]:
     print("\nCheck C: per-stage timeout/retry policy + Catch-all -> ERROR …")
@@ -255,7 +260,8 @@ def check_c_timeout_retry_catch() -> list[str]:
         "pipeline-stack.ts sets a per-task timeout",
     )
     failures += _assert(
-        bool(re.search(r"ERROR", text)) and bool(re.search(r"failing.?stage|failed.?stage|stage.?name", text, re.IGNORECASE)),
+        bool(re.search(r"ERROR", text))
+        and bool(re.search(r"failing.?stage|failed.?stage|stage.?name", text, re.IGNORECASE)),
         "Error path records the failing stage and transitions the review to ERROR",
         "Per AC: a failed stage transitions execution + reviews row to ERROR with the failing stage recorded.",
     )
@@ -266,6 +272,7 @@ def check_c_timeout_retry_catch() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check D -- execution-level (state-machine) timeout
 # ---------------------------------------------------------------------------
+
 
 def check_d_execution_level_timeout() -> list[str]:
     print("\nCheck D: state-machine-level execution timeout …")
@@ -290,6 +297,7 @@ def check_d_execution_level_timeout() -> list[str]:
 # Check E -- CMK encryption wired
 # ---------------------------------------------------------------------------
 
+
 def check_e_cmk_encryption() -> list[str]:
     print("\nCheck E: state machine is CMK-encrypted (issue #19) …")
     failures: list[str] = []
@@ -300,14 +308,20 @@ def check_e_cmk_encryption() -> list[str]:
     text = _read(PIPELINE_STACK_PATH)
 
     failures += _assert(
-        bool(re.search(r"stateMachineKey|kms\.IKey|encryptionConfiguration|kmsKey", text, re.IGNORECASE)),
+        bool(
+            re.search(
+                r"stateMachineKey|kms\.IKey|encryptionConfiguration|kmsKey", text, re.IGNORECASE
+            )
+        ),
         "pipeline-stack.ts wires a CMK for the state machine",
     )
 
     if TOP_STACK_PATH.is_file():
         top_text = _read(TOP_STACK_PATH)
         failures += _assert(
-            "Pipeline" in top_text and "pipeline-stack" not in top_text or "PipelineStack" in top_text,  # noqa: RUF021
+            "Pipeline" in top_text  # noqa: RUF021
+            and "pipeline-stack" not in top_text
+            or "PipelineStack" in top_text,
             "contract-toaster-stack.ts instantiates PipelineStack",
         )
 
@@ -317,6 +331,7 @@ def check_e_cmk_encryption() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check F -- concurrency semaphore with lease/TTL
 # ---------------------------------------------------------------------------
+
 
 def check_f_concurrency_semaphore() -> list[str]:
     print("\nCheck F: concurrency control (semaphore) with lease/TTL semantics …")
@@ -329,7 +344,9 @@ def check_f_concurrency_semaphore() -> list[str]:
     data_text = _read(DATA_STACK_PATH) if DATA_STACK_PATH.is_file() else ""
 
     has_semaphore_concept = bool(
-        re.search(r"semaphore|maxConcurrency|reserved.?concurrency|concurrency.?slot", text, re.IGNORECASE)
+        re.search(
+            r"semaphore|maxConcurrency|reserved.?concurrency|concurrency.?slot", text, re.IGNORECASE
+        )
     )
     failures += _assert(
         has_semaphore_concept,
@@ -351,10 +368,13 @@ def check_f_concurrency_semaphore() -> list[str]:
 # Check G -- least-privilege pipeline task role; sole bedrock:InvokeModel holder
 # ---------------------------------------------------------------------------
 
+
 def check_g_least_privilege_bedrock() -> list[str]:
-    print("\nCheck G: pipelineReviewRole is the ONLY holder of bedrock:InvokeModel on the "
-          "primary/critic model ARNs and of bedrock:Retrieve/RetrieveAndGenerate "
-          "(reconciled with issue #60 -- ARN-scoped, not action-name-wide) …")
+    print(
+        "\nCheck G: pipelineReviewRole is the ONLY holder of bedrock:InvokeModel on the "
+        "primary/critic model ARNs and of bedrock:Retrieve/RetrieveAndGenerate "
+        "(reconciled with issue #60 -- ARN-scoped, not action-name-wide) …"
+    )
     failures: list[str] = []
 
     if not PIPELINE_STACK_PATH.is_file():
@@ -370,9 +390,9 @@ def check_g_least_privilege_bedrock() -> list[str]:
     # models.critic in the Bedrock model policy -- the grant must name exactly
     # the models the pinned roles call, so a re-pin that moves the policy file
     # but not this stack (or vice versa) fails here.
-    policy_models = json.loads(
-        _read(REPO_ROOT / "model-policy" / "bedrock-us-east-1.json")
-    )["models"]
+    policy_models = json.loads(_read(REPO_ROOT / "model-policy" / "bedrock-us-east-1.json"))[
+        "models"
+    ]
     for role, const in (("primary", "PRIMARY_MODEL_ID"), ("critic", "CRITIC_MODEL_ID")):
         match = re.search(rf"const {const} = '([^']+)';", pipeline_text)
         pinned = policy_models[role]["model_id"]
@@ -436,6 +456,7 @@ def check_g_least_privilege_bedrock() -> list[str]:
 # Check H -- RAG / context caps wired as config
 # ---------------------------------------------------------------------------
 
+
 def check_h_context_caps() -> list[str]:
     print("\nCheck H: RAG / context caps wired as state-machine/config limits …")
     failures: list[str] = []
@@ -464,6 +485,7 @@ def check_h_context_caps() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check I -- backend/src/reviews.py: idempotency, reservation, ensure-started
 # ---------------------------------------------------------------------------
+
 
 def check_i_reviews_py() -> list[str]:
     print("\nCheck I: backend/src/reviews.py -- idempotency, reservation, API stub …")
@@ -494,7 +516,9 @@ def check_i_reviews_py() -> list[str]:
         "reviews.py documents/uses a fixed-width timestamp bucket constant (default 10 min)",
     )
     failures += _assert(
-        bool(re.search(r"ConditionExpression|attribute_not_exists|conditional", text, re.IGNORECASE)),
+        bool(
+            re.search(r"ConditionExpression|attribute_not_exists|conditional", text, re.IGNORECASE)
+        ),
         "reviews.py uses a conditional write for the submission record",
     )
     failures += _assert(
@@ -520,12 +544,16 @@ def check_i_reviews_py() -> list[str]:
         "reviews.py returns 202 on submission",
     )
     failures += _assert(
-        bool(re.search(r"PENDING", text)) and bool(re.search(r"RUNNING", text)) and bool(re.search(r"\bDONE\b", text)),
+        bool(re.search(r"PENDING", text))
+        and bool(re.search(r"RUNNING", text))
+        and bool(re.search(r"\bDONE\b", text)),
         "reviews.py references the PENDING -> RUNNING -> DONE/ERROR status lifecycle",
     )
     failures += _assert(
         bool(re.search(r"release.?bundle|bundle_hash", text, re.IGNORECASE))
-        and bool(re.search(r"resolve.*once|single.?resolution|resolved.*submission", text, re.IGNORECASE)),
+        and bool(
+            re.search(r"resolve.*once|single.?resolution|resolved.*submission", text, re.IGNORECASE)
+        ),
         "reviews.py resolves the release bundle ONCE at submission (never re-resolved by execution)",
         "Reconciliation note #21.",
     )
@@ -536,6 +564,7 @@ def check_i_reviews_py() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check J -- orphan reconciler
 # ---------------------------------------------------------------------------
+
 
 def check_j_orphan_reconciler() -> list[str]:
     print("\nCheck J: orphan reconciler (dead-execution handling + re-drive) …")
@@ -562,7 +591,13 @@ def check_j_orphan_reconciler() -> list[str]:
             "reconciler transitions dead executions to ERROR",
         )
         failures += _assert(
-            bool(re.search(r"release.*(slot|reservation)|reservation.*release|slot.*release", text, re.IGNORECASE)),
+            bool(
+                re.search(
+                    r"release.*(slot|reservation)|reservation.*release|slot.*release",
+                    text,
+                    re.IGNORECASE,
+                )
+            ),
             "reconciler releases the reservation and concurrency slot on the dead-execution path",
         )
         failures += _assert(
@@ -584,6 +619,7 @@ def check_j_orphan_reconciler() -> list[str]:
 # Check K -- cdk synth
 # ---------------------------------------------------------------------------
 
+
 def check_k_cdk_synth() -> list[str]:
     print("\nCheck K: cdk synth runs cleanly with the pipeline stack wired in …")
     failures: list[str] = []
@@ -595,7 +631,10 @@ def check_k_cdk_synth() -> list[str]:
     if not node_modules.is_dir():
         print("  (node_modules absent — running npm install first …)")
         install = subprocess.run(
-            ["npm", "install"], cwd=INFRA, capture_output=True, text=True  # noqa: S607
+            ["npm", "install"],  # noqa: S607
+            cwd=INFRA,
+            capture_output=True,
+            text=True,
         )
         if install.returncode != 0:
             return _assert(

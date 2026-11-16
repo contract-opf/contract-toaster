@@ -148,7 +148,9 @@ def _manifest_clause_by_rule(opf_doc: dict[str, Any]) -> dict[str, str]:
     return out
 
 
-def _resolver(dossiers: dict[str, dict[str, Any]], opf_doc: dict[str, Any]) -> Callable[[Any], list[str]]:
+def _resolver(
+    dossiers: dict[str, dict[str, Any]], opf_doc: dict[str, Any]
+) -> Callable[[Any], list[str]]:
     """A function mapping one rule/topic id to the clause ids of the dossiers
     it names (empty when it names none)."""
     by_rule = _manifest_clause_by_rule(opf_doc)
@@ -246,7 +248,9 @@ def select_dossiers(
     kept, over_cap = ordered[: max(0, max_dossiers)], ordered[max(0, max_dossiers) :]
     aliases = deal_aliases.alias_map(opf_doc)
     return DossierSelection(
-        dossiers=tuple(deal_aliases.alias_dossier(dossiers[clause_id], aliases) for clause_id in kept),
+        dossiers=tuple(
+            deal_aliases.alias_dossier(dossiers[clause_id], aliases) for clause_id in kept
+        ),
         clause_ids=tuple(kept),
         sources={clause_id: sources[clause_id] for clause_id in kept},
         dropped_over_cap=tuple(over_cap),

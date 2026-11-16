@@ -154,7 +154,7 @@ class ReviewDetailPrefillFieldsTest(ReviewApiTestBase):
         self.assertIs(detail["has_input"], True)
 
     def test_defaults_project_as_none_rather_than_back_filled_values(self):
-        """"Ran at the default" must stay distinguishable from "ran at a
+        """ "Ran at the default" must stay distinguishable from "ran at a
         setting". The row records neither `notes_mode=external` nor
         `markup_intensity=medium` (both are the defaults and are deliberately
         absent), so the projection answers None -- and `fromMarkupIntensity`

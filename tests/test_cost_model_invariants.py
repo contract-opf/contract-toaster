@@ -57,6 +57,7 @@ RUNBOOK = REPO_ROOT / "RUNBOOK.md"
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
+
 def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
@@ -72,6 +73,7 @@ def cost_shape_section(arch_text: str) -> str:
 
 
 # ── Check 1: named token caps exist in Cost shape ────────────────────────────
+
 
 def check_token_caps_in_cost_shape() -> list[str]:
     """
@@ -98,6 +100,7 @@ def check_token_caps_in_cost_shape() -> list[str]:
 
 
 # ── Check 2: retry-inclusive reservation formula stated ─────────────────────
+
 
 def check_reservation_formula_retry_inclusive() -> list[str]:
     """
@@ -135,6 +138,7 @@ def check_reservation_formula_retry_inclusive() -> list[str]:
 
 # ── Check 3: unit-economics table present ────────────────────────────────────
 
+
 def check_unit_economics_table() -> list[str]:
     """
     ARCHITECTURE.md Cost shape must contain a unit-economics table or
@@ -153,20 +157,25 @@ def check_unit_economics_table() -> list[str]:
     # Each required element — pattern and human label
     required_elements = [
         (
-            re.compile(r"worst.case.*\$/review|worst.case.*per.review|\$/review.*worst.case",
-                       re.IGNORECASE),
+            re.compile(
+                r"worst.case.*\$/review|worst.case.*per.review|\$/review.*worst.case", re.IGNORECASE
+            ),
             "worst-case $/review figure",
         ),
         (
-            re.compile(r"max.*reviews?.*per.*day|max.*reviews?.*day|reviews?.*per.*day.*ceiling|"
-                       r"reviews?.*day.*cap",
-                       re.IGNORECASE),
+            re.compile(
+                r"max.*reviews?.*per.*day|max.*reviews?.*day|reviews?.*per.*day.*ceiling|"
+                r"reviews?.*day.*cap",
+                re.IGNORECASE,
+            ),
             "max reviews/day at the ceiling",
         ),
         (
-            re.compile(r"typical.*\$/review|typical.*per.review|expected.*\$/review|"
-                       r"average.*\$/review|\$/review.*typical|\$/review.*expected",
-                       re.IGNORECASE),
+            re.compile(
+                r"typical.*\$/review|typical.*per.review|expected.*\$/review|"
+                r"average.*\$/review|\$/review.*typical|\$/review.*expected",
+                re.IGNORECASE,
+            ),
             "typical (or expected/average) $/review figure",
         ),
         (
@@ -174,8 +183,9 @@ def check_unit_economics_table() -> list[str]:
             "dev idle monthly cost with fixed-cost line items",
         ),
         (
-            re.compile(r"prod.*month|monthly.*prod|50.{0,10}200.*review|production.*month",
-                       re.IGNORECASE),
+            re.compile(
+                r"prod.*month|monthly.*prod|50.{0,10}200.*review|production.*month", re.IGNORECASE
+            ),
             "prod monthly target (50–200 reviews range or equivalent)",  # noqa: RUF001
         ),
     ]
@@ -200,6 +210,7 @@ def check_unit_economics_table() -> list[str]:
 
 # ── Check 4: leakage-scan mechanism documented ───────────────────────────────
 
+
 def check_leakage_scan_mechanism() -> list[str]:
     """
     ARCHITECTURE.md must state whether the leakage scan is deterministic
@@ -218,9 +229,9 @@ def check_leakage_scan_mechanism() -> list[str]:
     leakage_section = m.group(0) if m else ""
 
     has_deterministic = bool(re.search(r"deterministic", leakage_section, re.IGNORECASE))
-    has_model_based = bool(re.search(
-        r"model.based|model call|LLM|InvokeModel", leakage_section, re.IGNORECASE
-    ))
+    has_model_based = bool(
+        re.search(r"model.based|model call|LLM|InvokeModel", leakage_section, re.IGNORECASE)
+    )
 
     if not (has_deterministic or has_model_based):
         failures.append(
@@ -233,6 +244,7 @@ def check_leakage_scan_mechanism() -> list[str]:
 
 
 # ── Check 5: pricing contradiction resolved ──────────────────────────────────
+
 
 def check_pricing_contradiction() -> list[str]:
     """
@@ -248,16 +260,20 @@ def check_pricing_contradiction() -> list[str]:
     failures = []
     notes_text = read(DESIGN_NOTES)
 
-    has_match_direct = bool(re.search(
-        r"per.token.*pricing.*match|rates.*match.*direct|pricing.*matches.*direct",
-        notes_text,
-        re.IGNORECASE,
-    ))
-    has_premium = bool(re.search(
-        r"10%.*premium|regional.*premium|premium.*regional",
-        notes_text,
-        re.IGNORECASE,
-    ))
+    has_match_direct = bool(
+        re.search(
+            r"per.token.*pricing.*match|rates.*match.*direct|pricing.*matches.*direct",
+            notes_text,
+            re.IGNORECASE,
+        )
+    )
+    has_premium = bool(
+        re.search(
+            r"10%.*premium|regional.*premium|premium.*regional",
+            notes_text,
+            re.IGNORECASE,
+        )
+    )
 
     if has_match_direct and has_premium:
         # Both claims exist — check if a reconciling sentence is present
@@ -269,10 +285,10 @@ def check_pricing_contradiction() -> list[str]:
         for para in paragraphs:
             if re.search(
                 r"per.token.*pricing.*match|rates.*match.*direct|pricing.*matches.*direct",
-                para, re.IGNORECASE
+                para,
+                re.IGNORECASE,
             ) and re.search(
-                r"10%.*premium|regional.*premium|premium.*regional",
-                para, re.IGNORECASE
+                r"10%.*premium|regional.*premium|premium.*regional", para, re.IGNORECASE
             ):
                 # Both appear in the same paragraph — that is the reconciliation
                 return failures  # no failure if same paragraph
@@ -290,6 +306,7 @@ def check_pricing_contradiction() -> list[str]:
 
 
 # ── Check 6: cap-lockout RUNBOOK entry ───────────────────────────────────────
+
 
 def check_runbook_cap_lockout_entry() -> list[str]:
     """
@@ -324,20 +341,27 @@ def check_runbook_cap_lockout_entry() -> list[str]:
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
+
 def main() -> int:
     checks = [
-        ("1", "Token caps (max_input_tokens, max_output_tokens, max_retries_per_pass) in Cost shape",
-         check_token_caps_in_cost_shape),
-        ("2", "Reservation formula is retry-inclusive",
-         check_reservation_formula_retry_inclusive),
-        ("3", "Unit-economics table present (worst-case, max/day, typical, idle, prod target)",
-         check_unit_economics_table),
-        ("4", "Leakage-scan mechanism stated (deterministic or model-based)",
-         check_leakage_scan_mechanism),
-        ("5", "Pricing contradiction resolved in design-notes.md",
-         check_pricing_contradiction),
-        ("6", "Cap-lockout RUNBOOK entry exists",
-         check_runbook_cap_lockout_entry),
+        (
+            "1",
+            "Token caps (max_input_tokens, max_output_tokens, max_retries_per_pass) in Cost shape",
+            check_token_caps_in_cost_shape,
+        ),
+        ("2", "Reservation formula is retry-inclusive", check_reservation_formula_retry_inclusive),
+        (
+            "3",
+            "Unit-economics table present (worst-case, max/day, typical, idle, prod target)",
+            check_unit_economics_table,
+        ),
+        (
+            "4",
+            "Leakage-scan mechanism stated (deterministic or model-based)",
+            check_leakage_scan_mechanism,
+        ),
+        ("5", "Pricing contradiction resolved in design-notes.md", check_pricing_contradiction),
+        ("6", "Cap-lockout RUNBOOK entry exists", check_runbook_cap_lockout_entry),
     ]
 
     overall_pass = True

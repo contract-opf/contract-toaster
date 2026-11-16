@@ -26,13 +26,13 @@
  * number. That keeps this correct on Node versions that do not exist yet, and
  * on any future release that removes the flag again.
  */
-import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const FLAG = "--no-experimental-webstorage";
+const FLAG = '--no-experimental-webstorage';
 
 const require = createRequire(import.meta.url);
 const here = dirname(fileURLToPath(import.meta.url));
@@ -44,16 +44,16 @@ const here = dirname(fileURLToPath(import.meta.url));
 // loudly here instead of as a confusing spawn error.
 const candidates = [];
 try {
-  candidates.push(join(dirname(require.resolve("vitest")), "vitest.mjs"));
+  candidates.push(join(dirname(require.resolve('vitest')), 'vitest.mjs'));
 } catch {
   /* not installed; the bin fallback below will also miss and we report once */
 }
-candidates.push(join(here, "..", "node_modules", "vitest", "vitest.mjs"));
+candidates.push(join(here, '..', 'node_modules', 'vitest', 'vitest.mjs'));
 
 const vitestEntry = candidates.find((c) => existsSync(c));
 if (!vitestEntry) {
   console.error(
-    "run-vitest: could not locate vitest's entry point. Run `npm install` in frontend/ first."
+    "run-vitest: could not locate vitest's entry point. Run `npm install` in frontend/ first.",
   );
   process.exit(1);
 }
@@ -70,14 +70,13 @@ const supported = process.allowedNodeEnvironmentFlags.has(FLAG);
 // failures inside tests rather than as an obvious startup error.
 const env = { ...process.env };
 if (supported) {
-  env.NODE_OPTIONS = [env.NODE_OPTIONS, FLAG].filter(Boolean).join(" ");
+  env.NODE_OPTIONS = [env.NODE_OPTIONS, FLAG].filter(Boolean).join(' ');
 }
 
-const result = spawnSync(
-  process.execPath,
-  [vitestEntry, "run", ...process.argv.slice(2)],
-  { stdio: "inherit", env }
-);
+const result = spawnSync(process.execPath, [vitestEntry, 'run', ...process.argv.slice(2)], {
+  stdio: 'inherit',
+  env,
+});
 
 if (result.error) {
   console.error(`run-vitest: failed to start vitest: ${result.error.message}`);

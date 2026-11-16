@@ -85,8 +85,7 @@ _BODY_TEXT = (
 _SEGMENTS = [
     {
         "op": "keep",
-        "text": "The Receiving Party shall hold the Confidential Information in "
-        "confidence for ",
+        "text": "The Receiving Party shall hold the Confidential Information in confidence for ",
     },
     {"op": "delete", "text": "sixty (60)", "issue_key": "TERM-1"},
     {"op": "insert", "text": "thirty-six (36)", "issue_key": "TERM-1"},
@@ -166,9 +165,7 @@ def _with_extra_styles(docx_bytes: bytes, style_xml_list: list) -> bytes:
     styles -- the shape any document that has ever held a footnote arrives
     in."""
     styles = _part(docx_bytes, STYLES_PART).decode("utf-8")
-    injected = "".join(
-        xml.replace(f' xmlns:w="{WORD_NS}"', "") for xml in style_xml_list
-    )
+    injected = "".join(xml.replace(f' xmlns:w="{WORD_NS}"', "") for xml in style_xml_list)
     assert styles.rstrip().endswith("</w:styles>"), styles[-60:]
     patched = styles.rstrip()[: -len("</w:styles>")] + injected + "</w:styles>"
     return _rewrite_part(docx_bytes, {STYLES_PART: patched.encode("utf-8")})
@@ -242,15 +239,11 @@ def _styles_by_id(docx_bytes: bytes) -> dict:
 
 def _canonical_part(docx_bytes: bytes) -> str:
     """`word/styles.xml` in canonical form."""
-    return ET.canonicalize(
-        xml_data=_part(docx_bytes, STYLES_PART).decode("utf-8"), strip_text=True
-    )
+    return ET.canonicalize(xml_data=_part(docx_bytes, STYLES_PART).decode("utf-8"), strip_text=True)
 
 
 def _canonical(element: ET.Element) -> str:
-    return ET.canonicalize(
-        xml_data=ET.tostring(element, encoding="unicode"), strip_text=True
-    )
+    return ET.canonicalize(xml_data=ET.tostring(element, encoding="unicode"), strip_text=True)
 
 
 def _reference_runs(docx_bytes: bytes) -> list:
@@ -320,7 +313,9 @@ def _part_1_reference_renders_superscript(failures: list) -> None:
 
     runs = _reference_runs(out)
     if len(runs) != 1:
-        failures.append(f"[{case}] expected exactly one in-body footnote reference, got {len(runs)}")
+        failures.append(
+            f"[{case}] expected exactly one in-body footnote reference, got {len(runs)}"
+        )
         return
     run = runs[0]
     named = _run_style(run)
@@ -328,7 +323,7 @@ def _part_1_reference_renders_superscript(failures: list) -> None:
         failures.append(
             f"[{case}] the in-body reference run names character style {named!r}, not "
             f"{docx_parts.FOOTNOTE_REFERENCE_STYLE_ID!r} -- Word writes "
-            f"<w:r><w:rPr><w:rStyle w:val=\"FootnoteReference\"/></w:rPr>"
+            f'<w:r><w:rPr><w:rStyle w:val="FootnoteReference"/></w:rPr>'
             f"<w:footnoteReference .../></w:r>, and without it the number is plain text."
         )
     if list(run)[0].tag != _qn("rPr"):  # noqa: RUF015
@@ -355,7 +350,7 @@ def _part_1_reference_renders_superscript(failures: list) -> None:
         if not _resolves_to_superscript(style):
             failures.append(
                 f"[{case}] FootnoteReference does not resolve to "
-                f"<w:vertAlign w:val=\"superscript\"/>: {_canonical(style)!r}"
+                f'<w:vertAlign w:val="superscript"/>: {_canonical(style)!r}'
             )
 
 
@@ -417,9 +412,7 @@ def _part_2_footnote_body_is_styled(failures: list) -> None:
     # <w:ins>, and the footnote BODY is still tracked.
     doc_root = ET.fromstring(_part(out, "word/document.xml"))  # noqa: S314
     inside_ins = [
-        ref
-        for ins in doc_root.iter(_qn("ins"))
-        for ref in ins.iter(_qn("footnoteReference"))
+        ref for ins in doc_root.iter(_qn("ins")) for ref in ins.iter(_qn("footnoteReference"))
     ]
     if len(inside_ins) != 1:
         failures.append(
@@ -427,9 +420,7 @@ def _part_2_footnote_body_is_styled(failures: list) -> None:
             f"(found {len(inside_ins)}); issue #615's tracked reference must survive."
         )
     if p.find(_qn("ins")) is None:
-        failures.append(
-            f"[{case}] the footnote body is no longer wrapped in <w:ins>; issue #615."
-        )
+        failures.append(f"[{case}] the footnote body is no longer wrapped in <w:ins>; issue #615.")
 
 
 # ---------------------------------------------------------------------------
@@ -458,9 +449,7 @@ def _part_3_existing_definitions_survive(failures: list) -> None:
                 f"their own way, and rewriting it is an unrequested formatting edit "
                 f"(issue #647 scope item 3)."
             )
-        their_style = _styles_by_id(out).get(
-            docx_parts.FOOTNOTE_REFERENCE_STYLE_ID
-        )
+        their_style = _styles_by_id(out).get(docx_parts.FOOTNOTE_REFERENCE_STYLE_ID)
         theirs = ET.fromstring(_FOREIGN_REFERENCE_STYLE)  # noqa: S314
         if their_style is None or _canonical(their_style) != _canonical(theirs):
             failures.append(
@@ -470,9 +459,7 @@ def _part_3_existing_definitions_survive(failures: list) -> None:
         # ...and it must still be the style the reference run names, so the
         # "leave it alone" rule does not silently cost the fix.
         runs = _reference_runs(out)
-        if len(runs) != 1 or _run_style(runs[0]) != (
-            docx_parts.FOOTNOTE_REFERENCE_STYLE_ID
-        ):
+        if len(runs) != 1 or _run_style(runs[0]) != (docx_parts.FOOTNOTE_REFERENCE_STYLE_ID):
             failures.append(
                 f"[{case}] the reference run does not name FootnoteReference: "
                 f"{[_run_style(r) for r in runs]!r}"
@@ -502,9 +489,7 @@ def _part_3_existing_definitions_survive(failures: list) -> None:
             f"define it -- the two styles are decided independently."
         )
     elif _canonical(added) != ET.canonicalize(
-        xml_data=docx_parts.FOOTNOTE_STYLE_XML[
-            docx_parts.FOOTNOTE_TEXT_STYLE_ID
-        ],
+        xml_data=docx_parts.FOOTNOTE_STYLE_XML[docx_parts.FOOTNOTE_TEXT_STYLE_ID],
         strip_text=True,
     ):
         failures.append(f"[{case}] the added FootnoteText is not the stated definition.")
@@ -607,9 +592,7 @@ def _part_5_projection_rule(failures: list) -> None:
     # renders as superscript".
     def _to_baseline(root: ET.Element) -> None:
         for style in root.findall(_qn("style")):
-            if style.get(_qn("styleId")) != (
-                docx_parts.FOOTNOTE_REFERENCE_STYLE_ID
-            ):
+            if style.get(_qn("styleId")) != (docx_parts.FOOTNOTE_REFERENCE_STYLE_ID):
                 continue
             vert = style.find(_qn("rPr")).find(_qn("vertAlign"))
             vert.set(_qn("val"), "baseline")
@@ -636,8 +619,7 @@ def _part_5_projection_rule(failures: list) -> None:
     doctored = _mutate_styles(out, _rewrite_heading)
     if not redline_projections._verify_part_allowlist(source, doctored):
         failures.append(
-            f"[5c] proof 3 accepted a redline that rewrote the document's own "
-            f"{_HEADING_1!r} style."
+            f"[5c] proof 3 accepted a redline that rewrote the document's own {_HEADING_1!r} style."
         )
 
     # 5d. Dropping a style the document had is refused.

@@ -24,7 +24,10 @@ import { CtCard } from './react';
 export function CtPanelSkeleton(): React.ReactElement {
   return (
     <CtCard data-testid="panel-skeleton">
-      <p role="status" style={{ fontSize: 'var(--ct-text-sm)', color: 'var(--ct-text-muted)', margin: 0 }}>
+      <p
+        role="status"
+        style={{ fontSize: 'var(--ct-text-sm)', color: 'var(--ct-text-muted)', margin: 0 }}
+      >
         Loading…
       </p>
     </CtCard>

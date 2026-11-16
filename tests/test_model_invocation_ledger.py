@@ -114,7 +114,9 @@ def _playbook() -> dict[str, Any]:
 
 
 class UsageReportingClient:
-    def __init__(self, responses: dict[str, list[str]], usage_sequence: list[dict[str, int]]) -> None:
+    def __init__(
+        self, responses: dict[str, list[str]], usage_sequence: list[dict[str, int]]
+    ) -> None:
         self._inner = model_client.FakeBedrockClient(responses)
         self._usage_sequence = list(usage_sequence)
         self.last_usage: dict[str, int] | None = None
@@ -751,8 +753,9 @@ class TestMockPipelineNeedsNoLedgerTable(unittest.TestCase):
         ddb = LedgerAwareFakeDDB(reviews_table, FakeLedgerTable())
 
         env_without_table = {k: v for k, v in os.environ.items() if k != "MODEL_INVOCATIONS_TABLE"}
-        with patch.dict(os.environ, env_without_table, clear=True), patch.object(
-            pr, "_settle_reservation"
+        with (
+            patch.dict(os.environ, env_without_table, clear=True),
+            patch.object(pr, "_settle_reservation"),
         ):
             pr.run_mock_pipeline(
                 dts.REVIEW_ID,

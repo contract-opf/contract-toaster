@@ -141,9 +141,7 @@ RULE_ID = "IND-004"
 EMPTY_FLOOR_FIXTURE = (
     REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.6-empty-floor.opf.json"
 )
-VECTOR_008 = (
-    opf_load.OPF_CONFORMANCE_VECTORS_DIR / "008-hard-rules-and-dossiers.json"
-)
+VECTOR_008 = opf_load.OPF_CONFORMANCE_VECTORS_DIR / "008-hard-rules-and-dossiers.json"
 GOVERNING_LAW = "This Agreement is governed by the laws of the State of Fixtureland."
 CLEARING_SPAN = "Each party shall indemnify the other against third-party claims"
 
@@ -464,7 +462,9 @@ class TestManifestBlockRendering(unittest.TestCase):
     def test_the_block_follows_the_digest(self) -> None:
         blocks = opf_prompt.compose_opf_system_blocks(_vector_doc())
         (digest_at,) = [i for i, b in enumerate(blocks) if b.startswith(opf_prompt.DIGEST_INTRO)]
-        (manifest_at,) = [i for i, b in enumerate(blocks) if b.startswith(opf_prompt.MANIFEST_INTRO)]
+        (manifest_at,) = [
+            i for i, b in enumerate(blocks) if b.startswith(opf_prompt.MANIFEST_INTRO)
+        ]
         self.assertEqual(manifest_at, digest_at + 1)
 
     def test_no_manifest_or_an_empty_one_composes_no_block(self) -> None:
@@ -533,7 +533,9 @@ class TestManifestInTheSharedPrefix(_EnvTestCase):
         expected = opf_prompt._manifest_block(doc)
         self.assertIn(f"[floor:{RULE_ID}]", expected)
         self.assertIn("Presence required.", expected)
-        self.assertIn('Test: the clause must contain all of: "indemnify", "third-party claims".', expected)
+        self.assertIn(
+            'Test: the clause must contain all of: "indemnify", "third-party claims".', expected
+        )
         self.assertIn(f"   Fallback language:\n      {_standard(doc)}", expected)
 
         primary, critic = transport.requests
@@ -574,7 +576,14 @@ class TestManifestInTheSharedPrefix(_EnvTestCase):
         metadata = _load_bundle()["playbook"]["metadata"]
         reviewer = _final(mos.ROLE_REVIEWER, "No changes identified.", None)
         critic_answer = _answerer(block_id)(
-            {"messages": [{"role": "user", "content": [{"text": "doc"}, {"text": pp.CRITIC_TASKING_BLOCK}]}]}
+            {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [{"text": "doc"}, {"text": pp.CRITIC_TASKING_BLOCK}],
+                    }
+                ]
+            }
         )
         for body in (reviewer, critic_answer):
             body.pop("role")  # a Bedrock response carries no tool-schema discriminator
@@ -638,7 +647,9 @@ class TestManifestLeakage(unittest.TestCase):
     def test_the_engine_shaped_statement_blocks_too(self) -> None:
         doc = _opf_doc()
         statement = doc["manifest"]["hard_rules"][0]["statement"]
-        outcome = _scan(leakage_scan.ConfidentialCorpus.from_opf_document(doc), f"Overall: {statement}")
+        outcome = _scan(
+            leakage_scan.ConfidentialCorpus.from_opf_document(doc), f"Overall: {statement}"
+        )
         self.assertTrue(outcome.blocked)
 
     def test_fallback_language_is_our_standard(self) -> None:
@@ -653,7 +664,9 @@ class TestManifestLeakage(unittest.TestCase):
 
     def test_a_rendered_rule_line_is_a_system_prompt_gram_and_a_bare_phrase_is_not(self) -> None:
         doc = _opf_doc()
-        system_blocks = [{"type": "text", "text": t} for t in opf_prompt.compose_opf_system_blocks(doc)]
+        system_blocks = [
+            {"type": "text", "text": t} for t in opf_prompt.compose_opf_system_blocks(doc)
+        ]
         corpus = leakage_scan.ConfidentialCorpus.from_opf_document(doc, system_blocks=system_blocks)
         test_line = 'Test: the clause must contain all of: "indemnify", "third-party claims".'
         outcome = _scan(corpus, f"Per the playbook -- {test_line}")
@@ -697,9 +710,7 @@ class TestManifestLeakage(unittest.TestCase):
                 # No check-1 gram the block contributes carries any sentence
                 # of the standard.
                 sentences = [
-                    piece
-                    for part in parts
-                    for piece in leakage_scan._SENTENCE_SPLIT.split(part)
+                    piece for part in parts for piece in leakage_scan._SENTENCE_SPLIT.split(part)
                 ]
                 self.assertGreaterEqual(len(sentences), 2)
                 for gram in corpus.system_prompt_ngrams:
@@ -750,7 +761,8 @@ class TestManifestLeakage(unittest.TestCase):
         rendered = "   Fallback language:\n" + "\n".join(f"      {p}" for p in MULTI_SENTENCE_PARTS)
         self.assertEqual(
             leakage_scan.system_prompt_ngrams_from_blocks(
-                [{"type": "text", "text": rendered}], exempt_texts=["\n\n".join(MULTI_SENTENCE_PARTS)]
+                [{"type": "text", "text": rendered}],
+                exempt_texts=["\n\n".join(MULTI_SENTENCE_PARTS)],
             ),
             [],
         )
@@ -764,7 +776,9 @@ class TestManifestLeakageEndToEnd(_EnvTestCase):
         transport = CachingOpenRouterTransport(
             _answerer(_block_id(docx, "Indemnification"), critic_summary=f"Overall: {statement}")
         )
-        result = review_spine.run_review(docx, _bundle(doc), _client(transport), review_id=REVIEW_ID)
+        result = review_spine.run_review(
+            docx, _bundle(doc), _client(transport), review_id=REVIEW_ID
+        )
         self.assertEqual(result["status"], "ERROR", result)
         self.assertEqual(result["reason"], "leakage_detected")
         self.assertEqual(result["leakage_field_name"], "verdict_summary")

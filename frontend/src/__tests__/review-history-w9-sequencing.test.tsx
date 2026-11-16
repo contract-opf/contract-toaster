@@ -73,7 +73,11 @@ describe('History listing requests are sequenced (W9-5)', () => {
               : page([row('new-1')], null),
           );
         }
-        return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) } as Response);
+        return Promise.resolve({
+          ok: false,
+          status: 404,
+          json: () => Promise.resolve({}),
+        } as Response);
       }),
     );
 
@@ -106,9 +110,15 @@ describe('History listing requests are sequenced (W9-5)', () => {
         const url = String(input);
         if (url.includes('/api/reviews?')) {
           firstPages += 1;
-          return firstPages === 1 ? slowFirst.promise : Promise.resolve(page([row('fresh-1')], null));
+          return firstPages === 1
+            ? slowFirst.promise
+            : Promise.resolve(page([row('fresh-1')], null));
         }
-        return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) } as Response);
+        return Promise.resolve({
+          ok: false,
+          status: 404,
+          json: () => Promise.resolve({}),
+        } as Response);
       }),
     );
 

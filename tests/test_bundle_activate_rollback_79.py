@@ -93,6 +93,7 @@ class BundleActivateRollbackTestBase(unittest.TestCase):
 
 # -- (1) activating a version sets it active --------------------------------
 
+
 class TestActivateSetsActive(BundleActivateRollbackTestBase):
     def test_activate_sets_status_active(self):
         self._upload("1.0.0")
@@ -106,9 +107,9 @@ class TestActivateSetsActive(BundleActivateRollbackTestBase):
         )
         self.assertEqual(result["status"], "active")
 
-        row = self.versions_table.get_item(
-            Key={"playbook_id": PLAYBOOK_ID, "version": "1.0.0"}
-        )["Item"]
+        row = self.versions_table.get_item(Key={"playbook_id": PLAYBOOK_ID, "version": "1.0.0"})[
+            "Item"
+        ]
         self.assertEqual(row["status"], "active")
 
     def test_activating_new_version_retires_previous_active(self):
@@ -130,12 +131,12 @@ class TestActivateSetsActive(BundleActivateRollbackTestBase):
             now_epoch_value=1_700_002_000,
         )
 
-        old = self.versions_table.get_item(
-            Key={"playbook_id": PLAYBOOK_ID, "version": "1.0.0"}
-        )["Item"]
-        new = self.versions_table.get_item(
-            Key={"playbook_id": PLAYBOOK_ID, "version": "1.1.0"}
-        )["Item"]
+        old = self.versions_table.get_item(Key={"playbook_id": PLAYBOOK_ID, "version": "1.0.0"})[
+            "Item"
+        ]
+        new = self.versions_table.get_item(Key={"playbook_id": PLAYBOOK_ID, "version": "1.1.0"})[
+            "Item"
+        ]
         self.assertEqual(old["status"], "retired")
         self.assertEqual(new["status"], "active")
 
@@ -151,6 +152,7 @@ class TestActivateSetsActive(BundleActivateRollbackTestBase):
 
 
 # -- (2) rollback restores the prior active version --------------------------
+
 
 class TestRollbackRestoresPriorActive(BundleActivateRollbackTestBase):
     def test_rollback_restores_prior_active_version(self):
@@ -226,6 +228,7 @@ class TestRollbackRestoresPriorActive(BundleActivateRollbackTestBase):
 
 # -- (3) both actions write audit records (actor + timestamp) ---------------
 
+
 class TestAuditRecordsWritten(BundleActivateRollbackTestBase):
     def test_activate_writes_audit_record_with_actor_and_timestamp(self):
         self._upload("1.0.0")
@@ -284,14 +287,13 @@ class TestAuditRecordsWritten(BundleActivateRollbackTestBase):
 
         # Full sequence recorded: two activations + one rollback.
         all_relevant = [
-            r
-            for r in rows
-            if r["action"] in ("release_bundle_activate", "release_bundle_rollback")
+            r for r in rows if r["action"] in ("release_bundle_activate", "release_bundle_rollback")
         ]
         self.assertEqual(len(all_relevant), 3)
 
 
 # -- (4) no tenant-brand strings in rendered output ---------------------------------
+
 
 class TestNoExosBranding(BundleActivateRollbackTestBase):
     def test_activate_and_rollback_audit_rows_contain_no_exos_branding(self):

@@ -40,6 +40,7 @@ Checks (all must pass; exit 1 on any failure):
   5. The table name is resolved from USERS_TABLE (the name every other
      module uses) rather than a second, separately-derived literal.
 """
+
 import os
 import sys
 import time
@@ -80,9 +81,7 @@ def _make_users_table(client) -> None:
 
 
 def _counter(client, sub: str) -> int:
-    item = client.get_item(
-        TableName=USERS_TABLE, Key={"cognito_sub": {"S": sub}}
-    ).get("Item", {})
+    item = client.get_item(TableName=USERS_TABLE, Key={"cognito_sub": {"S": sub}}).get("Item", {})
     raw = item.get(_today_attr())
     return int(raw["N"]) if raw else 0
 
@@ -107,9 +106,7 @@ class DailyLimitAgainstRealDynamo(unittest.TestCase):
 
     def test_1_first_call_succeeds_and_sets_the_counter(self) -> None:
         """The pre-fix expression raises ValidationException -> HTTP 503 here."""
-        _check_per_user_limits(
-            user_sub="user-a", env_name=ENV_NAME, dynamodb_client=self.client
-        )
+        _check_per_user_limits(user_sub="user-a", env_name=ENV_NAME, dynamodb_client=self.client)
         self.assertEqual(_counter(self.client, "user-a"), 1)
 
     def test_2_counter_is_day_scoped_and_increments(self) -> None:
@@ -118,9 +115,9 @@ class DailyLimitAgainstRealDynamo(unittest.TestCase):
                 user_sub="user-a", env_name=ENV_NAME, dynamodb_client=self.client
             )
             self.assertEqual(_counter(self.client, "user-a"), expected)
-        item = self.client.get_item(
-            TableName=USERS_TABLE, Key={"cognito_sub": {"S": "user-a"}}
-        )["Item"]
+        item = self.client.get_item(TableName=USERS_TABLE, Key={"cognito_sub": {"S": "user-a"}})[
+            "Item"
+        ]
         self.assertIn(_today_attr(), item)
 
     def test_3_exceeding_the_limit_raises_429(self) -> None:
@@ -140,9 +137,7 @@ class DailyLimitAgainstRealDynamo(unittest.TestCase):
             _check_per_user_limits(
                 user_sub="user-a", env_name=ENV_NAME, dynamodb_client=self.client
             )
-        _check_per_user_limits(
-            user_sub="user-b", env_name=ENV_NAME, dynamodb_client=self.client
-        )
+        _check_per_user_limits(user_sub="user-b", env_name=ENV_NAME, dynamodb_client=self.client)
         self.assertEqual(_counter(self.client, "user-a"), 3)
         self.assertEqual(_counter(self.client, "user-b"), 1)
 
@@ -158,9 +153,7 @@ class DailyLimitAgainstRealDynamo(unittest.TestCase):
                 yesterday: {"N": str(MAX_DAILY_REVIEWS)},
             },
         )
-        _check_per_user_limits(
-            user_sub="user-c", env_name=ENV_NAME, dynamodb_client=self.client
-        )
+        _check_per_user_limits(user_sub="user-c", env_name=ENV_NAME, dynamodb_client=self.client)
         self.assertEqual(_counter(self.client, "user-c"), 1)
 
     def test_6_table_name_comes_from_USERS_TABLE(self) -> None:

@@ -269,7 +269,7 @@ OPF_UPLOAD_MINIMUMS: tuple[OpfMinimum, ...] = (
         # checked under the same entry -- see `_perspective_defect`.
         requirement_source=(
             "the OPF schema's own /perspective description ('an open-standard "
-            "OPF instance must say who \"us\" is') -- normative prose the "
+            'OPF instance must say who "us" is\') -- normative prose the '
             "schema's `required` list does not enforce -- and its digest copy, "
             "which the schema describes as how 'the digest always says who \"us\" is'"
         ),
@@ -336,9 +336,7 @@ def _load_opf_from_bytes(contents: bytes, *, suffix: str) -> dict[str, Any]:
     """
     tmp_path: Path | None = None
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="wb", suffix=suffix, delete=False, dir=None
-        ) as tmp:
+        with tempfile.NamedTemporaryFile(mode="wb", suffix=suffix, delete=False, dir=None) as tmp:
             tmp.write(contents)
             tmp_path = Path(tmp.name)
         doc = opf_load.load_opf_document(tmp_path, require_identity=True)
@@ -443,9 +441,7 @@ def validate_playbook_upload(
         except opf_load.OpfValidationError as exc:
             raise PlaybookUploadRejected(str(exc)) from exc
         except UnicodeDecodeError as exc:
-            raise PlaybookUploadRejected(
-                f"Upload is not valid UTF-8 text: {exc}"
-            ) from exc
+            raise PlaybookUploadRejected(f"Upload is not valid UTF-8 text: {exc}") from exc
         return _finish_opf(
             doc,
             playbook_id=playbook_id,

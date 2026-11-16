@@ -102,7 +102,12 @@ class _Harness:
         # never fires and mask the ValidationException we are testing for.
         for sub in (CALLER_SUB, OTHER_ADMIN_SUB):
             self.users_table.put_item(
-                Item={"cognito_sub": sub, "is_admin": True, "status": "active", "email": f"{sub}@example.test"}
+                Item={
+                    "cognito_sub": sub,
+                    "is_admin": True,
+                    "status": "active",
+                    "email": f"{sub}@example.test",
+                }
             )
         self.users_table.put_item(
             Item={
@@ -146,11 +151,15 @@ def test_patch_status_survives_the_reserved_keyword(failures: list[str]) -> None
             return
 
         if result.get("status") != "suspended":
-            failures.append(f"[1b] returned row status is {result.get('status')!r}, expected 'suspended'")
+            failures.append(
+                f"[1b] returned row status is {result.get('status')!r}, expected 'suspended'"
+            )
         # The write must actually have landed, not merely been returned.
         persisted = h.row(TARGET_SUB)
         if persisted.get("status") != "suspended":
-            failures.append(f"[1c] persisted status is {persisted.get('status')!r}, expected 'suspended'")
+            failures.append(
+                f"[1c] persisted status is {persisted.get('status')!r}, expected 'suspended'"
+            )
         if "updated_at" not in persisted:
             failures.append("[1d] updated_at was not written")
 
@@ -169,11 +178,15 @@ def test_patch_every_valid_status_value(failures: list[str]) -> None:
                     event_id=f"evt-{value}",
                 )
             except Exception as exc:  # noqa: BLE001
-                failures.append(f"[2a] update_user(status={value!r}) raised {type(exc).__name__}: {exc}")
+                failures.append(
+                    f"[2a] update_user(status={value!r}) raised {type(exc).__name__}: {exc}"
+                )
                 continue
             persisted = h.row(TARGET_SUB)
             if persisted.get("status") != value:
-                failures.append(f"[2b] status={value!r} did not persist (got {persisted.get('status')!r})")
+                failures.append(
+                    f"[2b] status={value!r} did not persist (got {persisted.get('status')!r})"
+                )
 
 
 def test_patch_is_admin_still_works(failures: list[str]) -> None:

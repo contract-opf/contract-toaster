@@ -48,7 +48,12 @@ vi.mock('@aws-amplify/ui-react', () => ({
 }));
 
 const ROUTES: Record<string, unknown> = {
-  '/version': { version: '0.0.1', commit: 'abcdef1234567890', image_digest: 'sha256:x', uptime_seconds: 1 },
+  '/version': {
+    version: '0.0.1',
+    commit: 'abcdef1234567890',
+    image_digest: 'sha256:x',
+    uptime_seconds: 1,
+  },
   '/api/me': { is_admin: true },
   '/api/users': { users: [] },
   '/api/users/sync-status': { last_sync_at: null, status: 'idle' },
@@ -61,7 +66,12 @@ const ROUTES: Record<string, unknown> = {
   '/api/me/preferences': { preferences: {}, notes_mode_available: true },
   '/api/playbooks': {
     playbooks: [
-      { playbook_id: 'synthetic-nda-sample', display_name: 'Synthetic NDA Sample', status: 'active', version: '1.0.0' },
+      {
+        playbook_id: 'synthetic-nda-sample',
+        display_name: 'Synthetic NDA Sample',
+        status: 'active',
+        version: '1.0.0',
+      },
     ],
   },
   '/api/reviews': { reviews: [] },
@@ -131,8 +141,9 @@ describe('the console names its groups natively (#733)', () => {
           } as Response;
         }
         const body = ROUTES[pathname];
-        // eslint-disable-next-line @typescript-eslint/require-await
-        if (body === undefined) return { ok: false, status: 404, json: async () => ({}) } as Response;
+        if (body === undefined)
+          // eslint-disable-next-line @typescript-eslint/require-await
+          return { ok: false, status: 404, json: async () => ({}) } as Response;
         // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => body } as Response;
       }),

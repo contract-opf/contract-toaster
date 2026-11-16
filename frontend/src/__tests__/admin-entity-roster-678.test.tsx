@@ -172,9 +172,7 @@ describe('the entity roster editor (#678)', () => {
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const box = (await screen.findByTestId('admin-settings-roster-text')) as HTMLTextAreaElement;
     expect(box.value).toBe(STORED.join('\n'));
-    expect(screen.getByTestId('admin-settings-roster-last-saved').textContent).toMatch(
-      /admin-sub/,
-    );
+    expect(screen.getByTestId('admin-settings-roster-last-saved').textContent).toMatch(/admin-sub/);
   });
 
   it('saves the edited list to PUT /api/admin/entity-roster and shows what took effect', async () => {
@@ -308,7 +306,9 @@ describe('the entity roster editor (#678)', () => {
     stubRosterFetch({
       get: () => {
         attempt += 1;
-        return attempt === 1 ? { status: 500, body: { detail: 'boom' } } : { status: 200, body: roster() };
+        return attempt === 1
+          ? { status: 500, body: { detail: 'boom' } }
+          : { status: 200, body: roster() };
       },
     });
 
@@ -350,14 +350,18 @@ describe('the entity roster editor (#678)', () => {
     render(<AdminSettings />);
     const box = await screen.findByTestId('admin-settings-roster-text');
 
-    expect(screen.getByTestId('admin-settings-roster-count').textContent).toContain('1 distinct entity');
+    expect(screen.getByTestId('admin-settings-roster-count').textContent).toContain(
+      '1 distinct entity',
+    );
     expect(screen.queryByTestId('admin-settings-roster-duplicate-notice')).toBeNull();
 
     fireEvent.change(box, {
       target: { value: 'Acme Corp\nBeta LLC\nacme corp\n' },
     });
 
-    expect(screen.getByTestId('admin-settings-roster-count').textContent).toContain('2 distinct entities');
+    expect(screen.getByTestId('admin-settings-roster-count').textContent).toContain(
+      '2 distinct entities',
+    );
     const notice = screen.getByTestId('admin-settings-roster-duplicate-notice');
     expect(notice.textContent).toContain('1 duplicate entry will be merged on save');
   });

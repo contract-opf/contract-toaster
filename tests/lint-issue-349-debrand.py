@@ -157,14 +157,17 @@ def _self_test() -> None:
             raise AssertionError("self-test failed: false-positived on 'our_standard'")
 
         dirty_json = tmp_path / "dirty.json"
-        dirty_json.write_text('{"$schema": "https://teamexos.com/playbooks/schema/v1.json"}\n', encoding="utf-8")
+        dirty_json.write_text(
+            '{"$schema": "https://teamexos.com/playbooks/schema/v1.json"}\n', encoding="utf-8"
+        )
         teamexos_hits = scan_for_teamexos(dirty_json, tmp_path)
         if not teamexos_hits:
             raise AssertionError("self-test failed: did not flag 'teamexos.com'")
 
         clean_json = tmp_path / "clean.json"
         clean_json.write_text(
-            '{"$schema": "https://contract-opf.github.io/playbooks/schema/v1.json"}\n', encoding="utf-8"
+            '{"$schema": "https://contract-opf.github.io/playbooks/schema/v1.json"}\n',
+            encoding="utf-8",
         )
         clean_teamexos_hits = scan_for_teamexos(clean_json, tmp_path)
         if clean_teamexos_hits:

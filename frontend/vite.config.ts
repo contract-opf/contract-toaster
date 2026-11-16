@@ -123,9 +123,7 @@ export default defineConfig(({ mode }) => ({
     // production behaviour independent of the byte count. Other asset types
     // keep the default behaviour.
     assetsInlineLimit: (filePath: string) =>
-      /\.(mp3|ogg|wav|m4a|webp|png|jpe?g|avif|gif|woff2?|ttf|otf)$/i.test(
-        filePath,
-      )
+      /\.(mp3|ogg|wav|m4a|webp|png|jpe?g|avif|gif|woff2?|ttf|otf)$/i.test(filePath)
         ? false
         : undefined,
     // `manualChunks` (defined above) is declared inside BOTH branches of the

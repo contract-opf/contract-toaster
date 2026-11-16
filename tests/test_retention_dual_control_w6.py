@@ -158,10 +158,14 @@ class TestRequestingAReduction(DualControlBase):
         self.assertNotIn("pending_reduction", {k for k, v in self.row().items() if v})
 
     def test_the_free_text_second_admin_field_is_refused(self) -> None:
-        resp = self.client.post(ROUTE, json={
-            "retention_window_days": 0, "reason": "x",
-            "second_admin_confirmation": {"actor": "admin-b"},
-        })
+        resp = self.client.post(
+            ROUTE,
+            json={
+                "retention_window_days": 0,
+                "reason": "x",
+                "second_admin_confirmation": {"actor": "admin-b"},
+            },
+        )
         self.assertEqual(resp.status_code, 400, resp.text)
         self.assertEqual(int(self.row()["retention_window_days"]), 365)
 

@@ -300,7 +300,8 @@ def _direction_of(invariant: dict[str, Any]) -> Optional[str]:  # noqa: UP045
 
 
 def _clause_for(
-    invariant: dict[str, Any], clause_context: Optional[dict[str, dict[str, str]]]  # noqa: UP045
+    invariant: dict[str, Any],
+    clause_context: Optional[dict[str, dict[str, str]]],  # noqa: UP045
 ) -> Optional[dict[str, str]]:  # noqa: UP045
     """The `clause_context` entry for the invariant's `x_taxonomy_id`, if any."""
     taxonomy_id = invariant.get("x_taxonomy_id")
@@ -309,7 +310,9 @@ def _clause_for(
     return clause_context.get(taxonomy_id)
 
 
-def _check_judge_response(raw_text: str, *, expected_invariant_id: str) -> tuple[dict[str, Any] | None, str]:
+def _check_judge_response(
+    raw_text: str, *, expected_invariant_id: str
+) -> tuple[dict[str, Any] | None, str]:
     """Parse + strictly validate one judge response for one invariant.
 
     Mirrors primary_review_pass.validate_model_response's strictness:
@@ -376,7 +379,9 @@ def _check_judge_response(raw_text: str, *, expected_invariant_id: str) -> tuple
     }, ""
 
 
-def _validate_judge_response(raw_text: str, *, expected_invariant_id: str) -> tuple[bool, dict[str, Any] | None]:
+def _validate_judge_response(
+    raw_text: str, *, expected_invariant_id: str
+) -> tuple[bool, dict[str, Any] | None]:
     """`(True, verdict)` / `(False, None)` -- `_check_judge_response` without
     the reason, for callers that only need the yes/no."""
     verdict, _error = _check_judge_response(raw_text, expected_invariant_id=expected_invariant_id)
@@ -747,9 +752,13 @@ def judge_floor_invariants(
                         # `retry_reason` on a retried attempt -- the #157
                         # convention the review passes already ledger.
                         error_token=(
-                            "" if outcome == "success" else _primary_review_pass._error_token(attempt_error)
+                            ""
+                            if outcome == "success"
+                            else _primary_review_pass._error_token(attempt_error)
                         ),
-                        retry_reason=_primary_review_pass.attempt_retry_reason(outcome, attempt_error),
+                        retry_reason=_primary_review_pass.attempt_retry_reason(
+                            outcome, attempt_error
+                        ),
                     )
                 )
             if verdict is not None:
@@ -810,8 +819,7 @@ def floor_fires(judgment: FloorJudgment) -> list[dict[str, Any]]:
                 ),
                 "decision": "REQUEST_CHANGE",
                 "external_rationale_for_footnote": (
-                    "This agreement must satisfy the Floor invariant "
-                    "governing this position."
+                    "This agreement must satisfy the Floor invariant governing this position."
                 ),
                 "proposed_replacement_text": "",
                 "playbook_topic_id": invariant_id,

@@ -57,8 +57,11 @@ function stubFetch(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
 
 /** Stub every fetch with one canned failure response (login is the only call). */
 function stubLoginFailure(status: number, json: () => Promise<unknown>): void {
-  // eslint-disable-next-line @typescript-eslint/require-await
-  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status, json }) as unknown as Response));
+  vi.stubGlobal(
+    'fetch',
+    // eslint-disable-next-line @typescript-eslint/require-await
+    vi.fn(async () => ({ ok: false, status, json }) as unknown as Response),
+  );
 }
 
 function submitLogin(): void {
@@ -220,11 +223,13 @@ describe('Sign out in password mode (issue #468)', () => {
     fireEvent.click(signOutButton);
 
     await waitFor(() =>
-      expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/api/auth/logout'))).toBe(
-        true,
-      ),
+      expect(
+        fetchMock.mock.calls.some(([input]) => String(input).includes('/api/auth/logout')),
+      ).toBe(true),
     );
-    const logoutCall = fetchMock.mock.calls.find(([input]) => String(input).includes('/api/auth/logout'));
+    const logoutCall = fetchMock.mock.calls.find(([input]) =>
+      String(input).includes('/api/auth/logout'),
+    );
     const [, init] = logoutCall as [unknown, RequestInit];
     expect(init.method).toBe('POST');
     expect(init.credentials).toBe('same-origin');

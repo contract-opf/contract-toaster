@@ -129,7 +129,7 @@ describe('AC1 — the finished panel', () => {
     // resolved.
     await screen.findByTestId('review-saved-line');
     expect(screen.getByTestId('review-saved-line').textContent).toBe(
-      'Download started automatically. Save redline repeats it.'
+      'Download started automatically. Save redline repeats it.',
     );
 
     // Quiet meta line — filename · finished-at time (no contract type was

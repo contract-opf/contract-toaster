@@ -144,9 +144,7 @@ class TestConfigPublicEndpointSeam(unittest.TestCase):
             self.assertEqual(kwargs["endpoint_url"], "http://localhost:9000")
             # The regular (non-presigning) S3 kwargs are unaffected -- still
             # the internal compose host.
-            self.assertEqual(
-                config.boto3_client_kwargs("s3")["endpoint_url"], "http://minio:9000"
-            )
+            self.assertEqual(config.boto3_client_kwargs("s3")["endpoint_url"], "http://minio:9000")
 
 
 class TestPresignedUrlHostSwap(unittest.TestCase):
@@ -164,8 +162,7 @@ class TestPresignedUrlHostSwap(unittest.TestCase):
             with patch(
                 "boto3.client",
                 side_effect=AssertionError(
-                    "boto3.client() must not be called again when "
-                    "S3_PUBLIC_ENDPOINT_URL is unset"
+                    "boto3.client() must not be called again when S3_PUBLIC_ENDPOINT_URL is unset"
                 ),
             ):
                 response = download.generate_presigned_download_url(

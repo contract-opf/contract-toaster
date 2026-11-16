@@ -140,34 +140,35 @@ describe('issue #497 — tab title mirrors the stage, and always restores', () =
 });
 
 describe('issue #497 — the favicon browns through the real stage order', () => {
-  it.each([
-    ['primary_pass'],
-    ['critic_pass'],
-    ['reconciliation'],
-    ['redline'],
-  ])('%s repoints every <link rel="icon"> at that stage\'s frame', async (token) => {
-    const { useTabTheater } = await loadTabChrome();
-    const { FAVICON_STAGE_FRAMES } = await import('../toaster/faviconFrames');
-    function Harness({ phase, stage }: { phase: ToasterPhase; stage: string | null }) {
-      useTabTheater(phase, stage);
-      return null;
-    }
-    render(<Harness phase="working" stage={token} />);
-    const expected = FAVICON_STAGE_FRAMES[token as keyof typeof FAVICON_STAGE_FRAMES];
-    expect(iconHrefs()).toEqual([expected, expected]);
-    expect(iconTypes()).toEqual(['image/png', 'image/png']);
-  });
+  it.each([['primary_pass'], ['critic_pass'], ['reconciliation'], ['redline']])(
+    '%s repoints every <link rel="icon"> at that stage\'s frame',
+    async (token) => {
+      const { useTabTheater } = await loadTabChrome();
+      const { FAVICON_STAGE_FRAMES } = await import('../toaster/faviconFrames');
+      function Harness({ phase, stage }: { phase: ToasterPhase; stage: string | null }) {
+        useTabTheater(phase, stage);
+        return null;
+      }
+      render(<Harness phase="working" stage={token} />);
+      const expected = FAVICON_STAGE_FRAMES[token as keyof typeof FAVICON_STAGE_FRAMES];
+      expect(iconHrefs()).toEqual([expected, expected]);
+      expect(iconTypes()).toEqual(['image/png', 'image/png']);
+    },
+  );
 
   it('the six frame/badge blobs are distinct opaque PNGs, and the stage frames cover exactly the four stage tokens in order', async () => {
-    const { FAVICON_STAGE_FRAMES, FAVICON_BADGE_DONE, FAVICON_BADGE_FAILED } = await import(
-      '../toaster/faviconFrames'
-    );
+    const { FAVICON_STAGE_FRAMES, FAVICON_BADGE_DONE, FAVICON_BADGE_FAILED } =
+      await import('../toaster/faviconFrames');
     // The it.each above only checks each stage's rendered frame against the
     // very constant the implementation reads, so it stays green even if all
     // four stage frames were the identical blob (a favicon that never
     // browns), two stages were swapped, or a badge blob were pasted over a
     // stage blob. Assert over the frame set itself so those cases fail here.
-    const allBlobs = [...Object.values(FAVICON_STAGE_FRAMES), FAVICON_BADGE_DONE, FAVICON_BADGE_FAILED];
+    const allBlobs = [
+      ...Object.values(FAVICON_STAGE_FRAMES),
+      FAVICON_BADGE_DONE,
+      FAVICON_BADGE_FAILED,
+    ];
     expect(new Set(allBlobs).size).toBe(6);
     for (const blob of allBlobs) {
       expect(blob).toMatch(/^data:image\/png;base64,/);

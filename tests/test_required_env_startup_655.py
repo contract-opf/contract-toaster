@@ -81,18 +81,19 @@ BOOT_TIMEOUT_SECONDS = 180.0
 # Each has a documented default; promoting any of them to required turns a
 # working deployment into a boot loop.
 OPTIONAL_NAMES = (
-    "AWS_REGION",          # src/config.py::region
-    "DEPLOY_TARGET",       # src/config.py::deploy_target
-    "AUTH_MODE",           # src/config.py::auth_mode
-    "MODEL_PROVIDER",      # src/config.py::model_provider
+    "AWS_REGION",  # src/config.py::region
+    "DEPLOY_TARGET",  # src/config.py::deploy_target
+    "AUTH_MODE",  # src/config.py::auth_mode
+    "MODEL_PROVIDER",  # src/config.py::model_provider
     "NOTES_MODE_ENABLED",  # src/config.py::notes_mode_enabled
-    "VERSION",             # src/main.py, FastAPI(version=...)
+    "VERSION",  # src/main.py, FastAPI(version=...)
 )
 
 
 # ---------------------------------------------------------------------------
 # A/B -- the required set comes out of the source, not out of a list
 # ---------------------------------------------------------------------------
+
 
 class TestTheRequiredSetIsDerivedFromSource(unittest.TestCase):
     """A hand-maintained list would drift away from the code exactly the way
@@ -103,16 +104,12 @@ class TestTheRequiredSetIsDerivedFromSource(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "pkg").mkdir()
-            (root / "pkg" / "fixture_module.py").write_text(
-                module_source, encoding="utf-8"
-            )
+            (root / "pkg" / "fixture_module.py").write_text(module_source, encoding="utf-8")
             return startup_checks.required_env_names(root)
 
     def test_a_new_required_deref_is_picked_up_with_no_list_edited(self):
         derived = self._derive(
-            "import os\n"
-            "def f():\n"
-            "    return os.environ['FIXTURE_NEWLY_ADDED_TABLE']\n"
+            "import os\ndef f():\n    return os.environ['FIXTURE_NEWLY_ADDED_TABLE']\n"
         )
         self.assertEqual(derived, ("FIXTURE_NEWLY_ADDED_TABLE",))
 
@@ -131,25 +128,20 @@ class TestTheRequiredSetIsDerivedFromSource(unittest.TestCase):
         """`src/reviews.py` documents its bucket read in prose. A grep cannot
         tell that apart from a real dereference; an AST pass can."""
         derived = self._derive(
-            'import os\n'
-            'def f(key):\n'
+            "import os\n"
+            "def f(key):\n"
             '    """Bucket is `os.environ["FIXTURE_DOCSTRING_ONLY"]`."""\n'
             "    return os.environ['FIXTURE_REAL_DEREF']\n"
         )
         self.assertEqual(derived, ("FIXTURE_REAL_DEREF",))
 
     def test_a_non_literal_subscript_is_skipped_rather_than_guessed(self):
-        derived = self._derive(
-            "import os\n"
-            "def f(name):\n"
-            "    return os.environ[name]\n"
-        )
+        derived = self._derive("import os\ndef f(name):\n    return os.environ[name]\n")
         self.assertEqual(derived, ())
 
     def test_the_from_os_import_environ_form_is_also_caught(self):
         derived = self._derive(
-            "from os import environ\n"
-            "TABLE = environ['FIXTURE_FROM_IMPORT_TABLE']\n"
+            "from os import environ\nTABLE = environ['FIXTURE_FROM_IMPORT_TABLE']\n"
         )
         self.assertEqual(derived, ("FIXTURE_FROM_IMPORT_TABLE",))
 
@@ -170,11 +162,10 @@ class TestTheRequiredSetIsDerivedFromSource(unittest.TestCase):
 # The missing-name computation
 # ---------------------------------------------------------------------------
 
-class TestMissingNames(unittest.TestCase):
 
+class TestMissingNames(unittest.TestCase):
     def setUp(self):
-        self.full = {name: f"value-for-{name}" for name in
-                     startup_checks.required_env_names()}
+        self.full = {name: f"value-for-{name}" for name in startup_checks.required_env_names()}
 
     def test_a_complete_environment_reports_nothing_missing(self):
         self.assertEqual(startup_checks.missing_required_env(self.full), ())
@@ -182,9 +173,7 @@ class TestMissingNames(unittest.TestCase):
     def test_one_absent_name_is_reported(self):
         env = dict(self.full)
         del env["USER_PREFERENCES_TABLE"]
-        self.assertEqual(
-            startup_checks.missing_required_env(env), ("USER_PREFERENCES_TABLE",)
-        )
+        self.assertEqual(startup_checks.missing_required_env(env), ("USER_PREFERENCES_TABLE",))
 
     def test_an_empty_value_counts_as_absent(self):
         """A table name of "" is not a table name; DynamoDB rejects it on the
@@ -260,6 +249,7 @@ class TestBothComposeTargetsSupplyEveryName(unittest.TestCase):
 # C/D -- the real entrypoint, in a real process
 # ---------------------------------------------------------------------------
 
+
 def _base_env() -> dict[str, str]:
     """The table/bucket/state-machine half of the DTS backend container's
     environment, read out of `deploy/dts/docker-compose.yml` rather than out
@@ -294,8 +284,16 @@ def _run_uvicorn(env: dict[str, str], wait_for: str) -> tuple[int | None, str]:
         log_path = Path(tmp) / "uvicorn.log"
         with open(log_path, "w", encoding="utf-8") as sink:
             process = subprocess.Popen(
-                [sys.executable, "-m", "uvicorn", "src.main:app",
-                 "--host", "127.0.0.1", "--port", "0"],
+                [
+                    sys.executable,
+                    "-m",
+                    "uvicorn",
+                    "src.main:app",
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    "0",
+                ],
                 cwd=str(BACKEND_ROOT),
                 env=env,
                 stdout=sink,
@@ -345,9 +343,7 @@ class TestTheContainerRefusesToStart(unittest.TestCase):
         env = _base_env()
         removed_value = env.pop("USER_PREFERENCES_TABLE")
         code, output = _run_uvicorn(env, wait_for="Application startup complete")
-        self.assertIsNotNone(
-            code, f"started with a configuration it cannot serve:\n{output}"
-        )
+        self.assertIsNotNone(code, f"started with a configuration it cannot serve:\n{output}")
         self.assertNotEqual(code, 0, f"exited zero:\n{output}")
         self.assertIn("USER_PREFERENCES_TABLE", output)
         self.assertNotIn("Application startup complete", output)
@@ -373,13 +369,14 @@ class TestItIsActuallyWiredIn(unittest.TestCase):
     def _lifespan_body(self) -> list:
         source = (BACKEND_ROOT / "src" / "main.py").read_text(encoding="utf-8")
         function = next(
-            node for node in ast.walk(ast.parse(source))
+            node
+            for node in ast.walk(ast.parse(source))
             if isinstance(node, ast.AsyncFunctionDef) and node.name == "_lifespan"
         )
         return [
-            statement for statement in function.body
-            if not (isinstance(statement, ast.Expr)
-                    and isinstance(statement.value, ast.Constant))
+            statement
+            for statement in function.body
+            if not (isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Constant))
         ]
 
     def test_the_check_is_the_lifespans_first_statement(self):
@@ -389,9 +386,7 @@ class TestItIsActuallyWiredIn(unittest.TestCase):
         swallowed by the same handler and the process would boot anyway."""
         first = self._lifespan_body()[0]
         self.assertIsInstance(first, ast.Expr)
-        self.assertEqual(
-            ast.unparse(first.value), "startup_checks.verify_required_env()"
-        )
+        self.assertEqual(ast.unparse(first.value), "startup_checks.verify_required_env()")
 
     def test_the_lifespan_is_attached_to_the_app(self):
         """Writing the hook and forgetting to hand it to FastAPI is the same

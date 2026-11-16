@@ -305,13 +305,15 @@ def get_entity_roster(
     if isinstance(raw_history, list):
         for h in raw_history:
             if isinstance(h, dict):
-                history.append({
-                    "timestamp": str(h.get("timestamp", "")),
-                    "actor": str(h.get("actor", "")),
-                    "count": int(h.get("count", 0)),
-                    "added": list(h.get("added") or []),
-                    "removed": list(h.get("removed") or []),
-                })
+                history.append(
+                    {
+                        "timestamp": str(h.get("timestamp", "")),
+                        "actor": str(h.get("actor", "")),
+                        "count": int(h.get("count", 0)),
+                        "added": list(h.get("added") or []),
+                        "removed": list(h.get("removed") or []),
+                    }
+                )
 
     return {
         "setting_id": ENTITY_ROSTER_SETTING_ID,

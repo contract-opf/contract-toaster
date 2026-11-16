@@ -146,7 +146,9 @@ class UsersListPaginatesTest(unittest.TestCase):
 
         # Seed enough real rows to force a real DynamoDB/moto 1 MB scan page.
         with self.raw_table.batch_writer() as writer:
-            writer.put_item(Item={**ADMIN_ROW, "status": "active", "created_at": 0, "last_auth_at": None})
+            writer.put_item(
+                Item={**ADMIN_ROW, "status": "active", "created_at": 0, "last_auth_at": None}
+            )
             for i in range(ROW_COUNT):
                 writer.put_item(
                     Item={

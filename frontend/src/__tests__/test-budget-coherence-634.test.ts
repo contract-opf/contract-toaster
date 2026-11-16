@@ -108,7 +108,7 @@ describe('issue #634 — the per-test budget must honour what the suite declares
     const overDefault = windows.filter((w) => w.ms > VITEST_DEFAULT_TEST_TIMEOUT_MS);
     expect(
       overDefault.length,
-      'the poll-spanning files declare windows wider than vitest\'s 5000 ms default; ' +
+      "the poll-spanning files declare windows wider than vitest's 5000 ms default; " +
         'if none are found the scanner has stopped seeing them',
     ).toBeGreaterThan(0);
   });
@@ -149,7 +149,7 @@ describe('issue #634 — the per-test budget must honour what the suite declares
     expect(Date.now() - start).toBeGreaterThan(VITEST_DEFAULT_TEST_TIMEOUT_MS);
   });
 
-  it('the runner\'s parallelism is a stated decision, not the host core count', () => {
+  it("the runner's parallelism is a stated decision, not the host core count", () => {
     // Bounded workers cannot move the 3000 ms poll floor, but oversubscribing
     // 6 physical cores with 11 jsdom workers is contention we inflict on
     // ourselves: measured over the whole suite, the worst poll-spanning test

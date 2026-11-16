@@ -39,9 +39,7 @@ import ReviewSubmission from '../ReviewSubmission';
 import { OrbitDiner } from '../orbit-diner/OrbitDiner';
 import type { Cost, Playbook, ReviewModel, Status } from '../orbit-diner/types';
 
-const PLAYBOOKS: Playbook[] = [
-  { playbook_id: 'nda', display_name: 'NDA', status: 'active' },
-];
+const PLAYBOOKS: Playbook[] = [{ playbook_id: 'nda', display_name: 'NDA', status: 'active' }];
 
 /** The five statuses a review can END on. */
 const TERMINAL: Status[] = [
@@ -95,19 +93,17 @@ function glass(cost: Cost, patch: Partial<ReviewModel> = {}): [string, string] {
 describe('Estimated review cost (#735 H2)', () => {
   it('keeps the captured estimate on every terminal status', () => {
     for (const status of TERMINAL) {
-      const [label, figure] = glass(
-        { kind: 'estimated', cents: 79, basis: 'typical' },
-        { status },
-      );
+      const [label, figure] = glass({ kind: 'estimated', cents: 79, basis: 'typical' }, { status });
       expect(label, status).toBe('Estimated review cost');
       expect(figure, status).toBe('$0.79');
     }
   });
 
   it('is the same figure before submission', () => {
-    expect(
-      glass({ kind: 'estimated', cents: 79, basis: 'typical' }, { status: 'EMPTY' }),
-    ).toEqual(['Estimated review cost', '$0.79']);
+    expect(glass({ kind: 'estimated', cents: 79, basis: 'typical' }, { status: 'EMPTY' })).toEqual([
+      'Estimated review cost',
+      '$0.79',
+    ]);
   });
 
   it('never labels a terminal status a final cost without a settlement', () => {
@@ -115,10 +111,7 @@ describe('Estimated review cost (#735 H2)', () => {
     // this deployment cannot produce, and the em dash under it was `costText`
     // declining to invent one.
     for (const status of TERMINAL) {
-      const priced = glass(
-        { kind: 'estimated', cents: 79, basis: 'typical' },
-        { status },
-      );
+      const priced = glass({ kind: 'estimated', cents: 79, basis: 'typical' }, { status });
       expect(priced, status).toEqual(['Estimated review cost', '$0.79']);
       const unpriced = glass({ kind: 'unavailable' }, { status });
       expect(unpriced, status).toEqual(['Estimate unavailable', '—']);
@@ -132,18 +125,16 @@ describe('Review reservation (#735 H2)', () => {
       'Review reservation',
       '$6.86',
     ]);
-    expect(glass({ kind: 'held' }, { status: 'RUNNING' })).toEqual([
-      'Review reservation',
-      'Held',
-    ]);
+    expect(glass({ kind: 'held' }, { status: 'RUNNING' })).toEqual(['Review reservation', 'Held']);
   });
 });
 
 describe('Final review cost (#735 H2)', () => {
   it('appears only for a complete settlement carrying a number', () => {
-    expect(
-      glass({ kind: 'settled', cents: 104, settlementComplete: true }),
-    ).toEqual(['Final review cost', '$1.04']);
+    expect(glass({ kind: 'settled', cents: 104, settlementComplete: true })).toEqual([
+      'Final review cost',
+      '$1.04',
+    ]);
   });
 
   it('prints a genuine complete zero rather than suppressing it', () => {
@@ -231,8 +222,7 @@ function mockFetch(): ReturnType<typeof vi.fn> {
       // eslint-disable-next-line @typescript-eslint/require-await
       ({ ok: true, status: 200, json: async () => body }) as Response;
     if (path === '/api/playbooks') return ok({ playbooks: PLAYBOOKS });
-    if (path === '/api/me/preferences')
-      return ok({ preferences: {}, notes_mode_available: false });
+    if (path === '/api/me/preferences') return ok({ preferences: {}, notes_mode_available: false });
     if (path === '/api/review-cost-estimate') {
       if (estimateGate) await estimateGate;
       return ok({ estimated_usd_cents: estimateCents });
@@ -310,9 +300,7 @@ describe('a finished review keeps the estimate it was quoted at (#735)', () => {
 
     await submitOnce();
     await waitFor(() =>
-      expect(document.querySelector('.od-console')?.getAttribute('data-status')).toBe(
-        'done',
-      ),
+      expect(document.querySelector('.od-console')?.getAttribute('data-status')).toBe('done'),
     );
 
     // The regression this ticket exists for: the glass used to read
@@ -328,9 +316,7 @@ describe('a finished review keeps the estimate it was quoted at (#735)', () => {
     render(<ReviewSubmission />);
     await submitOnce();
     await waitFor(() =>
-      expect(document.querySelector('.od-console')?.getAttribute('data-status')).toBe(
-        'done',
-      ),
+      expect(document.querySelector('.od-console')?.getAttribute('data-status')).toBe('done'),
     );
 
     expect(priceText()).toContain('Estimate unavailable');

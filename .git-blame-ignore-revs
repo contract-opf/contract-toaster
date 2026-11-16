@@ -1,0 +1,11 @@
+# Commits that only reformat code, so `git blame` can look through them
+# (issue #90). GitHub applies this file to its blame view automatically; locally,
+# run once:  git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# One full 40-hex commit id per line, with a comment saying what it was.
+# tests/test_lint_gates_65.py check 7 holds this file to that shape. Only a
+# commit that changes layout and nothing else belongs here, and it only works
+# while the commit keeps its id: merge it, do not squash or rebase it.
+
+# style: reformat the Python tree with ruff format and the frontend with prettier
+346e7d41d919c5fd574f518f45db41cc61bbd9a6

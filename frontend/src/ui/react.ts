@@ -34,7 +34,15 @@ import { CtFileDrop as CtFileDropElement } from './components/ct-file-drop';
 import { CtProgress as CtProgressElement } from './components/ct-progress';
 import { CtColumns as CtColumnsElement } from './components/ct-columns';
 
-export type { CtChipVariant, CtButtonVariant, CtButtonSize, CtButtonType, CtCardPad, CtBannerVariant, CtTabDef };
+export type {
+  CtChipVariant,
+  CtButtonVariant,
+  CtButtonSize,
+  CtButtonType,
+  CtCardPad,
+  CtBannerVariant,
+  CtTabDef,
+};
 
 export const CtChip = createComponent({
   tagName: 'ct-chip',
@@ -59,8 +67,10 @@ const CtButtonComponent = createComponent({
   react: React,
 });
 
-export interface CtButtonProps
-  extends Omit<React.ComponentProps<typeof CtButtonComponent>, 'text' | 'children'> {
+export interface CtButtonProps extends Omit<
+  React.ComponentProps<typeof CtButtonComponent>,
+  'text' | 'children'
+> {
   children: string;
   /**
    * Optional confirm-step label (issue #428, §14). When set, the button arms
@@ -81,8 +91,10 @@ const CtIconButtonComponent = createComponent({
   react: React,
 });
 
-export interface CtIconButtonProps
-  extends Omit<React.ComponentProps<typeof CtIconButtonComponent>, 'text' | 'pressed' | 'children' | 'aria-pressed'> {
+export interface CtIconButtonProps extends Omit<
+  React.ComponentProps<typeof CtIconButtonComponent>,
+  'text' | 'pressed' | 'children' | 'aria-pressed'
+> {
   children: string;
   label: string;
   'aria-pressed'?: boolean;
@@ -93,7 +105,11 @@ export function CtIconButton({
   'aria-pressed': ariaPressed,
   ...rest
 }: CtIconButtonProps): React.ReactElement {
-  return React.createElement(CtIconButtonComponent, { ...rest, text: children, pressed: ariaPressed });
+  return React.createElement(CtIconButtonComponent, {
+    ...rest,
+    text: children,
+    pressed: ariaPressed,
+  });
 }
 
 // ---------------------------------------------------------------------------

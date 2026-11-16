@@ -99,9 +99,7 @@ def sse_lines_for_body(body: dict[str, Any], *, chunk_size: int = 7) -> list[str
     what such an answer looks like in streaming mode.
     """
     ids = {
-        key: body[key]
-        for key in ("id", "model")
-        if isinstance(body.get(key), str) and body[key]
+        key: body[key] for key in ("id", "model") if isinstance(body.get(key), str) and body[key]
     }
 
     lines: list[str] = [OPENROUTER_KEEPALIVE_COMMENT, ""]
@@ -124,7 +122,12 @@ def sse_lines_for_body(body: dict[str, Any], *, chunk_size: int = 7) -> list[str
 
     # Role-only opening delta: every OpenAI-compatible stream starts with one.
     lines.append(
-        _data_line({**ids, "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}]})
+        _data_line(
+            {
+                **ids,
+                "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+            }
+        )
     )
     lines.append("")
 
@@ -133,10 +136,20 @@ def sse_lines_for_body(body: dict[str, Any], *, chunk_size: int = 7) -> list[str
             "index": 0,
             "id": "call_stream_0",
             "type": "function",
-            "function": {"name": (tool_calls[0].get("function") or {}).get("name", "submit_review"), "arguments": ""},
+            "function": {
+                "name": (tool_calls[0].get("function") or {}).get("name", "submit_review"),
+                "arguments": "",
+            },
         }
         lines.append(
-            _data_line({**ids, "choices": [{"index": 0, "delta": {"tool_calls": [opening]}, "finish_reason": None}]})
+            _data_line(
+                {
+                    **ids,
+                    "choices": [
+                        {"index": 0, "delta": {"tool_calls": [opening]}, "finish_reason": None}
+                    ],
+                }
+            )
         )
         lines.append("")
         for fragment in _split(arguments, chunk_size):
@@ -162,7 +175,14 @@ def sse_lines_for_body(body: dict[str, Any], *, chunk_size: int = 7) -> list[str
 
     for fragment in _split(content, chunk_size):
         lines.append(
-            _data_line({**ids, "choices": [{"index": 0, "delta": {"content": fragment}, "finish_reason": None}]})
+            _data_line(
+                {
+                    **ids,
+                    "choices": [
+                        {"index": 0, "delta": {"content": fragment}, "finish_reason": None}
+                    ],
+                }
+            )
         )
         lines.append("")
 

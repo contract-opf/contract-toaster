@@ -249,9 +249,7 @@ def validate_pen_rules_document(
         try:
             bind_bundle._validate_overrides({"posture": posture_override}, opf_doc, previous_bundle)
         except bind_bundle.BindBundleError as exc:
-            errors.append(
-                _error("non_monotonic_version", "posture_override.version", str(exc))
-            )
+            errors.append(_error("non_monotonic_version", "posture_override.version", str(exc)))
 
     # (4) colliding floor_additions id -- isolated with a floor_additions-only
     # overrides slice (no posture key, so the posture block is skipped).
@@ -259,8 +257,6 @@ def validate_pen_rules_document(
         try:
             bind_bundle._validate_overrides({"floor_additions": floor_additions}, opf_doc, None)
         except bind_bundle.BindBundleError as exc:
-            errors.append(
-                _error("colliding_floor_additions", "floor_additions[].id", str(exc))
-            )
+            errors.append(_error("colliding_floor_additions", "floor_additions[].id", str(exc)))
 
     return {"playbook_id": playbook_id, "valid": not errors, "errors": errors}

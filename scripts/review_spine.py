@@ -474,7 +474,6 @@ def document_text_for_review(paragraphs: list[dict[str, Any]]) -> str:
     return "\n\n".join(blocks)
 
 
-
 def _assemble_opf_system_blocks(
     knowledge: "review_knowledge.ReviewKnowledge",  # noqa: UP037
     notes_mode: str = "external",
@@ -525,7 +524,7 @@ def _assemble_opf_system_blocks(
     # states what the review is for -- one objective, not two. The
     # perspective is the playbook artifact's own, so this block is the same
     # bytes for every review of it.
-    _perspective = ((getattr(knowledge, "opf_doc", None) or {}).get("perspective") or {})
+    _perspective = (getattr(knowledge, "opf_doc", None) or {}).get("perspective") or {}
     blocks: list[dict[str, Any]] = [
         {
             "type": "text",
@@ -576,7 +575,8 @@ def leakage_scan_instruction_blocks(
 
 
 def _floor_perspective_note(
-    opf_doc: Optional[dict[str, Any]], entity_roster: Optional[Sequence[str]] = None  # noqa: UP045
+    opf_doc: Optional[dict[str, Any]],  # noqa: UP045
+    entity_roster: Optional[Sequence[str]] = None,  # noqa: UP045
 ) -> str:
     """Who this review acts for, rendered for `floor_judge
     .judge_floor_invariants(perspective_note=...)` (issue #679).
@@ -686,8 +686,7 @@ def uses_block_mode(reconciled_result: dict[str, Any]) -> bool:
     only honest signal on the object stage 5 actually receives.
     """
     return bool(
-        (reconciled_result.get("block_patches") or [])
-        or (reconciled_result.get("block_ops") or [])
+        (reconciled_result.get("block_patches") or []) or (reconciled_result.get("block_ops") or [])
     )
 
 
@@ -1261,9 +1260,7 @@ def run_review(
     redline_docx_bytes, accept_report = (
         extraction_normalization_stage.materialize_accept_all_with_report(docx_bytes)
     )
-    revision_disclosure = extraction_normalization_stage.accepted_revision_disclosure(
-        accept_report
-    )
+    revision_disclosure = extraction_normalization_stage.accepted_revision_disclosure(accept_report)
     if revision_disclosure:
         normalization_notes = " ".join(
             part for part in (normalization_notes, revision_disclosure) if part
@@ -1532,9 +1529,7 @@ def run_review(
         primary_pass_result=primary_result,
         critic_pass_result=critic_result,
         detector_fires=detector_fires,
-        hard_rejection_rule_ids=reconciliation.hard_rejection_rule_ids(
-            playbook, floor_invariants
-        ),
+        hard_rejection_rule_ids=reconciliation.hard_rejection_rule_ids(playbook, floor_invariants),
         hard_ledger_rule_ids=ledger_rule_ids,
     )
     if two_pass["status"] != STATUS_OK:
@@ -1670,9 +1665,7 @@ def run_review(
             hard_ledger_record, redline_generate.delivered_issue_keys(redline_result)
         )
         if hard_ledger_record["asserted"] and summary is not None:
-            summary = hard_ledger.settled_verdict_summary(
-                pre_ledger_reconciled, hard_ledger_record
-            )
+            summary = hard_ledger.settled_verdict_summary(pre_ledger_reconciled, hard_ledger_record)
 
     result: dict[str, Any] = {
         "status": redline_result["status"],

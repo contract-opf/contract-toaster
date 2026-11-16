@@ -130,7 +130,9 @@ def _build_docx_bytes(body_paragraphs_xml: str, extra_parts: dict[str, str] | No
 
 
 def _heading_p(text: str, level: int = 1) -> str:
-    return f'<w:p><w:pPr><w:pStyle w:val="Heading{level}"/></w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>'
+    return (
+        f'<w:p><w:pPr><w:pStyle w:val="Heading{level}"/></w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>'
+    )
 
 
 def _body_p(text: str) -> str:
@@ -138,7 +140,7 @@ def _body_p(text: str) -> str:
 
 
 def _hidden_p(text: str) -> str:
-    return f'<w:p><w:r><w:rPr><w:vanish/></w:rPr><w:t>{text}</w:t></w:r></w:p>'
+    return f"<w:p><w:r><w:rPr><w:vanish/></w:rPr><w:t>{text}</w:t></w:r></w:p>"
 
 
 def _pending_change_p(original: str, resulting: str, author: str = "counterparty") -> str:
@@ -237,8 +239,7 @@ def _field_result_p(prefix: str, field_result: str, suffix: str, instr: str) -> 
 
 
 _HYPERLINK_RUNS = (
-    '<w:r><w:rPr><w:rStyle w:val="Hyperlink"/></w:rPr>'
-    '<w:t xml:space="preserve">{text}</w:t></w:r>'
+    '<w:r><w:rPr><w:rStyle w:val="Hyperlink"/></w:rPr><w:t xml:space="preserve">{text}</w:t></w:r>'
 )
 
 
@@ -260,7 +261,9 @@ def _hyperlink(inner: str, *, anchor: str | None = None, rel_id: str = "rId9") -
     return f"<w:hyperlink{attr}>{inner}</w:hyperlink>"
 
 
-def _linked_cross_reference_p(prefix: str, link_text: str, suffix: str, *, anchor: str | None = None) -> str:
+def _linked_cross_reference_p(
+    prefix: str, link_text: str, suffix: str, *, anchor: str | None = None
+) -> str:
     """A clause whose middle words live inside a `<w:hyperlink>` -- the
     silent-content-loss shape of issue #663."""
     return (
@@ -398,8 +401,7 @@ def _generate_clean_standard_form_fixture() -> Path:
         [
             _heading_p("Limitation on Liability", level=1),
             _body_p(
-                "Each party's aggregate liability under this Agreement "
-                "shall not exceed $150,000."
+                "Each party's aggregate liability under this Agreement shall not exceed $150,000."
             ),
             _heading_p("Governing Law", level=1),
             _body_p("This Agreement shall be governed by the laws of Delaware."),
@@ -510,7 +512,9 @@ def test_disallowed_parts_payload_never_reaches_output(failures: list[str]) -> N
     result = stage.extract_and_normalize(docx_bytes)
 
     if result.get("status") != "normalized":
-        failures.append(f"[G2] Fixture with disallowed-part payloads unexpectedly failed to normalize: {result}")
+        failures.append(
+            f"[G2] Fixture with disallowed-part payloads unexpectedly failed to normalize: {result}"
+        )
         return
 
     serialized = repr(result)
@@ -533,7 +537,9 @@ def test_disallowed_parts_payload_never_reaches_output(failures: list[str]) -> N
 
     preamble = next((p for p in result["paragraphs"] if p.get("heading") == "Preamble"), None)
     if preamble is None or "ordinary, allowed clause text" not in preamble.get("text", ""):
-        failures.append(f"[G2b] Allowed body text was lost alongside the disallowed-part exclusion: {preamble!r}")
+        failures.append(
+            f"[G2b] Allowed body text was lost alongside the disallowed-part exclusion: {preamble!r}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -552,7 +558,9 @@ def test_single_author_pending_change_accepts_all(failures: list[str]) -> None:
     result = stage.extract_and_normalize(_build_docx_bytes(body))
 
     if result.get("status") != "normalized":
-        failures.append(f"[G3a] Single-author pending change must accept-all, not fail closed. Got: {result}")
+        failures.append(
+            f"[G3a] Single-author pending change must accept-all, not fail closed. Got: {result}"
+        )
         return
     para = result["paragraphs"][0]
     if "uncapped" not in para["text"]:
@@ -581,11 +589,15 @@ def test_multi_author_conflict_accepts_all(failures: list[str]) -> None:
     )
     result = stage.extract_and_normalize(_build_docx_bytes(body))
     if result.get("status") != "normalized":
-        failures.append(f"[G3b] Two-author pending changes must accept-all, not fail closed. Got: {result}")
+        failures.append(
+            f"[G3b] Two-author pending changes must accept-all, not fail closed. Got: {result}"
+        )
         return
     para = result["paragraphs"][0]
     if resulting_a not in para["text"] or resulting_b not in para["text"]:
-        failures.append(f"[G3b2] Both authors' resulting text must be folded into the operative draft: {para!r}")
+        failures.append(
+            f"[G3b2] Both authors' resulting text must be folded into the operative draft: {para!r}"
+        )
     if "normalization_notes" not in result or not result["normalization_notes"]:
         failures.append(
             f"[G3b3] Multi-author accept-all disposition must be recorded in "
@@ -613,7 +625,9 @@ def test_pending_change_inside_field_code_accepts_all(failures: list[str]) -> No
     if "New York" not in para["text"]:
         failures.append(f"[G3c2] Field's resolved resulting text not folded into output: {para!r}")
     if "Delaware" in para["text"]:
-        failures.append(f"[G3c3] Pre-edit field text must not remain once accept-all applies: {para!r}")
+        failures.append(
+            f"[G3c3] Pre-edit field text must not remain once accept-all applies: {para!r}"
+        )
     notes = result.get("normalization_notes") or ""
     if not notes:
         failures.append(
@@ -647,8 +661,7 @@ def test_whole_paragraph_deletion_with_comment_normalizes(failures: list[str]) -
     texts = " ".join(p["text"] for p in result["paragraphs"])
     if struck in texts:
         failures.append(
-            f"[G3d2] The struck paragraph must not survive into the operative draft. "
-            f"Got: {texts!r}"
+            f"[G3d2] The struck paragraph must not survive into the operative draft. Got: {texts!r}"
         )
     if "Fees are payable monthly." not in texts:
         failures.append(
@@ -656,7 +669,10 @@ def test_whole_paragraph_deletion_with_comment_normalizes(failures: list[str]) -
             f"deletion of its neighbour. Got: {texts!r}"
         )
     notes = result.get("normalization_notes") or ""
-    if "accepted-all into the operative draft." not in notes or "struck paragraph is omitted" not in notes:
+    if (
+        "accepted-all into the operative draft." not in notes
+        or "struck paragraph is omitted" not in notes
+    ):
         failures.append(
             f"[G3d4] The deletion must be disclosed in normalization_notes, in the "
             f"established accept-all sentence shape. Got: {notes!r}"
@@ -666,23 +682,29 @@ def test_whole_paragraph_deletion_with_comment_normalizes(failures: list[str]) -
 def test_hidden_text_and_field_result_normalize_cleanly(failures: list[str]) -> None:
     """Hidden text is stripped; a STATIC field result resolves to its
     literal displayed text -- neither is fatal."""
-    body = _heading_p("Governing Law") + _hidden_p(
-        "HIDDEN: internal drafting note, do not disclose"
-    ) + _field_result_p(
-        "This Agreement shall be governed by the laws of ",
-        "Delaware",
-        ".",
-        " REF GoverningLawJurisdiction ",
+    body = (
+        _heading_p("Governing Law")
+        + _hidden_p("HIDDEN: internal drafting note, do not disclose")
+        + _field_result_p(
+            "This Agreement shall be governed by the laws of ",
+            "Delaware",
+            ".",
+            " REF GoverningLawJurisdiction ",
+        )
     )
     result = stage.extract_and_normalize(_build_docx_bytes(body))
     if result.get("status") != "normalized":
-        failures.append(f"[G3e] Hidden text + static field result must normalize cleanly. Got: {result}")
+        failures.append(
+            f"[G3e] Hidden text + static field result must normalize cleanly. Got: {result}"
+        )
         return
     para = result["paragraphs"][0]
     if "do not disclose" in para["text"] or "internal drafting note" in para["text"]:
         failures.append(f"[G3e2] Hidden text must never reach the clean body. Got: {para!r}")
     if "Delaware" not in para["text"]:
-        failures.append(f"[G3e3] Field result must resolve to its literal displayed text. Got: {para!r}")
+        failures.append(
+            f"[G3e3] Field result must resolve to its literal displayed text. Got: {para!r}"
+        )
 
 
 def test_sibling_body_paragraph_survives_accept_all_on_other_sibling(failures: list[str]) -> None:
@@ -713,7 +735,9 @@ def test_sibling_body_paragraph_survives_accept_all_on_other_sibling(failures: l
 
     section = next((p for p in result["paragraphs"] if p.get("heading") == "Section 10"), None)
     if section is None:
-        failures.append(f"[G3g2] Expected 'Section 10' paragraph missing. Got: {result['paragraphs']!r}")
+        failures.append(
+            f"[G3g2] Expected 'Section 10' paragraph missing. Got: {result['paragraphs']!r}"
+        )
         return
 
     text = section.get("text", "")
@@ -723,11 +747,17 @@ def test_sibling_body_paragraph_survives_accept_all_on_other_sibling(failures: l
             f"on its sibling paragraph -- it must NOT be silently dropped. Got: {section!r}"
         )
     if "Subclause B: liability uncapped." not in text:
-        failures.append(f"[G3g4] Accepted resulting text for 'Subclause B' not folded into output: {section!r}")
+        failures.append(
+            f"[G3g4] Accepted resulting text for 'Subclause B' not folded into output: {section!r}"
+        )
     if "$150,000" in text:
-        failures.append(f"[G3g5] Pre-edit text for the accepted sibling must not remain: {section!r}")
+        failures.append(
+            f"[G3g5] Pre-edit text for the accepted sibling must not remain: {section!r}"
+        )
     if "normalization_notes" not in result or not result["normalization_notes"]:
-        failures.append(f"[G3g6] Sibling accept-all disposition must be recorded, never silent. Got: {result}")
+        failures.append(
+            f"[G3g6] Sibling accept-all disposition must be recorded, never silent. Got: {result}"
+        )
 
 
 def test_comment_never_gates_accept_all(failures: list[str]) -> None:
@@ -784,7 +814,9 @@ def test_unnormalizable_document_emits_analysis_report_shape(failures: list[str]
             f"(no model has run yet). Got: {report!r}"
         )
     if not report.get("normalization_notes"):
-        failures.append(f"[G4e] normalization_notes must describe what could not be resolved: {report!r}")
+        failures.append(
+            f"[G4e] normalization_notes must describe what could not be resolved: {report!r}"
+        )
 
 
 def test_one_unnormalizable_paragraph_fails_whole_document(failures: list[str]) -> None:
@@ -836,7 +868,9 @@ def test_run_stage_pointer_only_payload_success_path(failures: list[str]) -> Non
         failures.append(f"[G5b] review_id must round-trip. Got: {output}")
     normalized_key = output.get("normalized_s3_key")
     if not normalized_key or normalized_key not in stored:
-        failures.append(f"[G5c] normalized_s3_key must point at something actually stored. Got: {output}")
+        failures.append(
+            f"[G5c] normalized_s3_key must point at something actually stored. Got: {output}"
+        )
 
     allowed_output_keys = {"review_id", "status", "normalized_s3_key"}
     if set(output.keys()) - allowed_output_keys:
@@ -846,13 +880,17 @@ def test_run_stage_pointer_only_payload_success_path(failures: list[str]) -> Non
         )
     for value in output.values():
         if isinstance(value, str) and ("Delaware" in value or "Agreement" in value):
-            failures.append(f"[G5e] Document substance leaked into the pointer-only output payload: {output!r}")
+            failures.append(
+                f"[G5e] Document substance leaked into the pointer-only output payload: {output!r}"
+            )
 
     # The stored artifact itself may carry document text (it's the actual
     # S3 object) -- but the STATE PAYLOAD (the `output` dict returned to
     # Step Functions / the caller) must not, which is what G5d/G5e assert.
     if "Delaware" not in str(stored[normalized_key]):
-        failures.append(f"[G5f] Stored normalized artifact should carry the actual extracted content: {stored}")
+        failures.append(
+            f"[G5f] Stored normalized artifact should carry the actual extracted content: {stored}"
+        )
 
 
 def test_run_stage_pointer_only_payload_fail_closed_path(failures: list[str]) -> None:
@@ -877,7 +915,9 @@ def test_run_stage_pointer_only_payload_fail_closed_path(failures: list[str]) ->
         failures.append(f"[G5g] Expected fail-closed pointer-only output. Got: {output}")
     report_key = output.get("analysis_report_s3_key")
     if not report_key or report_key not in stored:
-        failures.append(f"[G5h] analysis_report_s3_key must point at the stored report. Got: {output}")
+        failures.append(
+            f"[G5h] analysis_report_s3_key must point at the stored report. Got: {output}"
+        )
 
     allowed_output_keys = {"review_id", "status", "reason", "analysis_report_s3_key"}
     if set(output.keys()) - allowed_output_keys:
@@ -886,7 +926,9 @@ def test_run_stage_pointer_only_payload_fail_closed_path(failures: list[str]) ->
         )
     for value in output.values():
         if isinstance(value, str) and "$150,000" in value:
-            failures.append(f"[G5j] Document substance leaked into fail-closed pointer-only output: {output!r}")
+            failures.append(
+                f"[G5j] Document substance leaked into fail-closed pointer-only output: {output!r}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -957,7 +999,9 @@ def test_hyperlink_wrapped_text_reaches_extraction(failures: list[str]) -> None:
         )
     )
     if normalized.get("status") != "normalized":
-        failures.append(f"[G6d] Hyperlink-bearing document must normalize cleanly. Got: {normalized}")
+        failures.append(
+            f"[G6d] Hyperlink-bearing document must normalize cleanly. Got: {normalized}"
+        )
     elif normalized["paragraphs"][0]["text"] != expected:
         failures.append(
             f"[G6e] Hyperlink text lost between extraction and the normalized body: "
@@ -1277,9 +1321,7 @@ def test_short_tab_separated_sub_clauses_stay_body_text(failures: list[str]) -> 
         "</w:r></w:p>"
         for letter, sentence in sentences
     )
-    result = stage.extract_and_normalize(
-        _build_docx_bytes(_heading_p("Payment Terms") + body)
-    )
+    result = stage.extract_and_normalize(_build_docx_bytes(_heading_p("Payment Terms") + body))
     if result.get("status") != "normalized":
         failures.append(f"[G9e] Expected normalized document, got {result}")
         return
@@ -1492,7 +1534,9 @@ def test_line_break_split_numbered_heading_is_still_a_boundary(
                 f"clause, as on HEAD; got headings {headings!r} with texts {texts!r}"
             )
         elif texts != [first_body, second_body]:
-            failures.append(f"[G11c] {separator}: the headings must not fold into the body: {texts!r}")
+            failures.append(
+                f"[G11c] {separator}: the headings must not fold into the body: {texts!r}"
+            )
 
 
 def test_boundary_text_reads_only_the_accept_all_view(failures: list[str]) -> None:
@@ -1513,7 +1557,7 @@ def test_boundary_text_reads_only_the_accept_all_view(failures: list[str]) -> No
 
     def record(paragraph_xml: str) -> dict[str, Any]:
         root = ET.fromstring(  # noqa: S314 - fixture XML this file builds itself
-            "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">"
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
             f"<w:body>{paragraph_xml}</w:body></w:document>"
         )
         return stage._build_paragraph_record(root[0][0])
@@ -1543,8 +1587,7 @@ def test_boundary_text_reads_only_the_accept_all_view(failures: list[str]) -> No
             "Buyer shall pay.",
         ),
         (
-            '<w:p><w:r><w:t xml:space="preserve">1.</w:t><w:tab/></w:r>'
-            f"{inserted_title}</w:p>",
+            f'<w:p><w:r><w:t xml:space="preserve">1.</w:t><w:tab/></w:r>{inserted_title}</w:p>',
             "1.\tDefinitions.",
             "1.\tDefinitions.",
         ),
@@ -1618,9 +1661,7 @@ def test_hostile_or_malformed_sym_char_degrades_to_a_space(failures: list[str]) 
             "</w:r></w:p>"
         )
         try:
-            raw = stage.extract_document_paragraphs(
-                _build_docx_bytes(_heading_p("Fees") + body_p)
-            )
+            raw = stage.extract_document_paragraphs(_build_docx_bytes(_heading_p("Fees") + body_p))
         except Exception as exc:  # noqa: BLE001 - the point is that nothing escapes
             failures.append(f"[G12a] {label}: extraction raised {exc!r}")
             continue
@@ -1698,7 +1739,9 @@ def test_mixed_run_children_inside_a_pending_tracked_change(failures: list[str])
     record = raw[0]["physical_paragraphs"][0]
     tracked = [rev for rev in record["revisions"] if rev.get("type") == "tracked_change"]
     if len(tracked) != 1:
-        failures.append(f"[G10a] Expected exactly one tracked-change cluster. Got: {record['revisions']!r}")
+        failures.append(
+            f"[G10a] Expected exactly one tracked-change cluster. Got: {record['revisions']!r}"
+        )
         return
     revision = tracked[0]
     expected_original = "Old term\tunbounded."

@@ -86,6 +86,7 @@ def check(condition: bool, pass_msg: str, fail_msg: str) -> list[str]:
 # Check 1 — the frontend Dockerfile bakes the stamp into the bundle
 # ---------------------------------------------------------------------------
 
+
 def check_1_frontend_dockerfile() -> list[str]:
     print("\nCheck 1: deploy/dts/frontend.Dockerfile stamps the bundle …")
     failures: list[str] = []
@@ -125,9 +126,7 @@ def check_1_frontend_dockerfile() -> list[str]:
                 f"different kinds of 'no stamp'",
             )
 
-        env = re.search(
-            rf"^\s*ENV\s+{vite_var}\s*=\s*\$\{{{var}\}}\s*$", text, re.MULTILINE
-        )
+        env = re.search(rf"^\s*ENV\s+{vite_var}\s*=\s*\$\{{{var}\}}\s*$", text, re.MULTILINE)
         failures += check(
             env is not None,
             f"1d[{var}]: ENV {vite_var}=${{{var}}} forwards the build arg to Vite",
@@ -151,6 +150,7 @@ def check_1_frontend_dockerfile() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check 2 — the publish workflow stamps BOTH images
 # ---------------------------------------------------------------------------
+
 
 def check_2_workflow_stamps_both_legs() -> list[str]:
     print("\nCheck 2: dts-image-publish.yml stamps every matrix leg …")
@@ -214,11 +214,10 @@ def check_2_workflow_stamps_both_legs() -> list[str]:
 # Check 3 — the build-from-source compose stamps the frontend too
 # ---------------------------------------------------------------------------
 
+
 def _service_block(text: str, service: str) -> str | None:
     """The raw text of one top-level service's body."""
-    m = re.search(
-        rf"^  {re.escape(service)}:\n(.*?)(?=^  \S|\Z)", text, re.MULTILINE | re.DOTALL
-    )
+    m = re.search(rf"^  {re.escape(service)}:\n(.*?)(?=^  \S|\Z)", text, re.MULTILINE | re.DOTALL)
     return m.group(1) if m else None
 
 
@@ -233,7 +232,9 @@ def check_3_local_compose_frontend_build_args() -> list[str]:
     if block is None:
         return fail("3: could not locate the `frontend:` service in docker-compose.yml")
 
-    args = re.search(r"^      args:\n(.*?)(?=^      \S|^    \S|\Z)", block, re.MULTILINE | re.DOTALL)
+    args = re.search(
+        r"^      args:\n(.*?)(?=^      \S|^    \S|\Z)", block, re.MULTILINE | re.DOTALL
+    )
     failures += check(
         args is not None,
         "3a: the frontend build declares an `args:` block",
@@ -262,9 +263,7 @@ def check_3_local_compose_frontend_build_args() -> list[str]:
 # Check 4 — the stamp is never faked at runtime
 # ---------------------------------------------------------------------------
 
-RUNTIME_FAKE = re.compile(
-    r"^\s*(VERSION|COMMIT_SHA|IMAGE_DIGEST|VITE_[A-Z0-9_]+):", re.MULTILINE
-)
+RUNTIME_FAKE = re.compile(r"^\s*(VERSION|COMMIT_SHA|IMAGE_DIGEST|VITE_[A-Z0-9_]+):", re.MULTILINE)
 
 
 def check_4_no_runtime_frontend_stamp() -> list[str]:
@@ -282,13 +281,9 @@ def check_4_no_runtime_frontend_stamp() -> list[str]:
             failures += fail(f"4[{rel}]: could not locate the `frontend:` service")
             continue
 
-        env = re.search(
-            r"^    environment:\n(.*?)(?=^    \S|\Z)", block, re.MULTILINE | re.DOTALL
-        )
+        env = re.search(r"^    environment:\n(.*?)(?=^    \S|\Z)", block, re.MULTILINE | re.DOTALL)
         if env is None:
-            failures += ok(
-                f"4[{rel}]: the frontend service declares no `environment:` block"
-            )
+            failures += ok(f"4[{rel}]: the frontend service declares no `environment:` block")
             continue
 
         offenders = sorted({m.group(1) for m in RUNTIME_FAKE.finditer(env.group(1))})
@@ -309,6 +304,7 @@ def check_4_no_runtime_frontend_stamp() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check 5 — the reader the whole chain exists to feed
 # ---------------------------------------------------------------------------
+
 
 def check_5_reader_consumes_the_stamp() -> list[str]:
     print("\nCheck 5: the SPA actually reads the baked stamp …")
@@ -336,6 +332,7 @@ def check_5_reader_consumes_the_stamp() -> list[str]:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> int:
     print("Frontend build-stamp plumbing gate (issue #652)")
     print("=" * 70)
@@ -349,10 +346,7 @@ def main() -> int:
 
     print("\n" + "=" * 70)
     if all_failures:
-        print(
-            f"\nFAIL: {len(all_failures)} check(s) failed.\n"
-            "See output above for details."
-        )
+        print(f"\nFAIL: {len(all_failures)} check(s) failed.\nSee output above for details.")
         return 1
 
     print("\nPASS: all frontend build-stamp checks passed (issue #652).")

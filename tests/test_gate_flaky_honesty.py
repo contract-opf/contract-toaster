@@ -410,16 +410,14 @@ def check_contract_is_documented() -> list[str]:
     )
     header = loop_text.split("set -u", 1)[0]
     failures += _assert(
-        re.search(r"^#\s*2\s+", header, re.M) is not None
-        and "flak" in header.lower(),
+        re.search(r"^#\s*2\s+", header, re.M) is not None and "flak" in header.lower(),
         "scripts/collect_test_failures.sh's header spells out exit code 2 "
         "on its own line in the exit-code contract",
         detail="The header must document the 0/1/2 mapping explicitly.",
     )
     check_header = check_text.split("set -u", 1)[0]
     failures += _assert(
-        re.search(r"^#\s*3\s+", check_header, re.M) is not None
-        and "lock" in check_header.lower(),
+        re.search(r"^#\s*3\s+", check_header, re.M) is not None and "lock" in check_header.lower(),
         "scripts/check.sh's header spells out exit code 3 (lock busy)",
         detail="The header must document the 0/1/2/3 mapping explicitly.",
     )

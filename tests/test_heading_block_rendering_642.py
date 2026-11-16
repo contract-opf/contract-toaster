@@ -59,7 +59,9 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 BACKEND_SRC = REPO_ROOT / "backend" / "src"
-FIXTURE = REPO_ROOT / "tests" / "fixtures" / "document-shapes" / "baseline-mutual-nda.SYNTHETIC.docx"
+FIXTURE = (
+    REPO_ROOT / "tests" / "fixtures" / "document-shapes" / "baseline-mutual-nda.SYNTHETIC.docx"
+)
 
 for _dir in (SCRIPTS_DIR, BACKEND_SRC):
     if str(_dir) not in sys.path:
@@ -163,7 +165,6 @@ def test_a_compliant_transcription_of_a_heading_bearing_block_proves(
     transcribed = _as_the_model_transcribes_it(rendered, heading_block_id)
     own_text = block_map[heading_block_id]["text"]
 
-
     # [1a] THE REGRESSION. Pre-fix the rendering was
     # "[pNNNN] ## Heading\nbody", so `transcribed` carried the heading and
     # this proof failed with source_mismatch at folded offset 1.
@@ -221,7 +222,7 @@ def test_every_marked_block_is_followed_by_exactly_its_own_text(failures: list[s
             failures.append(
                 f"[2b] {block_id}: text after the marker != the block's provable text.\n"
                 f"       after marker: {transcribed[:60]!r}\n"
-                f"       block_map:    {entry.get('text','')[:60]!r}"
+                f"       block_map:    {entry.get('text', '')[:60]!r}"
             )
         checked += 1
 

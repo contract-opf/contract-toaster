@@ -189,9 +189,9 @@ def test_primary_enum_rejection_records_the_schema_path() -> None:
     _result, ledger = _run_primary(
         [_bad_enum_with_sentinel(), _fixture("primary_request_change_valid.json")]
     )
-    assert (
-        ledger[0].schema_error_location == "properties/issues/items/properties/decision/enum"
-    ), ledger[0]
+    assert ledger[0].schema_error_location == "properties/issues/items/properties/decision/enum", (
+        ledger[0]
+    )
     assert ledger[0].retry_reason == "schema_invalid", ledger[0]
 
 
@@ -389,9 +389,9 @@ def test_primary_offending_value_never_reaches_the_ledger() -> None:
 def test_primary_extra_key_never_reaches_the_ledger() -> None:
     _result, ledger = _run_primary([_extra_key_with_sentinel(), _extra_key_with_sentinel()])
     assert [r.error_token for r in ledger] == ["schema_invalid"] * 2, ledger
-    assert (
-        ledger[0].schema_error_location == "properties/issues/items/additionalProperties"
-    ), ledger[0]
+    assert ledger[0].schema_error_location == "properties/issues/items/additionalProperties", (
+        ledger[0]
+    )
     _assert_no_sentinel(ledger)
 
 

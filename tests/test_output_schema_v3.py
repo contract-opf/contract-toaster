@@ -110,7 +110,12 @@ BLOCK_TEXT_ASSIGN = "Provider may assign this Agreement to any third party witho
 
 BLOCK_MAP: dict[str, Any] = {
     "b0001": {"text": BLOCK_TEXT_TERM, "heading": "1 Term", "index": 0, "physical_spans": []},
-    "b0002": {"text": BLOCK_TEXT_ASSIGN, "heading": "2 Assignment", "index": 1, "physical_spans": []},
+    "b0002": {
+        "text": BLOCK_TEXT_ASSIGN,
+        "heading": "2 Assignment",
+        "index": 1,
+        "physical_spans": [],
+    },
 }
 
 VALID_BLOCK_PATCH: dict[str, Any] = {
@@ -155,7 +160,10 @@ def _response(**overrides: Any) -> dict[str, Any]:
         "schema_version": "output-schema-v3",
         "decision": "REQUEST_CHANGE",
         "confidence_state": "OK",
-        "issues": [_issue("I1"), _issue("I2", section_ref="2 Assignment", section_title="Assignment")],
+        "issues": [
+            _issue("I1"),
+            _issue("I2", section_ref="2 Assignment", section_title="Assignment"),
+        ],
         "block_patches": [copy.deepcopy(VALID_BLOCK_PATCH)],
         "block_ops": copy.deepcopy(VALID_BLOCK_OPS),
         "critic_delta": None,
@@ -210,15 +218,21 @@ def test_v3_is_a_clean_break(failures: list[str]) -> None:
     ):
         older = json.loads(path.read_text(encoding="utf-8"))
         if older.get("output_contract_version") != expected_version:
-            failures.append(f"{path.name} was edited: output_contract_version is not {expected_version!r}")
+            failures.append(
+                f"{path.name} was edited: output_contract_version is not {expected_version!r}"
+            )
         if not str(older.get("$id", "")).endswith(expected_suffix):
             failures.append(f"{path.name} was edited: $id no longer ends {expected_suffix}")
 
     v2 = json.loads(V2_PATH.read_text(encoding="utf-8"))
     if "source_quote" not in v2["definitions"]["Issue"]["properties"]:
-        failures.append("output-schema-v2.json lost source_quote; v3 is a new artifact, not an edit of v2")
+        failures.append(
+            "output-schema-v2.json lost source_quote; v3 is a new artifact, not an edit of v2"
+        )
     if "source_quote" in V3["definitions"]["Issue"]["properties"]:
-        failures.append("v3 still defines issues[].source_quote; block transcripts replaced quote location")
+        failures.append(
+            "v3 still defines issues[].source_quote; block transcripts replaced quote location"
+        )
 
 
 def test_additional_properties_false_wherever_an_object_is_defined(failures: list[str]) -> None:
@@ -255,7 +269,9 @@ def test_every_issue_includes_is_a_subset_of_v3_issue_properties(failures: list[
     playbook = json.loads(PLAYBOOK_PATH.read_text(encoding="utf-8"))
     every_issue_includes = (playbook.get("output_format") or {}).get("every_issue_includes") or []
     if not every_issue_includes:
-        failures.append("fixture playbook has no output_format.every_issue_includes to check against")
+        failures.append(
+            "fixture playbook has no output_format.every_issue_includes to check against"
+        )
         return
     issue_props = V3["definitions"]["Issue"]["properties"]
     missing = [field for field in every_issue_includes if field not in issue_props]
@@ -296,11 +312,15 @@ def test_issue_key_is_required_and_pattern_bounded(failures: list[str]) -> None:
 
     for bad in ("1", "i1", "X1", "I", "I12345", "I-1", ""):
         _expect_invalid(
-            failures, f"issue_key {bad!r}", _response(issues=[_issue(bad)], block_patches=[], block_ops=[])
+            failures,
+            f"issue_key {bad!r}",
+            _response(issues=[_issue(bad)], block_patches=[], block_ops=[]),
         )
     for good in ("I1", "I9999"):
         _expect_valid(
-            failures, f"issue_key {good!r}", _response(issues=[_issue(good)], block_patches=[], block_ops=[])
+            failures,
+            f"issue_key {good!r}",
+            _response(issues=[_issue(good)], block_patches=[], block_ops=[]),
         )
 
 
@@ -312,19 +332,28 @@ def test_source_quote_is_no_longer_accepted(failures: list[str]) -> None:
     )
 
 
-def test_proposed_replacement_text_is_optional_and_scope_note_is_bounded(failures: list[str]) -> None:
+def test_proposed_replacement_text_is_optional_and_scope_note_is_bounded(
+    failures: list[str],
+) -> None:
     base = _response(block_patches=[], block_ops=[])
     _expect_valid(failures, "issue with no proposed_replacement_text", base)
     _expect_valid(
         failures,
         "issue with an empty proposed_replacement_text",
-        _response(issues=[_issue("I1", proposed_replacement_text="")], block_patches=[], block_ops=[]),
+        _response(
+            issues=[_issue("I1", proposed_replacement_text="")], block_patches=[], block_ops=[]
+        ),
     )
     _expect_valid(
         failures,
         "issue with a replacement_scope_note",
         _response(
-            issues=[_issue("I1", replacement_scope_note="The whole clause is replaced; local repair leaves the carve-out unusable.")],
+            issues=[
+                _issue(
+                    "I1",
+                    replacement_scope_note="The whole clause is replaced; local repair leaves the carve-out unusable.",
+                )
+            ],
             block_patches=[],
             block_ops=[],
         ),
@@ -339,7 +368,9 @@ def test_proposed_replacement_text_is_optional_and_scope_note_is_bounded(failure
     _expect_invalid(
         failures,
         "replacement_scope_note of the wrong type",
-        _response(issues=[_issue("I1", replacement_scope_note=None)], block_patches=[], block_ops=[]),
+        _response(
+            issues=[_issue("I1", replacement_scope_note=None)], block_patches=[], block_ops=[]
+        ),
     )
 
 
@@ -367,17 +398,25 @@ def test_block_patch_segment_shapes(failures: list[str]) -> None:
     _expect_invalid(
         failures,
         "segment with an unknown key",
-        with_segments([{"op": "delete", "text": "sixty (60)", "issue_key": "I1", "issueKey": "I1"}]),
+        with_segments(
+            [{"op": "delete", "text": "sixty (60)", "issue_key": "I1", "issueKey": "I1"}]
+        ),
     )
     _expect_invalid(
-        failures, "segment with an unknown op", with_segments([{"op": "replace", "text": "x", "issue_key": "I1"}])
+        failures,
+        "segment with an unknown op",
+        with_segments([{"op": "replace", "text": "x", "issue_key": "I1"}]),
     )
-    _expect_invalid(failures, "segment with empty text", with_segments([{"op": "keep", "text": ""}]))
+    _expect_invalid(
+        failures, "segment with empty text", with_segments([{"op": "keep", "text": ""}])
+    )
     _expect_invalid(failures, "block patch with no segments", with_segments([]))
     _expect_invalid(
         failures,
         "block patch missing block_id",
-        _response(block_patches=[{"segments": copy.deepcopy(VALID_BLOCK_PATCH["segments"])}], block_ops=[]),
+        _response(
+            block_patches=[{"segments": copy.deepcopy(VALID_BLOCK_PATCH["segments"])}], block_ops=[]
+        ),
     )
     _expect_invalid(
         failures,
@@ -449,7 +488,9 @@ def test_block_op_shapes(failures: list[str]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_a_schema_valid_transcript_is_what_validate_block_patches_consumes(failures: list[str]) -> None:
+def test_a_schema_valid_transcript_is_what_validate_block_patches_consumes(
+    failures: list[str],
+) -> None:
     """The schema's shapes are not a parallel invention: the SAME fixture the
     schema calls valid is proven by `block_transcript.validate_block_patches`
     against a synthetic block map, and the shapes the schema calls invalid are
@@ -468,7 +509,9 @@ def test_a_schema_valid_transcript_is_what_validate_block_patches_consumes(failu
     if final_text != "The Term shall be thirty (30) days from the Effective Date.":
         failures.append(f"proven final_text is {final_text!r}, not the accept-all projection")
     if sorted(proven["by_issue"]) != ["I1", "I2"]:
-        failures.append(f"by_issue keys are {sorted(proven['by_issue'])}, expected the two issue_keys")
+        failures.append(
+            f"by_issue keys are {sorted(proven['by_issue'])}, expected the two issue_keys"
+        )
 
     # And the reverse direction: a segment list the SCHEMA rejects is one the
     # validator rejects too, so the two are not drifting apart.
@@ -511,7 +554,9 @@ def _walk_nodes(node: Any, path: str = ""):
 def test_model_facing_projection_keeps_the_v3_edit_fields(failures: list[str]) -> None:
     projected = mos.model_facing_output_schema(V3_PATH)
     if "schema_version" in projected["properties"]:
-        failures.append("model-facing v3 schema still asks the model for the stamped schema_version")
+        failures.append(
+            "model-facing v3 schema still asks the model for the stamped schema_version"
+        )
     if "provenance" in projected["definitions"]["Issue"]["properties"]:
         failures.append("model-facing v3 schema still asks the model for the stamped provenance")
     for field in ("block_patches", "block_ops"):
@@ -521,7 +566,9 @@ def test_model_facing_projection_keeps_the_v3_edit_fields(failures: list[str]) -
         failures.append("model-facing v3 schema dropped issues[].issue_key")
 
 
-def test_provider_strict_projection_retains_block_patches_and_block_ops(failures: list[str]) -> None:
+def test_provider_strict_projection_retains_block_patches_and_block_ops(
+    failures: list[str],
+) -> None:
     """The #567 fix-round-3 failure class, guarded for v3: a field silently
     missing from the projected schema ships ZERO redlines on every
     structured-outputs model, with every fixture test still green. Asserted
@@ -535,12 +582,19 @@ def test_provider_strict_projection_retains_block_patches_and_block_ops(failures
             failures.append(f"provider-strict v3 projection dropped top-level {field}")
             return
         if node.get("items", {}).get("$ref") is None:
-            failures.append(f"provider-strict v3 projection flattened {field}.items away: {node.get('items')}")
+            failures.append(
+                f"provider-strict v3 projection flattened {field}.items away: {node.get('items')}"
+            )
         if field not in projected.get("required", []):
-            failures.append(f"{field} is not in the projected root required list (strict mode requires it)")
+            failures.append(
+                f"{field} is not in the projected root required list (strict mode requires it)"
+            )
 
     patch = projected["definitions"].get("BlockPatch")
-    if not isinstance(patch, dict) or sorted(patch.get("properties") or {}) != ["block_id", "segments"]:
+    if not isinstance(patch, dict) or sorted(patch.get("properties") or {}) != [
+        "block_id",
+        "segments",
+    ]:
         failures.append(f"projected BlockPatch lost its properties: {patch}")
         return
     if sorted(patch.get("required") or []) != ["block_id", "segments"]:
@@ -555,7 +609,9 @@ def test_provider_strict_projection_retains_block_patches_and_block_ops(failures
         failures.append(f"projected Segment branches carry {branch_props}")
     for branch in segment_branches:
         if sorted(branch.get("required") or []) != sorted(branch.get("properties") or {}):
-            failures.append(f"projected Segment branch required != properties: {branch.get('required')}")
+            failures.append(
+                f"projected Segment branch required != properties: {branch.get('required')}"
+            )
 
     op_branches = (projected["definitions"].get("BlockOp") or {}).get("anyOf")
     if not isinstance(op_branches, list) or len(op_branches) != 2:
@@ -576,7 +632,9 @@ def test_provider_strict_projection_of_v3_is_strict_mode_clean(failures: list[st
     projected = mos.project_output_schema_for_provider(path=V3_PATH)
     for key in ("$schema", "$id", "output_contract_version"):
         if key in projected:
-            failures.append(f"projected v3 schema still carries the non-validation root keyword {key}")
+            failures.append(
+                f"projected v3 schema still carries the non-validation root keyword {key}"
+            )
     for path, node in _walk_nodes(projected):
         for banned in _STRICT_MODE_BANNED:
             if banned in node:
@@ -591,7 +649,9 @@ def test_provider_strict_projection_of_v3_is_strict_mode_clean(failures: list[st
                 )
 
 
-def test_a_projection_compliant_response_round_trips_through_the_full_schema(failures: list[str]) -> None:
+def test_a_projection_compliant_response_round_trips_through_the_full_schema(
+    failures: list[str],
+) -> None:
     """The seam that actually matters: a response shaped exactly as the
     provider-strict projection FORCES (every property present, including the
     ones the full schema calls optional) must still pass the FULL v3 schema
@@ -628,14 +688,18 @@ def test_a_projection_compliant_response_round_trips_through_the_full_schema(fai
     }
     projection_errors = _errors(emitted, projected)
     if projection_errors:
-        failures.append(f"the fixture does not satisfy the projected schema itself: {projection_errors}")
+        failures.append(
+            f"the fixture does not satisfy the projected schema itself: {projection_errors}"
+        )
         return
 
     ok, parsed_or_error = pp.validate_model_response(
         json.dumps(emitted), issue_provenance="model", schema_path=V3_PATH
     )
     if not ok:
-        failures.append(f"a projection-compliant v3 response failed the FULL v3 schema: {parsed_or_error}")
+        failures.append(
+            f"a projection-compliant v3 response failed the FULL v3 schema: {parsed_or_error}"
+        )
         return
     if parsed_or_error.get("schema_version") != "output-schema-v3":
         failures.append(
@@ -683,7 +747,9 @@ def test_duplicate_issue_key_is_rejected(failures: list[str]) -> None:
         failures.append("a critic-added issue reusing the primary's issue_key was accepted")
 
 
-def test_the_duplicate_check_is_dormant_on_an_artifact_without_issue_key(failures: list[str]) -> None:
+def test_the_duplicate_check_is_dormant_on_an_artifact_without_issue_key(
+    failures: list[str],
+) -> None:
     """v2 has no `issue_key`, so the check must not fire there — the gate is
     the ACTIVE artifact's own Issue definition, not a version string."""
     v2 = json.loads(V2_PATH.read_text(encoding="utf-8"))
@@ -742,7 +808,9 @@ def test_the_live_path_validates_against_v3(failures: list[str]) -> None:
 
     ok, parsed_or_error = pp.validate_model_response(json.dumps(_response()))
     if not ok:
-        failures.append(f"a v3-shaped response failed the DEFAULT validation path: {parsed_or_error}")
+        failures.append(
+            f"a v3-shaped response failed the DEFAULT validation path: {parsed_or_error}"
+        )
     elif parsed_or_error.get("schema_version") != "output-schema-v3":
         failures.append(
             f"the default path stamped {parsed_or_error.get('schema_version')!r}, not the v3 literal"
@@ -754,11 +822,11 @@ def test_the_live_path_validates_against_v3(failures: list[str]) -> None:
 
     # The v2 artifact remains SELECTABLE -- the third-party path still speaks
     # it, so a deactivated contract must not become an unusable one.
-    ok, parsed_or_error = pp.validate_model_response(
-        json.dumps(v2_shaped), schema_path=V2_PATH
-    )
+    ok, parsed_or_error = pp.validate_model_response(json.dumps(v2_shaped), schema_path=V2_PATH)
     if not ok:
-        failures.append(f"a v2-shaped response failed the explicitly-selected v2 path: {parsed_or_error}")
+        failures.append(
+            f"a v2-shaped response failed the explicitly-selected v2 path: {parsed_or_error}"
+        )
     elif parsed_or_error.get("schema_version") != "output-schema-v1":
         failures.append(
             f"the v2 path stamped {parsed_or_error.get('schema_version')!r}, not the v2 literal"

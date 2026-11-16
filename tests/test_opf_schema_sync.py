@@ -165,8 +165,11 @@ _CONTRACT: list[tuple[str, str, object]] = [
     ("properties.opf_version.const", "equals", "0.6"),
     # opf_canonicalize.verify_content_hash / bind_bundle lineage.
     ("properties.identity.properties.content_hash.pattern", "equals", "^sha256:[0-9a-f]{64}$"),
-    ("properties.identity.properties.section_digests.required", "superset_of",
-     ["evidence", "posture", "floor"]),
+    (
+        "properties.identity.properties.section_digests.required",
+        "superset_of",
+        ["evidence", "posture", "floor"],
+    ),
     # The spine refuses to run on a stub basis unless explicitly accepted.
     ("properties.compiler.properties.stub_basis_present.type", "equals", "boolean"),
     # Floor invariants drive the Binding block (and its suppression).
@@ -184,15 +187,21 @@ _CONTRACT: list[tuple[str, str, object]] = [
     ("properties.evidence.properties.clauses", "array_of", {"precedentClause"}),
     ("properties.evidence.properties.precedent", "array_of", {"precedent"}),
     ("$defs.precedentClause.properties.id", "type_is", "string"),
-    ("$defs.precedent.required", "superset_of",
-     ["id", "signed_text", "opened_with", "opening_text", "standard", "refused_asks"]),
+    (
+        "$defs.precedent.required",
+        "superset_of",
+        ["id", "signed_text", "opened_with", "opening_text", "standard", "refused_asks"],
+    ),
     ("$defs.precedent.properties.id", "type_is", "string"),
     ("$defs.precedent.properties.standard", "type_is", "boolean"),
     # leakage_scan skips an opening only when it is exactly "standard";
     # opf_prompt._prior_form_openings reads exactly "prior_standard" (OPF 0.6)
     # and its `opened_with_form` label.
-    ("$defs.precedent.properties.opened_with.enum", "enum_is",
-     ["standard", "prior_standard", "non_standard", "absent", None]),
+    (
+        "$defs.precedent.properties.opened_with.enum",
+        "enum_is",
+        ["standard", "prior_standard", "non_standard", "absent", None],
+    ),
     ("$defs.precedent.properties.opened_with_form", "type_is", "string"),
     ("$defs.precedent.properties.signed_text", "refs_exactly", {"textRef"}),
     ("$defs.precedent.properties.opening_text", "refs_exactly", {"textRef"}),
@@ -205,21 +214,36 @@ _CONTRACT: list[tuple[str, str, object]] = [
     ("properties.dossiers", "exists", None),
     ("properties.provenance_index", "exists", None),
     # ---- The digest: the model-facing prompt surface (opf_prompt) ----------
-    ("properties.digest.required", "superset_of", ["digest_version", "corpus", "clauses", "perspective"]),
+    (
+        "properties.digest.required",
+        "superset_of",
+        ["digest_version", "corpus", "clauses", "perspective"],
+    ),
     # opf_load.resolve_digest_version accepts exactly this value.
     ("properties.digest.properties.digest_version.type", "equals", "string"),
     ("properties.digest.properties.digest_version.const", "equals", "5"),
     # playbook_upload's perspective minimum reads the digest copy.
     ("properties.digest.properties.perspective.oneOf.1.$ref", "equals", "#/properties/perspective"),
     # opf_prompt._corpus_line.
-    ("properties.digest.properties.corpus.required", "superset_of",
-     ["n_deals", "n_signed", "first_signed", "last_signed"]),
+    (
+        "properties.digest.properties.corpus.required",
+        "superset_of",
+        ["n_deals", "n_signed", "first_signed", "last_signed"],
+    ),
     ("properties.digest.properties.corpus.properties.n_deals", "type_is", _COUNT),
     ("properties.digest.properties.corpus.properties.n_signed", "type_is", _COUNT),
     # Digest 5: every signing span the prompt renders is a month (`_signed_span`
     # cuts anything longer to one, and never renders a finer date).
-    ("properties.digest.properties.corpus.properties.first_signed", "refs_exactly", {"digestMonthOrNull"}),
-    ("properties.digest.properties.corpus.properties.last_signed", "refs_exactly", {"digestMonthOrNull"}),
+    (
+        "properties.digest.properties.corpus.properties.first_signed",
+        "refs_exactly",
+        {"digestMonthOrNull"},
+    ),
+    (
+        "properties.digest.properties.corpus.properties.last_signed",
+        "refs_exactly",
+        {"digestMonthOrNull"},
+    ),
     ("$defs.digestMonth.pattern", "equals", "^\\d{4}-\\d{2}$"),
     # opf_prompt._uncovered_line (issue #158): the closing no-precedent line
     # renders each entry's label and the taxonomy id an issue on it cites.
@@ -227,23 +251,62 @@ _CONTRACT: list[tuple[str, str, object]] = [
     # a list, and each entry's two strings, exactly.
     ("properties.digest.required", "superset_of", ["uncovered_clause_types"]),
     ("properties.digest.properties.uncovered_clause_types", "type_is", "array"),
-    ("properties.digest.properties.uncovered_clause_types.items.required", "superset_of",
-     ["taxonomy_id", "label"]),
-    ("properties.digest.properties.uncovered_clause_types.items.additionalProperties", "equals", False),
-    ("properties.digest.properties.uncovered_clause_types.items.properties", "keys_exactly",
-     ["taxonomy_id", "label"]),
-    ("properties.digest.properties.uncovered_clause_types.items.properties.taxonomy_id", "type_is", "string"),
-    ("properties.digest.properties.uncovered_clause_types.items.properties.label", "type_is", "string"),
+    (
+        "properties.digest.properties.uncovered_clause_types.items.required",
+        "superset_of",
+        ["taxonomy_id", "label"],
+    ),
+    (
+        "properties.digest.properties.uncovered_clause_types.items.additionalProperties",
+        "equals",
+        False,
+    ),
+    (
+        "properties.digest.properties.uncovered_clause_types.items.properties",
+        "keys_exactly",
+        ["taxonomy_id", "label"],
+    ),
+    (
+        "properties.digest.properties.uncovered_clause_types.items.properties.taxonomy_id",
+        "type_is",
+        "string",
+    ),
+    (
+        "properties.digest.properties.uncovered_clause_types.items.properties.label",
+        "type_is",
+        "string",
+    ),
     ("properties.digest.properties.clauses", "array_of", {"digestClause"}),
     # Every field opf_prompt._digest_clause_block renders. additionalProperties
     # false is what makes "these are the digest" true: opened up, the engine
     # could ship a clause field the prompt silently drops.
-    ("$defs.digestClause.required", "superset_of",
-     ["id", "taxonomy_id", "title", "our_standard", "n_deals", "n_signed_standard",
-      "n_opened_standard", "n_kept_standard", "positions", "signed_variants", "refused_asks",
-      "changed_openings", "n_variants_total", "n_refused_total", "n_changed_openings_total",
-      "first_signed", "last_signed", "standard_history", "n_signed_without_verified",
-      "n_signed_without_possible", "verified_absent_deals"]),
+    (
+        "$defs.digestClause.required",
+        "superset_of",
+        [
+            "id",
+            "taxonomy_id",
+            "title",
+            "our_standard",
+            "n_deals",
+            "n_signed_standard",
+            "n_opened_standard",
+            "n_kept_standard",
+            "positions",
+            "signed_variants",
+            "refused_asks",
+            "changed_openings",
+            "n_variants_total",
+            "n_refused_total",
+            "n_changed_openings_total",
+            "first_signed",
+            "last_signed",
+            "standard_history",
+            "n_signed_without_verified",
+            "n_signed_without_possible",
+            "verified_absent_deals",
+        ],
+    ),
     ("$defs.digestClause.additionalProperties", "equals", False),
     ("$defs.digestClause.properties.title", "type_is", "string"),
     ("$defs.digestClause.properties.n_deals", "type_is", _COUNT),
@@ -261,7 +324,11 @@ _CONTRACT: list[tuple[str, str, object]] = [
     ("$defs.digestClause.properties.n_signed_without_verified", "type_is", _COUNT),
     ("$defs.digestClause.properties.n_signed_without_possible", "type_is", _COUNT),
     ("$defs.digestClause.properties.verified_absent_deals", "array_of", {"digestAbsentDeal"}),
-    ("$defs.digestAbsentDeal.properties", "keys_exactly", ["document_id", "signed_on", "absence_id"]),
+    (
+        "$defs.digestAbsentDeal.properties",
+        "keys_exactly",
+        ["document_id", "signed_on", "absence_id"],
+    ),
     ("$defs.digestAbsentDeal.properties.document_id", "type_is", "string"),
     # opf_prompt._standard_history_lines / _fmt_former_form (issue #177): one
     # line per former form; every key it reads, at the shape it reads it. The
@@ -269,18 +336,53 @@ _CONTRACT: list[tuple[str, str, object]] = [
     ("$defs.digestClause.properties.standard_history", "refs_exactly", {"digestStandardHistory"}),
     ("$defs.digestStandardHistory.properties", "keys_exactly", ["forms", "why_changed"]),
     ("$defs.digestStandardHistory.properties.forms", "array_of", {"digestStandardForm"}),
-    ("$defs.digestStandardHistory.properties.why_changed.oneOf.1.required", "superset_of", ["text", "basis"]),
-    ("$defs.digestStandardHistory.properties.why_changed.oneOf.1.properties.text", "type_is", "string"),
-    ("$defs.digestStandardHistory.properties.why_changed.oneOf.1.properties.basis.const", "equals", "owner"),
+    (
+        "$defs.digestStandardHistory.properties.why_changed.oneOf.1.required",
+        "superset_of",
+        ["text", "basis"],
+    ),
+    (
+        "$defs.digestStandardHistory.properties.why_changed.oneOf.1.properties.text",
+        "type_is",
+        "string",
+    ),
+    (
+        "$defs.digestStandardHistory.properties.why_changed.oneOf.1.properties.basis.const",
+        "equals",
+        "owner",
+    ),
     ("$defs.digestStandardForm.additionalProperties", "equals", False),
-    ("$defs.digestStandardForm.properties", "keys_exactly",
-     ["form", "basis", "in_use_from", "in_use_until", "in_use_basis", "n_opened", "n_kept",
-      "n_conceded", "n_moved_to_current", "unchanged", "label", "part_map", "additions",
-      "label_by", "reason", "settled", "parts", "ref"]),
+    (
+        "$defs.digestStandardForm.properties",
+        "keys_exactly",
+        [
+            "form",
+            "basis",
+            "in_use_from",
+            "in_use_until",
+            "in_use_basis",
+            "n_opened",
+            "n_kept",
+            "n_conceded",
+            "n_moved_to_current",
+            "unchanged",
+            "label",
+            "part_map",
+            "additions",
+            "label_by",
+            "reason",
+            "settled",
+            "parts",
+            "ref",
+        ],
+    ),
     ("$defs.digestStandardForm.properties.form", "type_is", "string"),
     ("$defs.digestStandardForm.properties.basis.enum", "enum_is", ["supplied", "reconstructed"]),
-    ("$defs.digestStandardForm.properties.in_use_basis.enum", "enum_is",
-     ["config", "deal_dates", "mixed", None]),
+    (
+        "$defs.digestStandardForm.properties.in_use_basis.enum",
+        "enum_is",
+        ["config", "deal_dates", "mixed", None],
+    ),
     ("$defs.digestStandardForm.properties.n_opened", "type_is", _COUNT),
     ("$defs.digestStandardForm.properties.n_kept", "type_is", _COUNT),
     ("$defs.digestStandardForm.properties.n_conceded", "type_is", _COUNT),
@@ -288,8 +390,11 @@ _CONTRACT: list[tuple[str, str, object]] = [
     ("$defs.digestStandardForm.properties.unchanged", "type_is", "boolean"),
     ("$defs.digestStandardForm.properties.label.enum", "enum_is", _LABELS),
     ("$defs.digestStandardForm.properties.settled.oneOf.1.enum", "enum_is", _SETTLED),
-    ("$defs.digestStandardForm.properties.part_map.oneOf.1.items.enum", "enum_is",
-     ["=", "+", "-", "x+", "x-", "x0"]),
+    (
+        "$defs.digestStandardForm.properties.part_map.oneOf.1.items.enum",
+        "enum_is",
+        ["=", "+", "-", "x+", "x-", "x0"],
+    ),
     ("$defs.digestStandardForm.properties.ref", "refs_exactly", {"citation"}),
     # Our standard, in its parts (the leakage scan's allowlisted standard text
     # and the prompt's "Our standard" line).
@@ -302,23 +407,52 @@ _CONTRACT: list[tuple[str, str, object]] = [
     # The positions line renders the keys it knows, in its own order: a new
     # key would silently fall out of the line, so the key set is EXACT.
     ("$defs.digestClause.properties.positions", "refs_exactly", {"digestPositions"}),
-    ("$defs.digestPositions.properties", "keys_exactly",
-     ["standard", "equivalent", "more_protective", "less_protective", "mixed",
-      "different_concept", "unjudged"]),
+    (
+        "$defs.digestPositions.properties",
+        "keys_exactly",
+        [
+            "standard",
+            "equivalent",
+            "more_protective",
+            "less_protective",
+            "mixed",
+            "different_concept",
+            "unjudged",
+        ],
+    ),
     ("$defs.digestPositions.additionalProperties", "equals", False),
     # ITEM TYPES of every digest list the prompt renders, and that each is
     # still a LIST, uncapped. A type swap here is the #358 breakage; a union
     # widened to admit a foreign type is #358 from the other side; a maxItems
     # cap is the same class again (the totals are uncapped, so the block's
     # "not shown here" line would then undercount).
-    ("$defs.digestClause.properties.signed_variants", "array_of",
-     {"digestVariant", "digestEquivalentVariants"}),
+    (
+        "$defs.digestClause.properties.signed_variants",
+        "array_of",
+        {"digestVariant", "digestEquivalentVariants"},
+    ),
     ("$defs.digestClause.properties.refused_asks", "array_of", {"digestRefusedAsk"}),
     ("$defs.digestClause.properties.changed_openings", "array_of", {"digestChangedOpening"}),
     # A signed variant.
-    ("$defs.digestVariant.required", "superset_of",
-     ["text", "n_deals", "first_signed", "last_signed", "n_from_standard", "n_unchanged",
-      "label", "part_map", "additions", "reason", "settled", "ref", "precedent_ids"]),
+    (
+        "$defs.digestVariant.required",
+        "superset_of",
+        [
+            "text",
+            "n_deals",
+            "first_signed",
+            "last_signed",
+            "n_from_standard",
+            "n_unchanged",
+            "label",
+            "part_map",
+            "additions",
+            "reason",
+            "settled",
+            "ref",
+            "precedent_ids",
+        ],
+    ),
     ("$defs.digestVariant.additionalProperties", "equals", False),
     ("$defs.digestVariant.properties.text", "type_is", "string"),
     # The acceptance harness treats a precedent text longer than this as one
@@ -330,8 +464,11 @@ _CONTRACT: list[tuple[str, str, object]] = [
     ("$defs.digestVariant.properties.label.enum", "enum_is", _LABELS),
     ("$defs.digestVariant.properties.label_by.const", "equals", "owner"),
     ("$defs.digestVariant.properties.reason.type", "equals", ["string", "null"]),
-    ("$defs.digestVariant.properties.part_map.oneOf.1.items.enum", "enum_is",
-     ["=", "+", "-", "x+", "x-", "x0"]),
+    (
+        "$defs.digestVariant.properties.part_map.oneOf.1.items.enum",
+        "enum_is",
+        ["=", "+", "-", "x+", "x-", "x0"],
+    ),
     ("$defs.digestVariant.properties.additions.oneOf.1.items.enum", "enum_is", ["+", "-", "0"]),
     ("$defs.digestVariant.properties.ref", "refs_exactly", {"citation"}),
     # opf_prompt._settled_marker: `adjudicated` and `unchecked` carry a
@@ -343,20 +480,48 @@ _CONTRACT: list[tuple[str, str, object]] = [
     # opf_prompt._prior_form_note reads the variant's precedent ids.
     ("$defs.digestVariant.properties.precedent_ids.type", "equals", "array"),
     # The collapsed equivalent-wording entry.
-    ("$defs.digestEquivalentVariants.required", "superset_of",
-     ["label", "n_deals", "n_texts", "n_from_standard", "n_unchanged", "first_signed",
-      "last_signed", "settled_counts", "exemplars", "precedent_ids"]),
+    (
+        "$defs.digestEquivalentVariants.required",
+        "superset_of",
+        [
+            "label",
+            "n_deals",
+            "n_texts",
+            "n_from_standard",
+            "n_unchanged",
+            "first_signed",
+            "last_signed",
+            "settled_counts",
+            "exemplars",
+            "precedent_ids",
+        ],
+    ),
     # opf_prompt._settled_counts_note renders the adjudicated / unchecked counts.
-    ("$defs.digestEquivalentVariants.properties.settled_counts.properties", "keys_exactly", _SETTLED),
+    (
+        "$defs.digestEquivalentVariants.properties.settled_counts.properties",
+        "keys_exactly",
+        _SETTLED,
+    ),
     ("$defs.digestEquivalentVariants.additionalProperties", "equals", False),
     ("$defs.digestEquivalentVariants.properties.label.const", "equals", "equivalent"),
     ("$defs.digestEquivalentVariants.properties.n_texts", "type_is", _COUNT),
     ("$defs.digestEquivalentVariants.properties.exemplars.type", "equals", "array"),
-    ("$defs.digestEquivalentVariants.properties.exemplars.items.required", "superset_of", ["text", "ref"]),
-    ("$defs.digestEquivalentVariants.properties.exemplars.items.properties.text", "type_is", "string"),
+    (
+        "$defs.digestEquivalentVariants.properties.exemplars.items.required",
+        "superset_of",
+        ["text", "ref"],
+    ),
+    (
+        "$defs.digestEquivalentVariants.properties.exemplars.items.properties.text",
+        "type_is",
+        "string",
+    ),
     # A refused ask.
-    ("$defs.digestRefusedAsk.required", "superset_of",
-     ["text", "n_deals", "first_signed", "last_signed", "label", "reason", "settled", "ref"]),
+    (
+        "$defs.digestRefusedAsk.required",
+        "superset_of",
+        ["text", "n_deals", "first_signed", "last_signed", "label", "reason", "settled", "ref"],
+    ),
     ("$defs.digestRefusedAsk.properties.settled.oneOf.1.enum", "enum_is", _SETTLED),
     ("$defs.digestRefusedAsk.additionalProperties", "equals", False),
     ("$defs.digestRefusedAsk.properties.text", "type_is", "string"),
@@ -364,8 +529,11 @@ _CONTRACT: list[tuple[str, str, object]] = [
     ("$defs.digestRefusedAsk.properties.label.enum", "enum_is", _LABELS),
     ("$defs.digestRefusedAsk.properties.ref", "refs_exactly", {"citation"}),
     # An opening not signed as proposed.
-    ("$defs.digestChangedOpening.required", "superset_of",
-     ["text", "n_deals", "n_to_standard", "n_struck", "label", "reason", "settled", "ref"]),
+    (
+        "$defs.digestChangedOpening.required",
+        "superset_of",
+        ["text", "n_deals", "n_to_standard", "n_struck", "label", "reason", "settled", "ref"],
+    ),
     ("$defs.digestChangedOpening.properties.settled.oneOf.1.enum", "enum_is", _SETTLED),
     ("$defs.digestChangedOpening.additionalProperties", "equals", False),
     ("$defs.digestChangedOpening.properties.text", "type_is", "string"),
@@ -469,7 +637,9 @@ def check_shape_contract() -> list[str]:
                 continue
             if assertion == "equals":
                 if node != expected:
-                    failures.append(f"  {name}: {dotted} == {node!r}, contract expects {expected!r}")
+                    failures.append(
+                        f"  {name}: {dotted} == {node!r}, contract expects {expected!r}"
+                    )
             elif assertion == "type_is":
                 actual = node.get("type") if isinstance(node, dict) else None
                 if actual != expected:
@@ -481,16 +651,20 @@ def check_shape_contract() -> list[str]:
                     )
             elif assertion == "enum_is":
                 if not isinstance(node, list):
-                    failures.append(f"  {name}: {dotted} is {type(node).__name__}, expected an enum list")
+                    failures.append(
+                        f"  {name}: {dotted} is {type(node).__name__}, expected an enum list"
+                    )
                     continue
                 added = sorted(set(node) - set(expected), key=repr)
                 removed = sorted(set(expected) - set(node), key=repr)
                 if added or removed:
                     detail = ", ".join(
-                        part for part in (
+                        part
+                        for part in (
                             f"ADDED {added}" if added else "",
                             f"REMOVED {removed}" if removed else "",
-                        ) if part
+                        )
+                        if part
                     )
                     failures.append(
                         f"  {name}: {dotted} enum changed: {detail} (now {sorted(node, key=repr)!r})\n"
@@ -500,7 +674,9 @@ def check_shape_contract() -> list[str]:
                     )
             elif assertion == "keys_exactly":
                 if not isinstance(node, dict):
-                    failures.append(f"  {name}: {dotted} is {type(node).__name__}, expected an object")
+                    failures.append(
+                        f"  {name}: {dotted} is {type(node).__name__}, expected an object"
+                    )
                     continue
                 added = sorted(set(node) - set(expected))
                 removed = sorted(set(expected) - set(node))
@@ -530,7 +706,9 @@ def check_shape_contract() -> list[str]:
                     )
             elif assertion == "array_of":
                 if not isinstance(node, dict):
-                    failures.append(f"  {name}: {dotted} is {type(node).__name__}, expected an array schema")
+                    failures.append(
+                        f"  {name}: {dotted} is {type(node).__name__}, expected an array schema"
+                    )
                     continue
                 if node.get("type") != "array":
                     failures.append(
@@ -647,7 +825,9 @@ def check_source_parity() -> list[str]:
                 f"(re-vendor byte-for-byte + update the pin)."
             )
     source_conformance = spec_dir.parent / SOURCE_CONFORMANCE_SUBDIR
-    if _conformance_sha256(source_conformance) != _conformance_sha256(OPF_DIR / CONFORMANCE_DIR_NAME):
+    if _conformance_sha256(source_conformance) != _conformance_sha256(
+        OPF_DIR / CONFORMANCE_DIR_NAME
+    ):
         failures.append(
             f"  {CONFORMANCE_DIR_NAME}: vendored vectors DIFFER from source {source_conformance} "
             f"(re-vendor byte-for-byte + update the pin)."
@@ -657,10 +837,26 @@ def check_source_parity() -> list[str]:
 
 def main() -> int:
     checks = [
-        ("1", "shape contract: every field this repo consumes is still declared, at the shape we consume it", check_shape_contract),
-        ("2", "vendored schema sha256 matches the engine's PUBLISHED frozen sha (runs in CI)", check_upstream_pin),
-        ("2b", "vendored OPF 0.6 conformance set matches the engine's PUBLISHED pin (runs in CI)", check_conformance_pin),
-        ("3", "vendored schema + conformance byte-identical to playbook-engine source (chore signal, local-only)", check_source_parity),
+        (
+            "1",
+            "shape contract: every field this repo consumes is still declared, at the shape we consume it",
+            check_shape_contract,
+        ),
+        (
+            "2",
+            "vendored schema sha256 matches the engine's PUBLISHED frozen sha (runs in CI)",
+            check_upstream_pin,
+        ),
+        (
+            "2b",
+            "vendored OPF 0.6 conformance set matches the engine's PUBLISHED pin (runs in CI)",
+            check_conformance_pin,
+        ),
+        (
+            "3",
+            "vendored schema + conformance byte-identical to playbook-engine source (chore signal, local-only)",
+            check_source_parity,
+        ),
     ]
     ok = True
     for code, name, fn in checks:

@@ -72,6 +72,7 @@ def _assert(condition: bool, label: str, detail: str = "") -> list[str]:
 # AC1 — Separate AWS accounts; CDK context selects per environment
 # ---------------------------------------------------------------------------
 
+
 def check_ac1_separate_accounts() -> list[str]:
     print("\nAC1: Separate AWS account for prod and dev …")
     failures: list[str] = []
@@ -129,6 +130,7 @@ def check_ac1_separate_accounts() -> list[str]:
 # ---------------------------------------------------------------------------
 # AC2 — Account IDs and dev/prod boundary documented in ARCHITECTURE.md
 # ---------------------------------------------------------------------------
+
 
 def check_ac2_architecture_documents_boundary() -> list[str]:
     print("\nAC2: ARCHITECTURE.md documents the account boundary …")
@@ -212,6 +214,7 @@ def check_ac2_architecture_documents_boundary() -> list[str]:
 # AC3 — Dev uses synthetic corpus and synthetic documents only
 # ---------------------------------------------------------------------------
 
+
 def check_ac3_synthetic_corpus_only() -> list[str]:
     print("\nAC3: Dev uses synthetic corpus and synthetic documents only …")
     failures: list[str] = []
@@ -263,6 +266,7 @@ def check_ac3_synthetic_corpus_only() -> list[str]:
 # ---------------------------------------------------------------------------
 # AC4 — RUNBOOK.md documents synthetic-only local dev rule
 # ---------------------------------------------------------------------------
+
 
 def check_ac4_runbook_local_dev() -> list[str]:
     print("\nAC4: RUNBOOK.md documents synthetic-only local development …")
@@ -318,6 +322,7 @@ def check_ac4_runbook_local_dev() -> list[str]:
 # ---------------------------------------------------------------------------
 # AC5 — A documented guardrail prevents pointing dev tooling at prod
 # ---------------------------------------------------------------------------
+
 
 def check_ac5_dev_guardrail_documented() -> list[str]:
     print("\nAC5: ARCHITECTURE.md documents a guardrail against dev pointing at prod …")
@@ -385,6 +390,7 @@ def check_ac5_dev_guardrail_documented() -> list[str]:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> int:
     print("Synthetic-data isolation + separate production account gate (issue #69)")
     print("=" * 70)
@@ -392,16 +398,31 @@ def main() -> int:
     all_failures: list[str] = []
 
     checks = [
-        ("AC1", "Separate AWS accounts; CDK context selects per environment",
-         check_ac1_separate_accounts),
-        ("AC2", "Account boundary documented in ARCHITECTURE.md",
-         check_ac2_architecture_documents_boundary),
-        ("AC3", "Dev uses synthetic corpus and synthetic documents only",
-         check_ac3_synthetic_corpus_only),
-        ("AC4", "RUNBOOK.md documents synthetic-only local development",
-         check_ac4_runbook_local_dev),
-        ("AC5", "Guardrail against pointing dev tooling at prod documented",
-         check_ac5_dev_guardrail_documented),
+        (
+            "AC1",
+            "Separate AWS accounts; CDK context selects per environment",
+            check_ac1_separate_accounts,
+        ),
+        (
+            "AC2",
+            "Account boundary documented in ARCHITECTURE.md",
+            check_ac2_architecture_documents_boundary,
+        ),
+        (
+            "AC3",
+            "Dev uses synthetic corpus and synthetic documents only",
+            check_ac3_synthetic_corpus_only,
+        ),
+        (
+            "AC4",
+            "RUNBOOK.md documents synthetic-only local development",
+            check_ac4_runbook_local_dev,
+        ),
+        (
+            "AC5",
+            "Guardrail against pointing dev tooling at prod documented",
+            check_ac5_dev_guardrail_documented,
+        ),
     ]
 
     for code, name, fn in checks:

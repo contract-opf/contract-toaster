@@ -175,15 +175,15 @@ DESIGN_NOTES_PDF_DEFERRED_PATTERN = re.compile(
 # Gate functions
 # ---------------------------------------------------------------------------
 
+
 def gate_a_format_specific_rejection(arch_text: str) -> list[str]:
     """ARCHITECTURE.md frontend must describe format-specific PDF/.doc rejection."""
     failures = []
 
     # A1: PDF named as a wrong-format case
-    has_pdf_rejection = (
-        ARCH_PDF_REJECTION_PATTERN.search(arch_text)
-        or ARCH_PDF_OWN_COPY_PATTERN.search(arch_text)
-    )
+    has_pdf_rejection = ARCH_PDF_REJECTION_PATTERN.search(
+        arch_text
+    ) or ARCH_PDF_OWN_COPY_PATTERN.search(arch_text)
     if not has_pdf_rejection:
         failures.append(
             "  Gate A1: ARCHITECTURE.md frontend section does not name PDF as a\n"
@@ -196,10 +196,9 @@ def gate_a_format_specific_rejection(arch_text: str) -> list[str]:
         )
 
     # A1b: .doc (legacy Word) named as a wrong-format case
-    has_doc_rejection = (
-        ARCH_DOC_REJECTION_PATTERN.search(arch_text)
-        or ARCH_PDF_OWN_COPY_PATTERN.search(arch_text)
-    )
+    has_doc_rejection = ARCH_DOC_REJECTION_PATTERN.search(
+        arch_text
+    ) or ARCH_PDF_OWN_COPY_PATTERN.search(arch_text)
     if not has_doc_rejection:
         failures.append(
             "  Gate A1b: ARCHITECTURE.md frontend section does not name .doc (legacy\n"
@@ -211,10 +210,9 @@ def gate_a_format_specific_rejection(arch_text: str) -> list[str]:
         )
 
     # A2: format-specific path distinguished from hostile-file/generic error
-    has_distinct = (
-        ARCH_DISTINCT_FROM_HOSTILE_PATTERN.search(arch_text)
-        or ARCH_PDF_OWN_COPY_PATTERN.search(arch_text)
-    )
+    has_distinct = ARCH_DISTINCT_FROM_HOSTILE_PATTERN.search(
+        arch_text
+    ) or ARCH_PDF_OWN_COPY_PATTERN.search(arch_text)
     if not has_distinct:
         failures.append(
             "  Gate A2: ARCHITECTURE.md does not distinguish the format-specific\n"
@@ -244,10 +242,9 @@ def gate_b_reviewer_guidance(readme_text: str, runbook_text: str) -> list[str]:
     combined = readme_text + "\n\n" + runbook_text
 
     # B1: guidance to request the .docx original
-    has_request_docx = (
-        REVIEWER_REQUEST_DOCX_PATTERN.search(combined)
-        or REVIEWER_ASK_SCHOOL_PATTERN.search(combined)
-    )
+    has_request_docx = REVIEWER_REQUEST_DOCX_PATTERN.search(
+        combined
+    ) or REVIEWER_ASK_SCHOOL_PATTERN.search(combined)
     if not has_request_docx:
         failures.append(
             "  Gate B1: README.md / RUNBOOK.md does not tell reviewers to request\n"
@@ -260,10 +257,9 @@ def gate_b_reviewer_guidance(readme_text: str, runbook_text: str) -> list[str]:
         )
 
     # B2: conversion guidance and tracked-changes caveats
-    has_conversion_caveats = (
-        REVIEWER_CONVERSION_CAVEATS_PATTERN.search(combined)
-        or REVIEWER_CONVERSION_ALT_PATTERN.search(combined)
-    )
+    has_conversion_caveats = REVIEWER_CONVERSION_CAVEATS_PATTERN.search(
+        combined
+    ) or REVIEWER_CONVERSION_ALT_PATTERN.search(combined)
     if not has_conversion_caveats:
         failures.append(
             "  Gate B2: README.md / RUNBOOK.md does not document conversion guidance\n"

@@ -54,10 +54,10 @@ DATA_STACK_PATH = INFRA / "lib" / "nested" / "data-stack.ts"
 
 # The four required bucket logical names (used in construct IDs and names)
 REQUIRED_BUCKETS = {
-    "uploads":      "contract-toaster-uploads",
-    "outputs":      "contract-toaster-outputs",
-    "corpus":       "contract-toaster-corpus",
-    "audit":        "contract-toaster-audit-archive",
+    "uploads": "contract-toaster-uploads",
+    "outputs": "contract-toaster-outputs",
+    "corpus": "contract-toaster-corpus",
+    "audit": "contract-toaster-audit-archive",
 }
 
 # Buckets that MUST have versioning + object lock (Governance)
@@ -94,6 +94,7 @@ def _assert(condition: bool, label: str, detail: str = "") -> list[str]:
 # ---------------------------------------------------------------------------
 # Check A — Four required buckets defined in data-stack.ts
 # ---------------------------------------------------------------------------
+
 
 def check_a_bucket_names() -> list[str]:
     print("\nCheck A: Four required buckets defined in data-stack.ts …")
@@ -138,6 +139,7 @@ def check_a_bucket_names() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check B — Private, block-all-public-access, per-class CMK, no fixed delete lifecycle
 # ---------------------------------------------------------------------------
+
 
 def check_b_private_encrypted() -> list[str]:
     print("\nCheck B: Buckets are private, block-all-public-access, per-class CMK …")
@@ -221,8 +223,11 @@ def check_b_private_encrypted() -> list[str]:
 # Check C — Corpus and audit-archive: versioning + object lock Governance
 # ---------------------------------------------------------------------------
 
+
 def check_c_versioning_and_object_lock() -> list[str]:
-    print("\nCheck C: Corpus + audit-archive buckets have versioning and object lock (Governance) …")
+    print(
+        "\nCheck C: Corpus + audit-archive buckets have versioning and object lock (Governance) …"
+    )
     failures: list[str] = []
 
     data_ts = _read(DATA_STACK_PATH)
@@ -287,6 +292,7 @@ def check_c_versioning_and_object_lock() -> list[str]:
 # Check D — Audit-archive bucket: Glacier lifecycle after 1 year
 # ---------------------------------------------------------------------------
 
+
 def check_d_glacier_lifecycle() -> list[str]:
     print("\nCheck D: Audit-archive bucket has Glacier lifecycle transition after 1 year …")
     failures: list[str] = []
@@ -336,6 +342,7 @@ def check_d_glacier_lifecycle() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check E — Key isolation: each bucket references its distinct per-class CMK
 # ---------------------------------------------------------------------------
+
 
 def check_e_key_isolation() -> list[str]:
     print("\nCheck E: Each bucket references its own distinct per-class CMK …")
@@ -389,8 +396,11 @@ def check_e_key_isolation() -> list[str]:
 # Check F — Legal-hold enforcement at storage layer
 # ---------------------------------------------------------------------------
 
+
 def check_f_legal_hold_enforcement() -> list[str]:
-    print("\nCheck F: Legal-hold enforcement at storage layer (bucket policy DENY or Object Lock) …")
+    print(
+        "\nCheck F: Legal-hold enforcement at storage layer (bucket policy DENY or Object Lock) …"
+    )
     failures: list[str] = []
 
     data_ts = _read(DATA_STACK_PATH)  # noqa: F841
@@ -426,6 +436,7 @@ def check_f_legal_hold_enforcement() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check G — MFA break-glass path for governance bypass
 # ---------------------------------------------------------------------------
+
 
 def check_g_mfa_breakglass() -> list[str]:
     print("\nCheck G: MFA break-glass path for governance bypass documented/enforced …")
@@ -476,6 +487,7 @@ def check_g_mfa_breakglass() -> list[str]:
 # Check H — All four buckets in data-stack.ts (not scattered)
 # ---------------------------------------------------------------------------
 
+
 def check_h_single_file_location() -> list[str]:
     print("\nCheck H: All four buckets defined in data-stack.ts (not scattered) …")
     failures: list[str] = []
@@ -525,6 +537,7 @@ def check_h_single_file_location() -> list[str]:
 # Check I — cdk synth runs cleanly
 # ---------------------------------------------------------------------------
 
+
 def check_i_cdk_synth() -> list[str]:
     print("\nCheck I: cdk synth runs cleanly with S3 buckets …")
     failures: list[str] = []
@@ -568,6 +581,7 @@ def check_i_cdk_synth() -> list[str]:
 # Check J — Guard: bucket names/ARNs exported (CfnOutputs or public properties)
 # ---------------------------------------------------------------------------
 
+
 def check_j_bucket_exports() -> list[str]:
     print("\nCheck J: Bucket names/ARNs exported for downstream stack consumption …")
     failures: list[str] = []
@@ -602,6 +616,7 @@ def check_j_bucket_exports() -> list[str]:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> int:
     print("S3 buckets structural gate (issue #51)")
     print("=" * 60)
@@ -620,10 +635,7 @@ def main() -> int:
 
     print("\n" + "=" * 60)
     if all_failures:
-        print(
-            f"\nFAIL: {len(all_failures)} check(s) failed.\n"
-            "See output above for details."
-        )
+        print(f"\nFAIL: {len(all_failures)} check(s) failed.\nSee output above for details.")
         return 1
 
     print("\nPASS: all S3 buckets structural checks passed.")

@@ -183,17 +183,21 @@ class TestOpenRouterClientTracksCumulativeUsage(unittest.TestCase):
         the critic pass -- must all land in cumulative_usage. last_usage
         must still show only the LAST call's numbers (unchanged, pre-#415
         behavior)."""
-        http = _FakeHttpClient([
-            _openrouter_response("primary attempt 1", 100, 20),
-            _openrouter_response("primary attempt 2", 150, 40),
-            _openrouter_response("critic", 80, 30),
-        ])
+        http = _FakeHttpClient(
+            [
+                _openrouter_response("primary attempt 1", 100, 20),
+                _openrouter_response("primary attempt 2", 150, 40),
+                _openrouter_response("critic", 80, 30),
+            ]
+        )
         client = model_client.OpenRouterModelClient(api_key="sk-test", http_client=http)
 
         for _ in range(3):
             client.invoke(
                 model_id=model_client.openrouter_primary_model_id(),
-                system_prompt="s", user_prompt="u", max_output_tokens=100,
+                system_prompt="s",
+                user_prompt="u",
+                max_output_tokens=100,
             )
 
         self.assertEqual(client.last_usage, {"input_tokens": 80, "output_tokens": 30})
@@ -212,7 +216,9 @@ class TestOpenRouterClientTracksCumulativeUsage(unittest.TestCase):
         client = model_client.OpenRouterModelClient(api_key="sk-test", http_client=http)
         client.invoke(
             model_id=model_client.openrouter_primary_model_id(),
-            system_prompt="s", user_prompt="u", max_output_tokens=100,
+            system_prompt="s",
+            user_prompt="u",
+            max_output_tokens=100,
         )
         client.close()
         self.assertEqual(client.cumulative_usage, {"input_tokens": 10, "output_tokens": 5})
@@ -255,9 +261,7 @@ class MotoSubmissionsMixin:
 
     def submission_row(self, idempotency_key: str) -> dict[str, Any]:
         return (
-            self.submissions_table.get_item(
-                Key={"idempotency_key": idempotency_key}
-            ).get("Item")
+            self.submissions_table.get_item(Key={"idempotency_key": idempotency_key}).get("Item")
             or {}
         )
 
@@ -308,11 +312,13 @@ class TestSettleReservationActualUsdCents(MotoSubmissionsMixin, unittest.TestCas
         self.reservation_cents = reviews.compute_worst_case_reservation_usd_cents()
 
     def _ddb(self, review_id: str, idempotency_key: str) -> _SettlementOnlyDDB:
-        submissions = self.seed_submission({
-            "idempotency_key": idempotency_key,
-            "review_id": review_id,
-            "spend_reservation_id": f"res-{review_id}",
-        })
+        submissions = self.seed_submission(
+            {
+                "idempotency_key": idempotency_key,
+                "review_id": review_id,
+                "spend_reservation_id": f"res-{review_id}",
+            }
+        )
         daily_spend = FakeDailySpendTable(self.spend_date, self.reservation_cents)
         return _SettlementOnlyDDB(submissions, daily_spend)
 
@@ -402,11 +408,13 @@ class TestRealPipelineSettlesActualUsage(MotoSubmissionsMixin, unittest.TestCase
         self.reservation_cents = reviews.compute_worst_case_reservation_usd_cents()
 
     def _ddb(self, reviews_table) -> tuple[SettlementAwareFakeDDB, FakeDailySpendTable]:
-        submissions = self.seed_submission({
-            "idempotency_key": "idem-real-1",
-            "review_id": dts.REVIEW_ID,
-            "spend_reservation_id": "res-real-1",
-        })
+        submissions = self.seed_submission(
+            {
+                "idempotency_key": "idem-real-1",
+                "review_id": dts.REVIEW_ID,
+                "spend_reservation_id": "res-real-1",
+            }
+        )
         daily_spend = FakeDailySpendTable(self.spend_date, self.reservation_cents)
         return SettlementAwareFakeDDB(reviews_table, submissions, daily_spend), daily_spend
 
@@ -445,8 +453,11 @@ class TestRealPipelineSettlesActualUsage(MotoSubmissionsMixin, unittest.TestCase
         s3 = dts.FakeS3({f"uploads/user-1/{dts.REVIEW_ID}/in.docx": docx_bytes})
 
         pr.run_real_pipeline(
-            dts.REVIEW_ID, dts._payload(),
-            dynamodb_resource=ddb, s3_client=s3, model_client=client,
+            dts.REVIEW_ID,
+            dts._payload(),
+            dynamodb_resource=ddb,
+            s3_client=s3,
+            model_client=client,
         )
 
         self.assertEqual(reviews_table.item["status"], "DONE")
@@ -462,13 +473,15 @@ class TestRealPipelineSettlesActualUsage(MotoSubmissionsMixin, unittest.TestCase
 
         settled = daily_spend.items[self.spend_date]["settled_usd_cents"]
         self.assertEqual(
-            settled, expected_cents,
+            settled,
+            expected_cents,
             "settlement must equal the documented formula applied to the SUMMED tokens",
         )
         self.assertNotEqual(settled, 0)
         self.assertNotEqual(settled, self.reservation_cents)
         self.assertNotEqual(
-            settled, last_invoke_only_cents,
+            settled,
+            last_invoke_only_cents,
             "settlement must not be priced from only the LAST invoke's usage",
         )
         self.assertTrue(self.submission_row("idem-real-1")["reservation_released"])
@@ -481,7 +494,9 @@ class TestRealPipelineSettlesActualUsage(MotoSubmissionsMixin, unittest.TestCase
         primary_id = model_client.openrouter_primary_model_id()
         critic_id = model_client.openrouter_critic_model_id()
         client = UsageAccumulatingClient(
-            seeded_by_model((primary_id, [dts._primary_request_change_response()]), (critic_id, [])),
+            seeded_by_model(
+                (primary_id, [dts._primary_request_change_response()]), (critic_id, [])
+            ),
             usage_sequence=[{"input_tokens": 20_000, "output_tokens": 1_500}],
         )
         docx_bytes = dts._build_draft_docx({"sec-8": dts._SEC8_DRAFT_TEXT})
@@ -490,8 +505,11 @@ class TestRealPipelineSettlesActualUsage(MotoSubmissionsMixin, unittest.TestCase
         s3 = dts.FakeS3({f"uploads/user-1/{dts.REVIEW_ID}/in.docx": docx_bytes})
 
         pr.run_real_pipeline(
-            dts.REVIEW_ID, dts._payload(),
-            dynamodb_resource=ddb, s3_client=s3, model_client=client,
+            dts.REVIEW_ID,
+            dts._payload(),
+            dynamodb_resource=ddb,
+            s3_client=s3,
+            model_client=client,
         )
 
         self.assertNotIn(reviews_table.item["status"], ("PENDING", "RUNNING", "DONE"))
@@ -501,7 +519,8 @@ class TestRealPipelineSettlesActualUsage(MotoSubmissionsMixin, unittest.TestCase
 
         settled = daily_spend.items[self.spend_date]["settled_usd_cents"]
         self.assertEqual(
-            settled, expected_cents,
+            settled,
+            expected_cents,
             "a review that fails after the primary pass must settle at the "
             "primary-pass cost, not 0 and not the reservation",
         )
@@ -530,11 +549,13 @@ class TestMockPipelineStillSettlesAtZero(MotoSubmissionsMixin, unittest.TestCase
         spend_date = _today()
         reservation_cents = reviews.compute_worst_case_reservation_usd_cents()
         reviews_table = dts.FakeReviewsTable()
-        submissions = self.seed_submission({
-            "idempotency_key": "idem-mock-1",
-            "review_id": dts.REVIEW_ID,
-            "spend_reservation_id": "res-mock-1",
-        })
+        submissions = self.seed_submission(
+            {
+                "idempotency_key": "idem-mock-1",
+                "review_id": dts.REVIEW_ID,
+                "spend_reservation_id": "res-mock-1",
+            }
+        )
         daily_spend = FakeDailySpendTable(spend_date, reservation_cents)
         ddb = SettlementAwareFakeDDB(reviews_table, submissions, daily_spend)
         s3 = _MockPipelineFakeS3()
@@ -542,7 +563,8 @@ class TestMockPipelineStillSettlesAtZero(MotoSubmissionsMixin, unittest.TestCase
         pr.run_mock_pipeline(
             dts.REVIEW_ID,
             {"review_id": dts.REVIEW_ID, "playbook_id": "synthetic-generic"},
-            dynamodb_resource=ddb, s3_client=s3,
+            dynamodb_resource=ddb,
+            s3_client=s3,
         )
 
         self.assertEqual(reviews_table.item["status"], "DONE")

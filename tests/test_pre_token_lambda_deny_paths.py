@@ -60,6 +60,7 @@ TEST_LEGAL_ADMIN_GROUP = "legal-admin@teamexos.com"
 # Load the inline Lambda handler from auth-stack.ts
 # ---------------------------------------------------------------------------
 
+
 def _extract_lambda_code() -> str:
     """
     Extract the Python handler source from the fromInline(…) call in the CDK stack.
@@ -102,6 +103,7 @@ def _load_handler():
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_event(email: str, email_verified: str = "true", sub: str = "test-sub-123") -> dict:
     """Build a minimal Cognito pre-token-generation event."""
@@ -153,9 +155,7 @@ def _authz_env_and_boto3_patches(module):
                 "LEGAL_ADMIN_GROUP": TEST_LEGAL_ADMIN_GROUP,
             },
         )
-        jit_patch = unittest.mock.patch.object(
-            module, "_jit_create_user_row", return_value=None
-        )
+        jit_patch = unittest.mock.patch.object(module, "_jit_create_user_row", return_value=None)
         with env_patch, jit_patch:
             yield
 
@@ -165,6 +165,7 @@ def _authz_env_and_boto3_patches(module):
 # ---------------------------------------------------------------------------
 # Test 1 — Domain mismatch: non-@teamexos.com email must be denied
 # ---------------------------------------------------------------------------
+
 
 def test_domain_mismatch_deny() -> list[str]:
     print("\nTest 1: Domain-mismatch deny (non-@teamexos.com email) …")
@@ -179,7 +180,10 @@ def test_domain_mismatch_deny() -> list[str]:
         module.os.environ,  # type: ignore[attr-defined]
         {"ALLOWED_DOMAIN": TEST_ALLOWED_DOMAIN},
     )
-    with env_patch, unittest.mock.patch.object(module, "_check_group_membership", return_value=True):
+    with (
+        env_patch,
+        unittest.mock.patch.object(module, "_check_group_membership", return_value=True),
+    ):
         for bad_email in ["attacker@evil.com", "user@gmail.com", "test@other.com"]:
             event = _make_event(bad_email)
             raised = False
@@ -220,6 +224,7 @@ def test_domain_mismatch_deny() -> list[str]:
 # masking message containing "DynamoDB" or "boto3".
 # ---------------------------------------------------------------------------
 
+
 def test_non_allowlisted_deny() -> list[str]:
     print("\nTest 2: Non-allowlisted deny (not in legal-admin@teamexos.com group) …")
     failures: list[str] = []
@@ -228,8 +233,10 @@ def test_non_allowlisted_deny() -> list[str]:
     # _check_group_membership returns False → user is not in the group.
     # _jit_create_user_row is patched out via _authz_env_and_boto3_patches so
     # boto3 cannot mask a missing authz deny on this path.
-    with _authz_env_and_boto3_patches(module), \
-         unittest.mock.patch.object(module, "_check_group_membership", return_value=False):
+    with (
+        _authz_env_and_boto3_patches(module),
+        unittest.mock.patch.object(module, "_check_group_membership", return_value=False),
+    ):
         event = _make_event("user@teamexos.com")
         raised = False
         exc_str = ""
@@ -279,6 +286,7 @@ def test_non_allowlisted_deny() -> list[str]:
 # directory/fail-closed reason and explicitly rejects "DynamoDB"/"boto3".
 # ---------------------------------------------------------------------------
 
+
 def test_directory_unavailable_deny() -> list[str]:
     print("\nTest 3: Directory-unavailable deny (fail-closed on Directory API error) …")
     failures: list[str] = []
@@ -288,8 +296,10 @@ def test_directory_unavailable_deny() -> list[str]:
     # _jit_create_user_row is patched out via _authz_env_and_boto3_patches so
     # boto3 cannot mask a missing authz deny if the fail-closed branch is removed.
     dir_error = ConnectionError("simulated Directory API unavailable")
-    with _authz_env_and_boto3_patches(module), \
-         unittest.mock.patch.object(module, "_check_group_membership", side_effect=dir_error):
+    with (
+        _authz_env_and_boto3_patches(module),
+        unittest.mock.patch.object(module, "_check_group_membership", side_effect=dir_error),
+    ):
         event = _make_event("user@teamexos.com")
         raised = False
         exc_str = ""
@@ -302,10 +312,7 @@ def test_directory_unavailable_deny() -> list[str]:
             # Denial reason must indicate the directory error / fail-closed path —
             # NOT the env-guard short-circuit ("DIRECTORY_SECRET_ARN not configured")
             # AND NOT the DynamoDB/boto3 masking message.
-            is_denied_for_directory_error = (
-                "directory" in exc_str
-                or "fail-closed" in exc_str
-            )
+            is_denied_for_directory_error = "directory" in exc_str or "fail-closed" in exc_str
             is_env_guard = "directory_secret_arn not configured" in exc_str
             is_masking_message = "dynamodb" in exc_str or "boto3" in exc_str
 
@@ -335,6 +342,7 @@ def test_directory_unavailable_deny() -> list[str]:
 # Test 4 — Unverified email: email_verified != 'true' must be denied
 # ---------------------------------------------------------------------------
 
+
 def test_unverified_email_deny() -> list[str]:
     print("\nTest 4: Unverified email deny (email_verified != 'true') …")
     failures: list[str] = []
@@ -346,17 +354,17 @@ def test_unverified_email_deny() -> list[str]:
         module.os.environ,  # type: ignore[attr-defined]
         {"ALLOWED_DOMAIN": TEST_ALLOWED_DOMAIN},
     )
-    with env_patch, unittest.mock.patch.object(module, "_check_group_membership", return_value=True):
+    with (
+        env_patch,
+        unittest.mock.patch.object(module, "_check_group_membership", return_value=True),
+    ):
         event = _make_event("user@teamexos.com", email_verified="false")
         raised = False
         try:
             module.handler(event, None)
         except Exception as exc:  # noqa: BLE001
             raised = True
-            denied_unverified = (
-                "verified" in str(exc).lower()
-                or "denied" in str(exc).lower()
-            )
+            denied_unverified = "verified" in str(exc).lower() or "denied" in str(exc).lower()
             failures += _assert(
                 denied_unverified,
                 "handler raises for unverified email (email_verified=false)",
@@ -382,6 +390,7 @@ def test_unverified_email_deny() -> list[str]:
 # We mock both group membership (True) and DynamoDB to avoid AWS calls.
 # ---------------------------------------------------------------------------
 
+
 def test_happy_path_no_deny() -> list[str]:
     print("\nTest 5: Happy-path — valid @teamexos.com group member → token allowed …")
     failures: list[str] = []
@@ -391,14 +400,18 @@ def test_happy_path_no_deny() -> list[str]:
     # handler reaches the allow path without real AWS calls.
     env_patch = unittest.mock.patch.dict(
         module.os.environ,  # type: ignore[attr-defined]
-        {"DIRECTORY_SECRET_ARN": "arn:aws:secretsmanager:us-east-1:123456789012:secret:test",
-         "USERS_TABLE_NAME": "contract-toaster-users-test",
-         "ALLOWED_DOMAIN": TEST_ALLOWED_DOMAIN,
-         "LEGAL_ADMIN_GROUP": TEST_LEGAL_ADMIN_GROUP},
+        {
+            "DIRECTORY_SECRET_ARN": "arn:aws:secretsmanager:us-east-1:123456789012:secret:test",
+            "USERS_TABLE_NAME": "contract-toaster-users-test",
+            "ALLOWED_DOMAIN": TEST_ALLOWED_DOMAIN,
+            "LEGAL_ADMIN_GROUP": TEST_LEGAL_ADMIN_GROUP,
+        },
     )
-    with env_patch, \
-         unittest.mock.patch.object(module, "_check_group_membership", return_value=True), \
-         unittest.mock.patch.object(module, "_jit_create_user_row", return_value=None):
+    with (
+        env_patch,
+        unittest.mock.patch.object(module, "_check_group_membership", return_value=True),
+        unittest.mock.patch.object(module, "_jit_create_user_row", return_value=None),
+    ):
         event = _make_event("reviewer@teamexos.com")
         try:
             result = module.handler(event, None)
@@ -440,6 +453,7 @@ def test_happy_path_no_deny() -> list[str]:
 # used in Tests 2 and 3) so that boto3 masking cannot produce a false GREEN.
 # ---------------------------------------------------------------------------
 
+
 def _make_fail_open_module() -> types.ModuleType:
     """
     Return a module with a fail-open handler stub (never raises, always returns
@@ -467,8 +481,10 @@ def _make_missing_group_deny_module() -> types.ModuleType:
     def _handler_without_group_deny(event, context):  # noqa: ANN001
         # Intercept the group-membership result so is_member is always True,
         # simulating removal of the `if not is_member: _deny(...)` guard.
-        with unittest.mock.patch.object(module, "_check_group_membership", return_value=True), \
-             unittest.mock.patch.object(module, "_jit_create_user_row", return_value=None):
+        with (
+            unittest.mock.patch.object(module, "_check_group_membership", return_value=True),
+            unittest.mock.patch.object(module, "_jit_create_user_row", return_value=None),
+        ):
             return _orig_handler(event, context)
 
     module.handler = _handler_without_group_deny  # type: ignore[attr-defined]
@@ -510,19 +526,22 @@ def _make_directory_fail_open_module() -> types.ModuleType:
         mut_module = types.ModuleType("pre_token_lambda_mutated")
         mut_module.__builtins__ = __builtins__  # type: ignore[attr-defined]
         exec(compile(mutated, "<mutated>", "exec"), mut_module.__dict__)  # noqa: S102
-        with unittest.mock.patch.dict(
-            mut_module.os.environ,
-            {
-                "DIRECTORY_SECRET_ARN": "arn:aws:secretsmanager:us-east-1:123456789012:secret:test",
-                "USERS_TABLE_NAME": "contract-toaster-users-test",
-                "ALLOWED_DOMAIN": TEST_ALLOWED_DOMAIN,
-                "LEGAL_ADMIN_GROUP": TEST_LEGAL_ADMIN_GROUP,
-            },
-        ), unittest.mock.patch.object(
-            mut_module, "_check_group_membership",
-            side_effect=ConnectionError("simulated Directory API unavailable"),
-        ), unittest.mock.patch.object(
-            mut_module, "_jit_create_user_row", return_value=None
+        with (
+            unittest.mock.patch.dict(
+                mut_module.os.environ,
+                {
+                    "DIRECTORY_SECRET_ARN": "arn:aws:secretsmanager:us-east-1:123456789012:secret:test",
+                    "USERS_TABLE_NAME": "contract-toaster-users-test",
+                    "ALLOWED_DOMAIN": TEST_ALLOWED_DOMAIN,
+                    "LEGAL_ADMIN_GROUP": TEST_LEGAL_ADMIN_GROUP,
+                },
+            ),
+            unittest.mock.patch.object(
+                mut_module,
+                "_check_group_membership",
+                side_effect=ConnectionError("simulated Directory API unavailable"),
+            ),
+            unittest.mock.patch.object(mut_module, "_jit_create_user_row", return_value=None),
         ):
             return mut_module.handler(event, context)
 
@@ -542,7 +561,9 @@ def test_tdd_red_state_verification() -> list[str]:
     All stubs include the _jit_create_user_row patch so boto3 masking cannot
     produce a false GREEN that hides the missing authz deny.
     """
-    print("\nTest 6: TDD RED-state — confirm deny tests fail against per-path fail-open mutations …")
+    print(
+        "\nTest 6: TDD RED-state — confirm deny tests fail against per-path fail-open mutations …"
+    )
     failures: list[str] = []
 
     # --- Sub-test A: non-allowlisted deny removed → Test 2 must fail ---
@@ -648,8 +669,9 @@ def test_tdd_red_state_verification() -> list[str]:
             "LEGAL_ADMIN_GROUP": TEST_LEGAL_ADMIN_GROUP,
         },
     )
-    with env_patch_c, unittest.mock.patch.object(
-        stub_module_c, "_check_group_membership", return_value=False
+    with (
+        env_patch_c,
+        unittest.mock.patch.object(stub_module_c, "_check_group_membership", return_value=False),
     ):
         event = _make_event("user@teamexos.com")
         try:
@@ -678,8 +700,9 @@ def test_tdd_red_state_verification() -> list[str]:
         },
     )
     dir_error = ConnectionError("simulated Directory API unavailable")
-    with env_patch_d, unittest.mock.patch.object(
-        stub_module_d, "_check_group_membership", side_effect=dir_error
+    with (
+        env_patch_d,
+        unittest.mock.patch.object(stub_module_d, "_check_group_membership", side_effect=dir_error),
     ):
         event = _make_event("user@teamexos.com")
         try:
@@ -702,6 +725,7 @@ def test_tdd_red_state_verification() -> list[str]:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> int:
     print("Pre-token Lambda behavioral gate (issue #53 — deny-path tests)")
@@ -732,10 +756,7 @@ def main() -> int:
 
     print("\n" + "=" * 65)
     if all_failures:
-        print(
-            f"\nFAIL: {len(all_failures)} check(s) failed.\n"
-            "See output above for details."
-        )
+        print(f"\nFAIL: {len(all_failures)} check(s) failed.\nSee output above for details.")
         return 1
 
     print("\nPASS: all pre-token Lambda behavioral checks passed.")

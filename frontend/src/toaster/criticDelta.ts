@@ -157,7 +157,5 @@ export function criticDeltaHasContent(delta: CriticDeltaSource | null | undefine
     return false;
   }
   const counts = criticDeltaCounts(delta);
-  return (
-    counts.overrides + counts.added + counts.dropped + counts.retained + counts.contested > 0
-  );
+  return counts.overrides + counts.added + counts.dropped + counts.retained + counts.contested > 0;
 }

@@ -188,6 +188,7 @@ RUNBOOK_STUCK_PATTERNS = [
 # Runner
 # ---------------------------------------------------------------------------
 
+
 def _check(patterns: list, text: str, label: str) -> list[str]:
     """Return a list of failure messages for patterns that do not match."""
     failures = []

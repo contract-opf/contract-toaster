@@ -74,9 +74,7 @@ class TestNoDuckTypedTables(unittest.TestCase):
         """The guard is worthless if it scans nothing -- a moved directory
         would otherwise turn it permanently green."""
         for root in SCANNED_ROOTS:
-            self.assertTrue(
-                root.is_dir(), f"guard scans a directory that does not exist: {root}"
-            )
+            self.assertTrue(root.is_dir(), f"guard scans a directory that does not exist: {root}")
         files = _python_files()
         self.assertGreater(
             len(files),
@@ -103,8 +101,7 @@ class TestNoDuckTypedTables(unittest.TestCase):
             "pick its access path. A real boto3 Table always has .query/.scan, "
             "so the fallback is dead in production and live only under test "
             "fakes. Call the index query unconditionally and build the test "
-            "table with tests/ddb_fixtures.py instead.\n  "
-            + "\n  ".join(offenders),
+            "table with tests/ddb_fixtures.py instead.\n  " + "\n  ".join(offenders),
         )
 
 

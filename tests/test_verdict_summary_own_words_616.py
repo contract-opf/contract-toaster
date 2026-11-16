@@ -345,8 +345,7 @@ class TestOwnWordsRuleReachesTheModel(unittest.TestCase):
         self.assertIn(
             pp.OWN_WORDS_SUMMARY_RULE,
             client.calls[0]["system_prompt"],
-            "The own-words rule is missing from the critic pass's assembled "
-            "system prompt.",
+            "The own-words rule is missing from the critic pass's assembled system prompt.",
         )
 
     def test_rule_survives_the_shared_overlay_seam(self):

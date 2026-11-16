@@ -170,9 +170,7 @@ class TestRecoverySettlesAtRealSpend(recovery62.RecoveryFixture):
         # under the one review_id partition, exactly as a real review that
         # got through its primary AND critic pass before the restart leaves
         # them.
-        ledger_write = invocation_ledger.make_ledger_write(
-            recovery62.ORPHAN_INPROCESS, self.ddb
-        )
+        ledger_write = invocation_ledger.make_ledger_write(recovery62.ORPHAN_INPROCESS, self.ddb)
         ledger_write(
             model_client.ModelInvocationRecord(
                 review_id=recovery62.ORPHAN_INPROCESS,
@@ -303,15 +301,11 @@ class TestRecoverySettlesAtRealSpend(recovery62.RecoveryFixture):
             None,
             rates=rates,
         )
-        critic_dropped = reviews.compute_actual_usd_cents_from_usage(
-            primary, None, rates=rates
-        )
+        critic_dropped = reviews.compute_actual_usd_cents_from_usage(primary, None, rates=rates)
 
         self.assertNotEqual(correct, swapped, "swapping the rate slots prices identically")
         self.assertNotEqual(correct, summed, "one summed slot prices identically")
-        self.assertNotEqual(
-            correct, critic_dropped, "dropping the critic row prices identically"
-        )
+        self.assertNotEqual(correct, critic_dropped, "dropping the critic row prices identically")
 
     def test_untouched_orphans_still_settle_at_zero(self) -> None:
         """The other two orphans (`ORPHAN_NO_ARN`, `ORPHAN_PENDING`)

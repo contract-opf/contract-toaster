@@ -131,9 +131,10 @@ def _load_playbook(playbook_path: Path | None = None) -> dict:
     # CALL time (issue #289), not a hard-coded "eiaa" path baked in at
     # import time -- a synthetic registry (see playbook_registry.py's
     # module docstring) changes what this loads with zero code changes.
-    path = playbook_path or playbook_registry.resolve_playbook(
-        playbook_registry.default_playbook_id()
-    ).playbook_path
+    path = (
+        playbook_path
+        or playbook_registry.resolve_playbook(playbook_registry.default_playbook_id()).playbook_path
+    )
     with open(path) as f:
         return json.load(f)
 
@@ -165,7 +166,13 @@ _KEYWORD_ALIASES: dict[str, list[str]] = {
     "notices": ["notice", "notices"],
     "exclusivity": ["exclusiv", "non-exclusive"],
     "entire-agreement-and-amendment": ["entire agreement", "amendment"],
-    "order-of-precedence": ["order of precedence", "conflict", "controls", "prevail", "additional terms"],
+    "order-of-precedence": [
+        "order of precedence",
+        "conflict",
+        "controls",
+        "prevail",
+        "additional terms",
+    ],
 }
 
 
@@ -191,7 +198,7 @@ def _heading_alias_from_segment(segment: str) -> str | None:
     matching is the real fallback for those cases.
     """
     if segment.startswith(_ABSENT_PREFIX):
-        segment = segment[len(_ABSENT_PREFIX):]
+        segment = segment[len(_ABSENT_PREFIX) :]
     paren_idx = segment.find("(")
     base = segment[:paren_idx].strip() if paren_idx != -1 else segment.strip()
     return base or None
@@ -307,11 +314,13 @@ def extract_clauses(
         if not text.strip():
             # A matched heading with no body text is not a usable clause.
             continue
-        clauses.append({
-            "playbook_topic_id": topic_id,
-            "heading": heading,
-            "text": text,
-        })
+        clauses.append(
+            {
+                "playbook_topic_id": topic_id,
+                "heading": heading,
+                "text": text,
+            }
+        )
     return clauses
 
 

@@ -125,9 +125,7 @@ def _uncommented(block: str) -> str:
     A `run:` line inside a comment is not a step, and an install mentioned
     only in prose is not an install.
     """
-    return "\n".join(
-        ln for ln in block.splitlines() if not ln.lstrip().startswith("#")
-    )
+    return "\n".join(ln for ln in block.splitlines() if not ln.lstrip().startswith("#"))
 
 
 # ── Check 1: the job that runs the gate installs its dependencies ───────────
@@ -141,9 +139,7 @@ def check_workflow_installs_gate_dependencies() -> list:
         text = _read(wf)
         for job_id, block in _job_blocks(text).items():
             body = _uncommented(block)
-            if re.search(
-                r"run:.*\b" + re.escape(GATE_INVOCATION) + r"\b", body
-            ):
+            if re.search(r"run:.*\b" + re.escape(GATE_INVOCATION) + r"\b", body):
                 running_jobs.append((wf, job_id, body))
 
     if not running_jobs:
@@ -162,9 +158,7 @@ def check_workflow_installs_gate_dependencies() -> list:
                 r"pip install\b.*-r\s+" + re.escape(REQUIREMENTS_FILE), ln
             ):
                 install_idx = i
-            if gate_idx is None and re.search(
-                r"run:.*\b" + re.escape(GATE_INVOCATION) + r"\b", ln
-            ):
+            if gate_idx is None and re.search(r"run:.*\b" + re.escape(GATE_INVOCATION) + r"\b", ln):
                 gate_idx = i
 
         if install_idx is None:
@@ -373,9 +367,7 @@ def check_ci_is_strict_variants() -> list:
                 )
         os.environ.pop("CI", None)
         if fn():
-            failures.append(
-                "  ci_is_strict() returned True with $CI unset. (issue #638)"
-            )
+            failures.append("  ci_is_strict() returned True with $CI unset. (issue #638)")
     finally:
         os.environ.pop("CI", None)
         if saved is not None:

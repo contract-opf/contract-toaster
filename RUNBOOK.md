@@ -134,7 +134,7 @@ bash scripts/land.sh    # gates, then push + `gh pr create --fill`
 ```
 
 `scripts/land.sh` (issue #64) refuses to run on `main`, runs
-`ruff check … && mypy` (issue #65, first because it is the cheapest gate),
+`ruff check … && ruff format --check … && mypy` (issues #65 and #90, first because it is the cheapest gate),
 `npm test`, `scripts/check.sh` and `tests/lint-brand-free.py`, and pushes
 nothing if any of them is red — it reads `check.sh`'s exit code directly, so exit 2
 (FLAKY-UNRESOLVED) and exit 3 (another gate run holds the lock) both stop the

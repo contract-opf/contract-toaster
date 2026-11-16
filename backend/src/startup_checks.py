@@ -83,8 +83,12 @@ def _environ_subscript_name(node: ast.Subscript) -> Optional[str]:  # noqa: UP04
     target = node.value
     is_environ = (
         # os.environ[...] — the form every module in this package uses.
-        (isinstance(target, ast.Attribute) and target.attr == "environ"
-         and isinstance(target.value, ast.Name) and target.value.id == "os")
+        (
+            isinstance(target, ast.Attribute)
+            and target.attr == "environ"
+            and isinstance(target.value, ast.Name)
+            and target.value.id == "os"
+        )
         # environ[...] — `from os import environ`.
         or (isinstance(target, ast.Name) and target.id == "environ")
     )
@@ -136,9 +140,7 @@ def missing_required_env(
     same silent half-working deployment one restart earlier."""
     env = os.environ if environ is None else environ
     return tuple(
-        name
-        for name in required_env_names(source_root)
-        if not (env.get(name) or "").strip()
+        name for name in required_env_names(source_root) if not (env.get(name) or "").strip()
     )
 
 
@@ -334,25 +336,27 @@ DEMO_TOKEN_SECRET_MIN_BYTES = 32
 GENERATE_SECRET_HINT = "Generate one with `openssl rand -hex 32`"  # noqa: S105
 
 # Normalised form (lower-case, alphanumerics only); see _normalise_secret.
-_KNOWN_PLACEHOLDER_SECRETS = frozenset({
-    "changemetoalongrandomstring",  # what deploy/dts/.env.example used to ship
-    "changeme",
-    "changethis",
-    "secret",
-    "password",
-    "demotokensecret",
-    "localsecret",
-    "replaceme",
-    "yoursecret",
-    "yoursecrethere",
-    "mysecret",
-    "supersecret",
-    "testsecret",
-    "devsecret",
-    "default",
-    "example",
-    "placeholder",
-})
+_KNOWN_PLACEHOLDER_SECRETS = frozenset(
+    {
+        "changemetoalongrandomstring",  # what deploy/dts/.env.example used to ship
+        "changeme",
+        "changethis",
+        "secret",
+        "password",
+        "demotokensecret",
+        "localsecret",
+        "replaceme",
+        "yoursecret",
+        "yoursecrethere",
+        "mysecret",
+        "supersecret",
+        "testsecret",
+        "devsecret",
+        "default",
+        "example",
+        "placeholder",
+    }
+)
 _PLACEHOLDER_PREFIXES = ("changeme", "changethis", "replaceme", "setme", "yoursecret")
 
 _PASSWORD_AUTH_MODES = frozenset({"password", "both"})

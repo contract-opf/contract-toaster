@@ -433,9 +433,9 @@ describe('a stored id that cannot be resumed is forgotten (issue #58)', () => {
     await waitFor(() =>
       expect(window.sessionStorage.getItem(INFLIGHT_REVIEW_STORAGE_KEY)).toBeNull(),
     );
-    expect(
-      fetchMock.mock.calls.some(([input]) => String(input).includes('../../api/me')),
-    ).toBe(false);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('../../api/me'))).toBe(
+      false,
+    );
     expectNoReviewAttached();
   });
 

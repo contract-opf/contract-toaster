@@ -75,9 +75,7 @@ export interface StageVignette {
  * module used to state by hand, now a consequence of where the stage sits
  * rather than a fifth thing to keep in sync.
  */
-export const STAGE_VIGNETTES: readonly StageVignette[] = (
-  Object.keys(stages) as ReviewStageToken[]
-)
+export const STAGE_VIGNETTES: readonly StageVignette[] = (Object.keys(stages) as ReviewStageToken[])
   .sort((a, b) => stages[a].step - stages[b].step)
   .map((token, _index, all) => ({
     token,

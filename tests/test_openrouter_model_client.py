@@ -168,7 +168,9 @@ class TestOpenRouterInvoke(unittest.TestCase):
         with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelInvocationError):
                 self._client(http).invoke(
-                    model_id=PRIMARY_MODEL_ID, system_prompt="s", user_prompt="u",
+                    model_id=PRIMARY_MODEL_ID,
+                    system_prompt="s",
+                    user_prompt="u",
                     max_output_tokens=10,
                 )
 
@@ -316,9 +318,7 @@ class TestOpenRouterDataRetentionPosture(unittest.TestCase):
     def _client(self, http: FakeHttpClient, **kwargs) -> mc.OpenRouterModelClient:
         kwargs.setdefault("max_retries", 0)
         kwargs.setdefault("sleep_fn", lambda _seconds: None)
-        return mc.OpenRouterModelClient(
-            api_key="sk-test", http_client=http, **kwargs
-        )
+        return mc.OpenRouterModelClient(api_key="sk-test", http_client=http, **kwargs)
 
     def _invoke_ok(self, http: FakeHttpClient, env: dict | None = None) -> None:
         with patch.dict("os.environ", env or {}, clear=True):
@@ -405,9 +405,7 @@ class TestOpenRouterDataRetentionPosture(unittest.TestCase):
                 captured.update(kwargs)
                 return {"body": FakeBody()}
 
-        out = mc.LiveBedrockModelClient(
-            bedrock_runtime_client=FakeRuntime()
-        ).invoke(
+        out = mc.LiveBedrockModelClient(bedrock_runtime_client=FakeRuntime()).invoke(
             model_id="anthropic.claude-opus-4-8",
             system_prompt="SYS",
             user_prompt=SECRET_PROMPT,
@@ -441,7 +439,9 @@ def _usage_response(content: str, usage: dict) -> FakeResponse:
 
 
 class TestOpenRouterReasoningTokenUsage(unittest.TestCase):
-    def _invoke(self, usage: dict, *, model_id: str = PRIMARY_MODEL_ID, max_output_tokens: int = 8000):
+    def _invoke(
+        self, usage: dict, *, model_id: str = PRIMARY_MODEL_ID, max_output_tokens: int = 8000
+    ):
         http = FakeHttpClient(_usage_response('{"decision":"ACCEPT"}', usage))
         client = mc.OpenRouterModelClient(
             api_key="sk-test",
@@ -547,9 +547,7 @@ class TestOpenRouterReasoningTokenUsage(unittest.TestCase):
                 "completion_tokens_details": {"reasoning_tokens": 2100},
             }
         )
-        self.assertEqual(
-            client.cumulative_usage, {"input_tokens": 61000, "output_tokens": 9400}
-        )
+        self.assertEqual(client.cumulative_usage, {"input_tokens": 61000, "output_tokens": 9400})
 
     def test_request_payload_is_unchanged_for_a_model_with_no_allowance(self) -> None:
         """A model with NO declared allowance must have a byte-identical

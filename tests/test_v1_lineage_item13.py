@@ -60,7 +60,9 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 os.environ.setdefault("PLAYBOOKS_TABLE", "contract-toaster-playbooks-v1lineage-test")
-os.environ.setdefault("PLAYBOOK_VERSIONS_TABLE", "contract-toaster-playbook-versions-v1lineage-test")
+os.environ.setdefault(
+    "PLAYBOOK_VERSIONS_TABLE", "contract-toaster-playbook-versions-v1lineage-test"
+)
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 os.environ.setdefault("AWS_ACCESS_KEY_ID", "testing")
 os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
@@ -90,7 +92,9 @@ def _registry_raw_hash(playbook_id: str = REGISTERED_ID) -> str:
 
 
 def _registry_canonical_hash(playbook_id: str = REGISTERED_ID) -> str:
-    return canonicalize.content_hash(json.loads(_registry_path(playbook_id).read_text(encoding="utf-8")))
+    return canonicalize.content_hash(
+        json.loads(_registry_path(playbook_id).read_text(encoding="utf-8"))
+    )
 
 
 class V1LineageBase(unittest.TestCase):
@@ -167,7 +171,9 @@ class TestV1RowBoundToTheRegistryBytes(V1LineageBase):
     def test_both_hashes_naming_other_bytes_is_refused(self) -> None:
         other = "sha256:" + "ef" * 32
         self.activate(row_hash=other, active_hash=other)
-        self.assertIsNone(self.resolve(), "an uploaded v1 document that differs from the shipped file")
+        self.assertIsNone(
+            self.resolve(), "an uploaded v1 document that differs from the shipped file"
+        )
 
     def test_an_unregistered_playbook_id_is_refused(self) -> None:
         self.assertNotIn(UNREGISTERED_ID, playbook_registry.load_registry().get("playbooks", {}))

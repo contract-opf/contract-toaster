@@ -203,13 +203,17 @@ class TestPurgeWorkerExpiresAStoredReduction(RealTableTestCase):
 
     def test_a_reduction_inside_the_delay_is_not_applied(self) -> None:
         self._park(int(purge_worker.now_epoch()))
-        settings = purge_worker._apply_ready_pending_reduction(purge_worker.get_retention_settings())
+        settings = purge_worker._apply_ready_pending_reduction(
+            purge_worker.get_retention_settings()
+        )
         self.assertEqual(settings["retention_window_days"], 365)
         self.assertEqual(self._row()["retention_window_days"], 365)
 
     def test_a_reduction_past_the_delay_is_applied(self) -> None:
         self._park(int(purge_worker.now_epoch()) - DELAY - 3600)
-        settings = purge_worker._apply_ready_pending_reduction(purge_worker.get_retention_settings())
+        settings = purge_worker._apply_ready_pending_reduction(
+            purge_worker.get_retention_settings()
+        )
         self.assertEqual(settings["retention_window_days"], 30)
         row = self._row()
         self.assertEqual(row["retention_window_days"], 30)

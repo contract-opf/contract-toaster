@@ -105,11 +105,15 @@ def check_digest() -> list[str]:
         doc = _load(path)
         digest = doc.get("digest")
         if not isinstance(digest, dict) or digest.get("digest_version") != opf_load.DIGEST_VERSION:
-            failures.append(f"  {path.name}: missing a digest_version {opf_load.DIGEST_VERSION} digest")
+            failures.append(
+                f"  {path.name}: missing a digest_version {opf_load.DIGEST_VERSION} digest"
+            )
             continue
         evidence_ids = [c["id"] for c in doc["evidence"]["clauses"]]
         if [c["id"] for c in digest["clauses"]] != evidence_ids:
-            failures.append(f"  {path.name}: digest clauses are not one per evidence clause, in order")
+            failures.append(
+                f"  {path.name}: digest clauses are not one per evidence clause, in order"
+            )
         est = len(opf_canonicalize.canonicalize(digest)) // 4
         if est >= DIGEST_TOKEN_CEILING:
             failures.append(f"  {path.name}: digest token estimate {est} >= {DIGEST_TOKEN_CEILING}")
@@ -128,7 +132,9 @@ def check_variants() -> list[str]:
     if real_shape.get("posture") != {} or real_shape.get("floor") != {}:
         failures.append("  real-shape fixture must ship posture == {} and floor == {}")
     if "digest" in _load(gen.SYNTHETIC_EIAA_PATH):
-        failures.append("  synthetic-eiaa must carry NO digest (it drives the no-digest refusal path)")
+        failures.append(
+            "  synthetic-eiaa must carry NO digest (it drives the no-digest refusal path)"
+        )
     return failures
 
 
@@ -172,7 +178,9 @@ def check_no_real_names() -> list[str]:
         for doc in _load(path)["corpus"]["documents"]:
             did = doc["document_id"].lower()
             if not any(tok in did for tok in allowed_party_tokens):
-                failures.append(f"  {path.name}: suspicious corpus document_id {doc['document_id']!r}")
+                failures.append(
+                    f"  {path.name}: suspicious corpus document_id {doc['document_id']!r}"
+                )
     return failures
 
 

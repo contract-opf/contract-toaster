@@ -186,9 +186,7 @@ class TestRequestPathNeverCreatesTable(MotoTestBase):
             self.spy.create_table(
                 TableName="anything",
                 KeySchema=[{"AttributeName": "setting_id", "KeyType": "HASH"}],
-                AttributeDefinitions=[
-                    {"AttributeName": "setting_id", "AttributeType": "S"}
-                ],
+                AttributeDefinitions=[{"AttributeName": "setting_id", "AttributeType": "S"}],
                 BillingMode="PAY_PER_REQUEST",
             )
 
@@ -314,9 +312,7 @@ class TestStartupHelperOnAws(MotoTestBase):
         self.assertFalse(self._table_exists())
         # DEPLOY_TARGET unset is the AWS target — the default, deliberately
         # exercised as "unset" rather than as the literal string.
-        environ_without_target = {
-            k: v for k, v in os.environ.items() if k != "DEPLOY_TARGET"
-        }
+        environ_without_target = {k: v for k, v in os.environ.items() if k != "DEPLOY_TARGET"}
         with patch.dict(os.environ, environ_without_target, clear=True):
             self.assertEqual(config.deploy_target(), "aws")
             with self.assertRaises(SystemExit) as caught:

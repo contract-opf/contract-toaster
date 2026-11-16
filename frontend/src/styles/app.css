@@ -169,7 +169,9 @@
   margin-top: 0.75rem;
 }
 .ct-actions button[type='submit'],
-.ct-actions [role='button'] { width: auto; }
+.ct-actions [role='button'] {
+  width: auto;
+}
 
 /* Compact text/search field for a panel toolbar (History search, playbook
    filter, Diagnostics search, entity-roster filter). Surface, border, radius
@@ -299,12 +301,36 @@
   box-shadow: 0 1px 2px rgba(20, 14, 8, 0.14);
   /* A torn bottom edge, drawn rather than imaged (the CSP forbids remote
      loads and this file carries no image files). */
-  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 6px),
-    96% 100%, 92% calc(100% - 6px), 88% 100%, 84% calc(100% - 6px), 80% 100%,
-    76% calc(100% - 6px), 72% 100%, 68% calc(100% - 6px), 64% 100%, 60% calc(100% - 6px),
-    56% 100%, 52% calc(100% - 6px), 48% 100%, 44% calc(100% - 6px), 40% 100%,
-    36% calc(100% - 6px), 32% 100%, 28% calc(100% - 6px), 24% 100%, 20% calc(100% - 6px),
-    16% 100%, 12% calc(100% - 6px), 8% 100%, 4% calc(100% - 6px), 0 100%);
+  clip-path: polygon(
+    0 0,
+    100% 0,
+    100% calc(100% - 6px),
+    96% 100%,
+    92% calc(100% - 6px),
+    88% 100%,
+    84% calc(100% - 6px),
+    80% 100%,
+    76% calc(100% - 6px),
+    72% 100%,
+    68% calc(100% - 6px),
+    64% 100%,
+    60% calc(100% - 6px),
+    56% 100%,
+    52% calc(100% - 6px),
+    48% 100%,
+    44% calc(100% - 6px),
+    40% 100%,
+    36% calc(100% - 6px),
+    32% 100%,
+    28% calc(100% - 6px),
+    24% 100%,
+    20% calc(100% - 6px),
+    16% 100%,
+    12% calc(100% - 6px),
+    8% 100%,
+    4% calc(100% - 6px),
+    0 100%
+  );
   animation: toaster-receipt-spool 520ms var(--ct-ease-out) both;
 }
 .toaster-receipt__line {
@@ -363,21 +389,69 @@
    count in step with the paper's clip-path if the edge ever changes. */
 @keyframes toaster-receipt-spool {
   from {
-    clip-path: polygon(0 0, 100% 0, 100% 0,
-      96% 0, 92% 0, 88% 0, 84% 0, 80% 0,
-      76% 0, 72% 0, 68% 0, 64% 0, 60% 0,
-      56% 0, 52% 0, 48% 0, 44% 0, 40% 0,
-      36% 0, 32% 0, 28% 0, 24% 0, 20% 0,
-      16% 0, 12% 0, 8% 0, 4% 0, 0 0);
+    clip-path: polygon(
+      0 0,
+      100% 0,
+      100% 0,
+      96% 0,
+      92% 0,
+      88% 0,
+      84% 0,
+      80% 0,
+      76% 0,
+      72% 0,
+      68% 0,
+      64% 0,
+      60% 0,
+      56% 0,
+      52% 0,
+      48% 0,
+      44% 0,
+      40% 0,
+      36% 0,
+      32% 0,
+      28% 0,
+      24% 0,
+      20% 0,
+      16% 0,
+      12% 0,
+      8% 0,
+      4% 0,
+      0 0
+    );
     transform: translateY(-8px);
   }
   to {
-    clip-path: polygon(0 0, 100% 0, 100% calc(100% - 6px),
-      96% 100%, 92% calc(100% - 6px), 88% 100%, 84% calc(100% - 6px), 80% 100%,
-      76% calc(100% - 6px), 72% 100%, 68% calc(100% - 6px), 64% 100%, 60% calc(100% - 6px),
-      56% 100%, 52% calc(100% - 6px), 48% 100%, 44% calc(100% - 6px), 40% 100%,
-      36% calc(100% - 6px), 32% 100%, 28% calc(100% - 6px), 24% 100%, 20% calc(100% - 6px),
-      16% 100%, 12% calc(100% - 6px), 8% 100%, 4% calc(100% - 6px), 0 100%);
+    clip-path: polygon(
+      0 0,
+      100% 0,
+      100% calc(100% - 6px),
+      96% 100%,
+      92% calc(100% - 6px),
+      88% 100%,
+      84% calc(100% - 6px),
+      80% 100%,
+      76% calc(100% - 6px),
+      72% 100%,
+      68% calc(100% - 6px),
+      64% 100%,
+      60% calc(100% - 6px),
+      56% 100%,
+      52% calc(100% - 6px),
+      48% 100%,
+      44% calc(100% - 6px),
+      40% 100%,
+      36% calc(100% - 6px),
+      32% 100%,
+      28% calc(100% - 6px),
+      24% 100%,
+      20% calc(100% - 6px),
+      16% 100%,
+      12% calc(100% - 6px),
+      8% 100%,
+      4% calc(100% - 6px),
+      0 100%
+    );
     transform: translateY(0);
   }
 }

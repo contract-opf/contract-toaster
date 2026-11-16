@@ -140,8 +140,9 @@ class RetentionWindowConfigTestBase(unittest.TestCase):
     def tearDown(self):
         self._mock_aws.stop()
 
-    def _seed_review(self, review_id: str, window_days, age_days: float,
-                      status_: str = "DONE") -> None:
+    def _seed_review(
+        self, review_id: str, window_days, age_days: float, status_: str = "DONE"
+    ) -> None:
         now = retention_module.now_epoch()
         self.reviews_table.put_item(
             Item={
@@ -160,6 +161,7 @@ class RetentionWindowConfigTestBase(unittest.TestCase):
 # (1) The configured window (not a hard-coded 90) flows from the admin
 #     setting through review-creation snapshotting to the purge worker.
 # ---------------------------------------------------------------------------
+
 
 class TestPurgeWorkerHonorsConfiguredWindow(RetentionWindowConfigTestBase):
     def test_new_review_snapshots_the_admin_configured_window(self):
@@ -211,6 +213,7 @@ class TestPurgeWorkerHonorsConfiguredWindow(RetentionWindowConfigTestBase):
 # (2) "forever" disables purge, at any age.
 # ---------------------------------------------------------------------------
 
+
 class TestForeverDisablesPurge(RetentionWindowConfigTestBase):
     def test_forever_is_a_valid_forward_looking_setting(self):
         result = retention_module.request_retention_change(FOREVER, ADMIN, self.ddb)
@@ -255,7 +258,10 @@ class TestForeverDisablesPurge(RetentionWindowConfigTestBase):
         confirmation applies it."""
         retention_module.request_retention_change(FOREVER, ADMIN, self.ddb)
         result = retention_module.request_retention_change(
-            1095, ADMIN, self.ddb, reason="matter closed",
+            1095,
+            ADMIN,
+            self.ddb,
+            reason="matter closed",
         )
         self.assertEqual(result["status"], "PENDING_SECOND_APPROVAL")
         self.assertEqual(
@@ -263,9 +269,7 @@ class TestForeverDisablesPurge(RetentionWindowConfigTestBase):
             FOREVER,
         )
         admin_2 = {**ADMIN, "cognito_sub": "admin-2"}
-        result = retention_module.confirm_pending_reduction(
-            result["pending_id"], admin_2, self.ddb
-        )
+        result = retention_module.confirm_pending_reduction(result["pending_id"], admin_2, self.ddb)
         self.assertEqual(result["status"], "APPLIED")
         self.assertFalse(result["applied_immediately"])
         settings = retention_module.get_retention_settings(ADMIN, self.ddb)
@@ -283,6 +287,7 @@ class TestForeverDisablesPurge(RetentionWindowConfigTestBase):
 # ---------------------------------------------------------------------------
 # (3) De-brand: rendered option labels contain no tenant-brand strings.
 # ---------------------------------------------------------------------------
+
 
 class TestRetentionSettingsSurfaceDeBrand(RetentionWindowConfigTestBase):
     def test_no_row_yet_default_settings_include_forever_option_no_branding(self):
@@ -330,18 +335,22 @@ class TestRetentionEndpointAcceptsForever(RetentionWindowConfigTestBase):
             BillingMode="PAY_PER_REQUEST",
         )
         users_table = self.ddb.Table(os.environ["USERS_TABLE"])
-        users_table.put_item(Item={
-            "cognito_sub": ADMIN_SUB, "email": f"{ADMIN_SUB}@example.com",
-            "status": "active", "is_admin": True,
-        })
+        users_table.put_item(
+            Item={
+                "cognito_sub": ADMIN_SUB,
+                "email": f"{ADMIN_SUB}@example.com",
+                "status": "active",
+                "is_admin": True,
+            }
+        )
 
         self.client = TestClient(backend_main.app)
-        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = (
-            lambda: self.ddb
-        )
-        backend_main.app.dependency_overrides[backend_main.get_current_user] = (
-            lambda: {"sub": ADMIN_SUB, "email": f"{ADMIN_SUB}@example.com", "token_use": "access"}
-        )
+        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = lambda: self.ddb
+        backend_main.app.dependency_overrides[backend_main.get_current_user] = lambda: {
+            "sub": ADMIN_SUB,
+            "email": f"{ADMIN_SUB}@example.com",
+            "token_use": "access",
+        }
 
     def tearDown(self):
         backend_main.app.dependency_overrides.clear()

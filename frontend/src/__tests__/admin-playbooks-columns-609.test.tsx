@@ -154,9 +154,7 @@ describe('AdminPlaybooks / #609 — "upload a version" pairs its two short field
     const panel = await openUploadVersion();
     const order = controlOrder(panel);
 
-    const playbook = order.indexOf(
-      screen.getByTestId('admin-playbooks-upload-playbook').id,
-    );
+    const playbook = order.indexOf(screen.getByTestId('admin-playbooks-upload-playbook').id);
     const version = order.indexOf(screen.getByTestId('admin-playbooks-upload-version').id);
     const note = order.indexOf(screen.getByTestId('admin-playbooks-upload-notes').id);
 

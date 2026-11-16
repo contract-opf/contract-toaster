@@ -67,9 +67,7 @@ from botocore.stub import Stubber  # noqa: E402
 
 import reviews  # noqa: E402
 
-REAL_ARN = (
-    "arn:aws:states:us-east-1:123456789012:execution:contract-toaster-dev:review-abc"
-)
+REAL_ARN = "arn:aws:states:us-east-1:123456789012:execution:contract-toaster-dev:review-abc"
 INPROCESS_ARN = "inprocess:review-abc"
 
 
@@ -204,9 +202,9 @@ def _persist_terminal_condition() -> str:
         for keyword in node.keywords:
             if keyword.arg != "ConditionExpression":
                 continue
-            value = ast.literal_eval(keyword.value) if isinstance(
-                keyword.value, ast.Constant
-            ) else None
+            value = (
+                ast.literal_eval(keyword.value) if isinstance(keyword.value, ast.Constant) else None
+            )
             if isinstance(value, str) and "#status" in value:
                 conditions.append(value)
     if not conditions:

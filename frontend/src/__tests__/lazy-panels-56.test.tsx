@@ -202,9 +202,7 @@ describe('issue #56 — code-split panels still all mount at once', () => {
 
     for (const [label, activeTestId] of ADMIN_PANELS) {
       fireEvent.click(screen.getByRole('tab', { name: label }));
-      await waitFor(() =>
-        expect(tabpanelOf(activeTestId)).not.toHaveAttribute('hidden'),
-      );
+      await waitFor(() => expect(tabpanelOf(activeTestId)).not.toHaveAttribute('hidden'));
 
       for (const [, testId] of ADMIN_PANELS) {
         const node = screen.getByTestId(testId);

@@ -156,6 +156,7 @@ IN_FLIGHT_SEMANTICS_PATTERNS = [
 # Gate runner helpers
 # ---------------------------------------------------------------------------
 
+
 def gate_1_physical_store_pin(arch_text: str) -> list[str]:
     failures = []
     labels = [
@@ -164,7 +165,8 @@ def gate_1_physical_store_pin(arch_text: str) -> list[str]:
         "retrieval queries the exact pinned store, not 'active' at query time",
     ]
     for i, (pattern, label) in enumerate(
-        zip(PHYSICAL_STORE_PIN_PATTERNS, labels), 1  # noqa: B905
+        zip(PHYSICAL_STORE_PIN_PATTERNS, labels),  # noqa: B905
+        1,
     ):
         if not pattern.search(arch_text):
             failures.append(
@@ -185,7 +187,8 @@ def gate_2_rollback_window(arch_text: str) -> list[str]:
         "re-ingestion is the documented recovery path beyond the rollback window",
     ]
     for i, (pattern, label) in enumerate(
-        zip(ROLLBACK_WINDOW_PATTERNS, labels), 1  # noqa: B905
+        zip(ROLLBACK_WINDOW_PATTERNS, labels),  # noqa: B905
+        1,
     ):
         if not pattern.search(arch_text):
             failures.append(
@@ -231,7 +234,8 @@ def gate_4_in_flight_semantics(arch_text: str) -> list[str]:
         "interlock restated as: resolved store is active AND has no in-progress ingestion job",
     ]
     for i, (pattern, label) in enumerate(
-        zip(IN_FLIGHT_SEMANTICS_PATTERNS, labels), 1  # noqa: B905
+        zip(IN_FLIGHT_SEMANTICS_PATTERNS, labels),  # noqa: B905
+        1,
     ):
         if not pattern.search(arch_text):
             failures.append(

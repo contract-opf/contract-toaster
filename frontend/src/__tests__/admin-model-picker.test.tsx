@@ -16,11 +16,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import AdminModel, {
-  ModelSelectionSettings,
-  formatUsd,
-  perReviewCostUsd,
-} from '../AdminModel';
+import AdminModel, { ModelSelectionSettings, formatUsd, perReviewCostUsd } from '../AdminModel';
 import { allowConsoleErrorsInThisTest } from './support/consoleErrorGuard';
 
 vi.mock('../auth', () => ({

@@ -90,7 +90,10 @@ const RUN_REVIEW_STAGE_FALLBACK_CAUSE = /stopped inside the review pipeline/i;
 const RUN_REVIEW_STAGE_FALLBACK_FIX = /resubmitting will not usually help/i;
 
 /** Stub GET /api/admin/diagnostics/recent-failures with one canned response. */
-function stubDiagnosticsFetch(response: { status: number; body: unknown }): ReturnType<typeof vi.fn> {
+function stubDiagnosticsFetch(response: {
+  status: number;
+  body: unknown;
+}): ReturnType<typeof vi.fn> {
   // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async () => ({
     ok: response.status >= 200 && response.status < 300,
@@ -547,9 +550,7 @@ describe('AdminDiagnostics — recent failures, with a cause per row', () => {
 
     // The id stays visible as plain, selectable text — the documented
     // fallback when copy itself isn't available.
-    expect(screen.getByTestId('review-id-text-r-no-clipboard')).toHaveTextContent(
-      'r-no-clipboard',
-    );
+    expect(screen.getByTestId('review-id-text-r-no-clipboard')).toHaveTextContent('r-no-clipboard');
   });
 
   // -------------------------------------------------------------------------
@@ -710,8 +711,9 @@ describe('AdminDiagnostics — recent failures, with a cause per row', () => {
     );
     // The stage itself is still recorded — it just no longer stands in for
     // the cause.
-    expect(within(screen.getByTestId('failure-row-r-critic')).getAllByRole('cell')[3])
-      .toHaveTextContent('run_review');
+    expect(
+      within(screen.getByTestId('failure-row-r-critic')).getAllByRole('cell')[3],
+    ).toHaveTextContent('run_review');
   });
 
   it('tells the three critic failure classes apart', async () => {
@@ -781,9 +783,9 @@ describe('AdminDiagnostics — recent failures, with a cause per row', () => {
     expect(screen.getByTestId('failure-critic-attempts-r-critic-widened')).toHaveTextContent(
       `${CRITIC_ATTEMPTS_AFTER_A_TRUNCATION_GRANT} attempts`,
     );
-    expect(
-      screen.getByTestId('failure-critic-attempts-r-critic').textContent,
-    ).not.toEqual(screen.getByTestId('failure-critic-attempts-r-critic-widened').textContent);
+    expect(screen.getByTestId('failure-critic-attempts-r-critic').textContent).not.toEqual(
+      screen.getByTestId('failure-critic-attempts-r-critic-widened').textContent,
+    );
     // A row with no count grows no empty label.
     expect(screen.queryByTestId('failure-critic-attempts-r-credits')).toBeNull();
   });
@@ -948,8 +950,16 @@ describe('AdminDiagnostics — recent failures, with a cause per row', () => {
         status: 200,
         body: {
           failures: [
-            failure({ review_id: 'rev-alpha', reason: 'model_rate_limit', failing_stage: 'stage_a' }),
-            failure({ review_id: 'rev-beta', reason: 'document_too_large', failing_stage: 'stage_b' }),
+            failure({
+              review_id: 'rev-alpha',
+              reason: 'model_rate_limit',
+              failing_stage: 'stage_a',
+            }),
+            failure({
+              review_id: 'rev-beta',
+              reason: 'document_too_large',
+              failing_stage: 'stage_b',
+            }),
           ],
         },
       });

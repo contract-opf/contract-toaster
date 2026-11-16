@@ -67,7 +67,9 @@ _MODEL_ID = "anthropic.claude-opus-4-8"
 # Distinctive, greppable substance. If any of these strings reaches a log line
 # or an exception message, the check_5 assertions below fail -- these stand in
 # for real policy prose and real contract language, both confidential.
-_RULE_TEXT_A = "Do not accept uncapped or unlimited liability, or an indemnity covering their own negligence."
+_RULE_TEXT_A = (
+    "Do not accept uncapped or unlimited liability, or an indemnity covering their own negligence."
+)
 _RULE_TEXT_B = "Do not accept removal of the standard confidentiality exceptions."
 _INTRODUCED_TEXT = (
     "Licensee hereby grants an irrevocable license to the deliverables, "
@@ -78,7 +80,11 @@ _INTRODUCED_TEXT = (
 def _must_rules() -> list[dict[str, Any]]:
     return [
         {"id": "floor.no-uncapped-liability", "strength": "must", "text": _RULE_TEXT_A},
-        {"id": "confidentiality.preserve-standard-exceptions", "strength": "must", "text": _RULE_TEXT_B},
+        {
+            "id": "confidentiality.preserve-standard-exceptions",
+            "strength": "must",
+            "text": _RULE_TEXT_B,
+        },
     ]
 
 
@@ -141,7 +147,9 @@ class _ScriptedSelfCheckClient:
                 return line[len("check_id: ") :].strip()
         raise AssertionError("the self-check user prompt carries no `check_id: ` line")
 
-    def invoke(self, *, model_id: str, system_prompt: str, user_prompt: str, max_output_tokens: int) -> str:
+    def invoke(
+        self, *, model_id: str, system_prompt: str, user_prompt: str, max_output_tokens: int
+    ) -> str:
         check_id = self._check_id_of(user_prompt)
         self.calls.append(
             {
@@ -199,7 +207,9 @@ def check_1_every_must_rule_gets_exactly_one_verdict() -> list[str]:
                 f"{entry.get('verdict')!r}, which is not one of {sorted(review_selfcheck.VERDICTS)}"
             )
     if transcript.fail_closed:
-        failures.append(f"  [1] every rule was judged, yet fail_closed is True: {transcript.unjudged}")
+        failures.append(
+            f"  [1] every rule was judged, yet fail_closed is True: {transcript.unjudged}"
+        )
 
     # The rule's TEXT must actually reach the model -- otherwise "judged" is a
     # verdict on nothing. (Asserted on the prompt, not on the transcript: the
@@ -357,7 +367,9 @@ def check_5_the_bound_check_is_a_judgment_not_a_lexical_match() -> list[str]:
         verdicts={"bound:0@sec-8": review_selfcheck.VERDICT_TENSION_FLAGGED}
     )
     transcript = _run(client, reconciled=_reconciled(substance_only))
-    flagged = [e for e in transcript.flagged() if e["kind"] == review_selfcheck.KIND_REPLACEMENT_BOUND]
+    flagged = [
+        e for e in transcript.flagged() if e["kind"] == review_selfcheck.KIND_REPLACEMENT_BOUND
+    ]
     if len(flagged) != 1:
         failures.append(
             f"  [5] the judge flagged a bound introduced in substance but not by name, and the "
@@ -433,12 +445,36 @@ def check_6_no_rule_or_document_substance_in_logs_or_exceptions() -> list[str]:
 
 def main() -> int:
     checks = [
-        ("1", "every must rule gets exactly one verdict", check_1_every_must_rule_gets_exactly_one_verdict),
-        ("2", "an unjudged rule fails closed to ERROR", check_2_unjudged_rule_fails_closed_to_manual_review),
-        ("3", "zero must rules is an empty transcript, not a pass", check_3_zero_must_rules_is_an_empty_transcript_not_a_pass),
-        ("4", "an introduced replacement-text bound is flagged", check_4_introduced_bound_is_flagged),
-        ("5", "the bound check is a judgment, not a lexical match", check_5_the_bound_check_is_a_judgment_not_a_lexical_match),
-        ("6", "no rule/document substance in logs or exceptions", check_6_no_rule_or_document_substance_in_logs_or_exceptions),
+        (
+            "1",
+            "every must rule gets exactly one verdict",
+            check_1_every_must_rule_gets_exactly_one_verdict,
+        ),
+        (
+            "2",
+            "an unjudged rule fails closed to ERROR",
+            check_2_unjudged_rule_fails_closed_to_manual_review,
+        ),
+        (
+            "3",
+            "zero must rules is an empty transcript, not a pass",
+            check_3_zero_must_rules_is_an_empty_transcript_not_a_pass,
+        ),
+        (
+            "4",
+            "an introduced replacement-text bound is flagged",
+            check_4_introduced_bound_is_flagged,
+        ),
+        (
+            "5",
+            "the bound check is a judgment, not a lexical match",
+            check_5_the_bound_check_is_a_judgment_not_a_lexical_match,
+        ),
+        (
+            "6",
+            "no rule/document substance in logs or exceptions",
+            check_6_no_rule_or_document_substance_in_logs_or_exceptions,
+        ),
     ]
 
     overall_pass = True

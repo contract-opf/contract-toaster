@@ -95,11 +95,7 @@ def tool_arg_delta(fragment: str) -> str:
             "choices": [
                 {
                     "index": 0,
-                    "delta": {
-                        "tool_calls": [
-                            {"index": 0, "function": {"arguments": fragment}}
-                        ]
-                    },
+                    "delta": {"tool_calls": [{"index": 0, "function": {"arguments": fragment}}]},
                     "finish_reason": None,
                 }
             ],
@@ -121,9 +117,7 @@ def usage_chunk(usage: dict[str, Any], *, served_model: str = PRIMARY_MODEL_ID) 
     """The terminal usage-only chunk `stream_options.include_usage` asks for:
     `choices` is EMPTY, which is why the accumulator must not assume every
     chunk carries one."""
-    return data(
-        {"id": "gen-657", "model": served_model, "choices": [], "usage": usage}
-    )
+    return data({"id": "gen-657", "model": served_model, "choices": [], "usage": usage})
 
 
 KEEPALIVE = ": OPENROUTER PROCESSING"
@@ -147,9 +141,7 @@ def content_stream(
             {
                 "id": "gen-657",
                 "model": PRIMARY_MODEL_ID,
-                "choices": [
-                    {"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}
-                ],
+                "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
             }
         ),
         "",
@@ -188,9 +180,7 @@ class WireStreamHttpClient:
 
     def post(self, url, json=None, headers=None):  # noqa: A002 - mirror httpx sig
         self.posts += 1
-        raise AssertionError(
-            "issue #657: the generation path must stream, never POST non-streamed"
-        )
+        raise AssertionError("issue #657: the generation path must stream, never POST non-streamed")
 
     def stream(self, method, url, json=None, headers=None):  # noqa: A002
         assert method == "POST", method
@@ -234,9 +224,7 @@ class _ClockedSseResponse:
     def iter_lines(self) -> Iterator[str]:
         for gap, line in self._timed_lines:
             if gap > self._read_timeout:
-                raise httpx.ReadTimeout(
-                    "timed out waiting for the next chunk", request=None
-                )
+                raise httpx.ReadTimeout("timed out waiting for the next chunk", request=None)
             self._clock.advance(gap)
             self.lines_yielded += 1
             yield line
@@ -264,9 +252,7 @@ class ClockedStreamHttpClient:
     def stream(self, method, url, json=None, headers=None):  # noqa: A002
         assert method == "POST", method
         self.attempts += 1
-        response = _ClockedSseResponse(
-            self._timed_lines, self._read_timeout, self.clock
-        )
+        response = _ClockedSseResponse(self._timed_lines, self._read_timeout, self.clock)
         self.responses.append(response)
         return SseStreamContext(response)  # type: ignore[arg-type]
 
@@ -430,9 +416,7 @@ class TestStreamedToolCallArguments(unittest.TestCase):
                     {
                         "index": 0,
                         "delta": {
-                            "tool_calls": [
-                                {"index": 1, "function": {"arguments": "GARBAGE"}}
-                            ]
+                            "tool_calls": [{"index": 1, "function": {"arguments": "GARBAGE"}}]
                         },
                         "finish_reason": None,
                     }
@@ -569,9 +553,7 @@ class TestStreamedUsageAndProvenance(unittest.TestCase):
             "",
             finish("stop"),
             "",
-            usage_chunk(
-                {"prompt_tokens": 1, "completion_tokens": 1}, served_model=served
-            ),
+            usage_chunk({"prompt_tokens": 1, "completion_tokens": 1}, served_model=served),
             "",
             DONE,
         ]
@@ -755,11 +737,7 @@ class TestStreamedRequestPayload(unittest.TestCase):
         # accounting, without which a prompt-cache hit is never reported.
         self.assertEqual(payload["usage"], {"include": True})
         self.assertEqual(
-            {
-                k: v
-                for k, v in payload.items()
-                if k not in ("stream", "stream_options", "usage")
-            },
+            {k: v for k, v in payload.items() if k not in ("stream", "stream_options", "usage")},
             {
                 "model": PRIMARY_MODEL_ID,
                 "messages": [
@@ -844,9 +822,7 @@ class TestStreamedErrorPaths(unittest.TestCase):
     def test_a_400_naming_the_context_length_still_fails_closed(self) -> None:
         http = WireStreamHttpClient(
             status_code=400,
-            error_payload={
-                "error": {"code": "context_length_exceeded", "message": "too long"}
-            },
+            error_payload={"error": {"code": "context_length_exceeded", "message": "too long"}},
         )
         with self.assertRaises(mc.ModelContextLengthExceededError):
             _invoke(_client(http))
@@ -876,9 +852,7 @@ class TestStreamedErrorPaths(unittest.TestCase):
         with self.assertRaises(mc.ModelInvocationError) as ctx:
             _invoke(_client(http, max_retries=3))
         self.assertNotIsInstance(ctx.exception, mc.ModelTimeoutError)
-        self.assertEqual(
-            len(http.calls), 1, "a malformed chunk is deterministic -- never retried"
-        )
+        self.assertEqual(len(http.calls), 1, "a malformed chunk is deterministic -- never retried")
 
     def test_a_chunk_whose_choices_entry_is_not_an_object_raises(self) -> None:
         lines = [data({"choices": ["nonsense"]}), "", DONE]

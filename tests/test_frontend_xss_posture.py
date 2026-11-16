@@ -83,6 +83,7 @@ HOSTILE_STRING = '<script>document.cookie="stolen="+document.cookie</script>'
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
@@ -139,6 +140,7 @@ def check(condition: bool, pass_msg: str, fail_msg: str) -> list[str]:
 # Check A — threat-model.md Frontend security posture section
 # ---------------------------------------------------------------------------
 
+
 def check_a_frontend_security_posture() -> list[str]:
     print("\nCheck A: threat-model.md — Frontend security posture section …")
     failures: list[str] = []
@@ -157,10 +159,13 @@ def check_a_frontend_security_posture() -> list[str]:
     )
 
     # A1: In-memory token storage, never localStorage
-    a1 = bool(re.search(
-        r"memory|in-memory|in memory|never.*localStorage|localStorage.*never|HttpOnly",
-        body, re.IGNORECASE,
-    ))
+    a1 = bool(
+        re.search(
+            r"memory|in-memory|in memory|never.*localStorage|localStorage.*never|HttpOnly",
+            body,
+            re.IGNORECASE,
+        )
+    )
     failures += check(
         a1,
         "A1: in-memory token storage (never localStorage) documented",
@@ -169,10 +174,13 @@ def check_a_frontend_security_posture() -> list[str]:
     )
 
     # A2: Content Security Policy
-    a2 = bool(re.search(
-        r"Content.Security.Policy|CSP|unsafe-inline|unsafe-eval",
-        body, re.IGNORECASE,
-    ))
+    a2 = bool(
+        re.search(
+            r"Content.Security.Policy|CSP|unsafe-inline|unsafe-eval",
+            body,
+            re.IGNORECASE,
+        )
+    )
     failures += check(
         a2,
         "A2: Content-Security-Policy documented",
@@ -188,11 +196,14 @@ def check_a_frontend_security_posture() -> list[str]:
     )
 
     # A4: No dangerouslySetInnerHTML / escaped-text-only
-    a4 = bool(re.search(
-        r"dangerouslySetInnerHTML|escaped.text.only|escape.*text|text.only.*escape|"
-        r"no.*innerHTML|innerHTML.*never",
-        body, re.IGNORECASE,
-    ))
+    a4 = bool(
+        re.search(
+            r"dangerouslySetInnerHTML|escaped.text.only|escape.*text|text.only.*escape|"
+            r"no.*innerHTML|innerHTML.*never",
+            body,
+            re.IGNORECASE,
+        )
+    )
     failures += check(
         a4,
         "A4: no dangerouslySetInnerHTML / escaped-text-only rendering documented",
@@ -200,11 +211,14 @@ def check_a_frontend_security_posture() -> list[str]:
     )
 
     # A5: Dependency scanning
-    a5 = bool(re.search(
-        r"dependency.*scan|scan.*dependency|dep.*scan|npm.audit|pip.audit|"
-        r"transitive.*package|package.*scan",
-        body, re.IGNORECASE,
-    ))
+    a5 = bool(
+        re.search(
+            r"dependency.*scan|scan.*dependency|dep.*scan|npm.audit|pip.audit|"
+            r"transitive.*package|package.*scan",
+            body,
+            re.IGNORECASE,
+        )
+    )
     failures += check(
         a5,
         "A5: dependency scanning documented",
@@ -213,11 +227,14 @@ def check_a_frontend_security_posture() -> list[str]:
 
     # A6 (reconciliation): upload filenames as untrusted, escaped in both UIs
     # The reconciliation note requires this to appear in threat-model.md
-    a6 = bool(re.search(
-        r"upload.filename|filename.*upload|filename.*untrusted|untrusted.*filename|"
-        r"filename.*escaped|escaped.*filename",
-        text, re.IGNORECASE,
-    ))
+    a6 = bool(
+        re.search(
+            r"upload.filename|filename.*upload|filename.*untrusted|untrusted.*filename|"
+            r"filename.*escaped|escaped.*filename",
+            text,
+            re.IGNORECASE,
+        )
+    )
     failures += check(
         a6,
         "A6: upload filenames documented as untrusted and escaped (reconciliation #25)",
@@ -231,6 +248,7 @@ def check_a_frontend_security_posture() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check B — threat-model.md Admin UI stored-XSS section
 # ---------------------------------------------------------------------------
+
 
 def check_b_admin_ui_xss() -> list[str]:
     print("\nCheck B: threat-model.md — Admin UI stored-XSS section …")
@@ -266,11 +284,14 @@ def check_b_admin_ui_xss() -> list[str]:
         )
 
     # B2: Upload filenames explicitly mentioned in admin UI context
-    b2 = bool(re.search(
-        r"upload.filename|filename.*upload|filename.*attacker|attacker.*filename|"
-        r"filename.*escaped|escaped.*filename|filename.*render",
-        body, re.IGNORECASE,
-    ))
+    b2 = bool(
+        re.search(
+            r"upload.filename|filename.*upload|filename.*attacker|attacker.*filename|"
+            r"filename.*escaped|escaped.*filename|filename.*render",
+            body,
+            re.IGNORECASE,
+        )
+    )
     failures += check(
         b2,
         "B2: upload filenames explicitly mentioned as untrusted in admin UI section",
@@ -278,11 +299,14 @@ def check_b_admin_ui_xss() -> list[str]:
     )
 
     # B3: Same CSP / Trusted Types rules apply to admin UI
-    b3 = bool(re.search(
-        r"CSP|Content.Security.Policy|Trusted.Types|dangerouslySetInnerHTML|"
-        r"same.*rule|rule.*same|applies.*most strictly|most strictly",
-        body, re.IGNORECASE,
-    ))
+    b3 = bool(
+        re.search(
+            r"CSP|Content.Security.Policy|Trusted.Types|dangerouslySetInnerHTML|"
+            r"same.*rule|rule.*same|applies.*most strictly|most strictly",
+            body,
+            re.IGNORECASE,
+        )
+    )
     failures += check(
         b3,
         "B3: CSP / Trusted Types / no-dangerouslySetInnerHTML referenced for admin UI",
@@ -290,10 +314,13 @@ def check_b_admin_ui_xss() -> list[str]:
     )
 
     # B4: Corpus metadata specifically called out
-    b4 = bool(re.search(
-        r"corpus.metadata|counterparty.name|corpus.*untrusted",
-        body, re.IGNORECASE,
-    ))
+    b4 = bool(
+        re.search(
+            r"corpus.metadata|counterparty.name|corpus.*untrusted",
+            body,
+            re.IGNORECASE,
+        )
+    )
     failures += check(
         b4,
         "B4: corpus metadata explicitly called out as untrusted",
@@ -307,6 +334,7 @@ def check_b_admin_ui_xss() -> list[str]:
 # Check C — ARCHITECTURE.md Frontend section
 # ---------------------------------------------------------------------------
 
+
 def check_c_architecture_frontend() -> list[str]:
     print("\nCheck C: ARCHITECTURE.md — Frontend section references XSS/escaping posture …")
     failures: list[str] = []
@@ -318,11 +346,14 @@ def check_c_architecture_frontend() -> list[str]:
     arch_frontend = section_body(text, "Frontend")
 
     # References escaped-text-only
-    c1 = bool(re.search(
-        r"escaped.text.only|escape.*text.only|no.*innerHTML|model.*escaped|"
-        r"dangerouslySetInnerHTML",
-        arch_frontend, re.IGNORECASE,
-    ))
+    c1 = bool(
+        re.search(
+            r"escaped.text.only|escape.*text.only|no.*innerHTML|model.*escaped|"
+            r"dangerouslySetInnerHTML",
+            arch_frontend,
+            re.IGNORECASE,
+        )
+    )
     failures += check(
         c1,
         "C1: ARCHITECTURE.md Frontend section references escaped-text-only rendering",
@@ -330,10 +361,13 @@ def check_c_architecture_frontend() -> list[str]:
     )
 
     # Cross-reference to threat-model
-    c2 = bool(re.search(
-        r"threat.model|docs/threat-model",
-        arch_frontend, re.IGNORECASE,
-    ))
+    c2 = bool(
+        re.search(
+            r"threat.model|docs/threat-model",
+            arch_frontend,
+            re.IGNORECASE,
+        )
+    )
     failures += check(
         c2,
         "C2: ARCHITECTURE.md Frontend section cross-references docs/threat-model.md",
@@ -347,6 +381,7 @@ def check_c_architecture_frontend() -> list[str]:
 # Check D — No dangerouslySetInnerHTML in frontend/src/
 # ---------------------------------------------------------------------------
 
+
 def check_d_no_dangerous_html() -> list[str]:
     print("\nCheck D: frontend/src/ — no dangerouslySetInnerHTML on untrusted content …")
     failures: list[str] = []
@@ -355,10 +390,10 @@ def check_d_no_dangerous_html() -> list[str]:
         return fail("frontend/src/ directory does not exist")
 
     all_src_files: list[Path] = (
-        list(FRONTEND_SRC.rglob("*.tsx")) +
-        list(FRONTEND_SRC.rglob("*.ts")) +
-        list(FRONTEND_SRC.rglob("*.jsx")) +
-        list(FRONTEND_SRC.rglob("*.js"))
+        list(FRONTEND_SRC.rglob("*.tsx"))
+        + list(FRONTEND_SRC.rglob("*.ts"))
+        + list(FRONTEND_SRC.rglob("*.jsx"))
+        + list(FRONTEND_SRC.rglob("*.js"))
     )
 
     # Exclude test source (e.g. frontend/src/__tests__/) — those files
@@ -366,8 +401,7 @@ def check_d_no_dangerous_html() -> list[str]:
     # and comments (this very check is one of them); they are not rendered
     # application code, so they are out of scope for this scan.
     all_src_files = [
-        f for f in all_src_files
-        if "__tests__" not in f.relative_to(FRONTEND_SRC).parts
+        f for f in all_src_files if "__tests__" not in f.relative_to(FRONTEND_SRC).parts
     ]
 
     violating_files: list[str] = []
@@ -390,6 +424,7 @@ def check_d_no_dangerous_html() -> list[str]:
 # Check E — frontend/package.json has 'audit' script
 # ---------------------------------------------------------------------------
 
+
 def check_e_npm_audit_script() -> list[str]:
     print("\nCheck E: frontend/package.json — 'audit' script for dependency scanning …")
     failures: list[str] = []
@@ -398,15 +433,18 @@ def check_e_npm_audit_script() -> list[str]:
         return fail("frontend/package.json does not exist")
 
     import json as _json
+
     pkg = _json.loads(read(FRONTEND_PKG))
     scripts = pkg.get("scripts", {})
 
     audit_scripts = {k: v for k, v in scripts.items() if "audit" in k.lower()}
-    has_audit = bool(audit_scripts) or bool(re.search(
-        r"npm\s+audit|npm.*audit",
-        " ".join(scripts.values()),
-        re.IGNORECASE,
-    ))
+    has_audit = bool(audit_scripts) or bool(
+        re.search(
+            r"npm\s+audit|npm.*audit",
+            " ".join(scripts.values()),
+            re.IGNORECASE,
+        )
+    )
 
     failures += check(
         has_audit,
@@ -421,6 +459,7 @@ def check_e_npm_audit_script() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check F — cicd-stack.ts runs npm audit for frontend
 # ---------------------------------------------------------------------------
+
 
 def check_f_cicd_npm_audit() -> list[str]:
     print("\nCheck F: infra/lib/nested/cicd-stack.ts — npm audit for frontend …")
@@ -446,6 +485,7 @@ def check_f_cicd_npm_audit() -> list[str]:
 # Check G — frontend-stack.ts has real Content-Security-Policy header
 # ---------------------------------------------------------------------------
 
+
 def check_g_frontend_stack_csp() -> list[str]:
     print("\nCheck G: infra/lib/nested/frontend-stack.ts — real CSP header value …")
     failures: list[str] = []
@@ -456,11 +496,13 @@ def check_g_frontend_stack_csp() -> list[str]:
     text = read(FRONTEND_STACK)
 
     # Must have a Content-Security-Policy key
-    has_csp_key = bool(re.search(
-        r"Content-Security-Policy",
-        text,
-        re.IGNORECASE,
-    ))
+    has_csp_key = bool(
+        re.search(
+            r"Content-Security-Policy",
+            text,
+            re.IGNORECASE,
+        )
+    )
     failures += check(
         has_csp_key,
         "G1: frontend-stack.ts references Content-Security-Policy header",
@@ -469,10 +511,12 @@ def check_g_frontend_stack_csp() -> list[str]:
 
     # Must have a real policy value (not just the placeholder comment)
     # A real policy has 'default-src' or 'script-src' as a value string
-    has_real_policy = bool(re.search(
-        r"default-src|script-src|connect-src",
-        text,
-    ))
+    has_real_policy = bool(
+        re.search(
+            r"default-src|script-src|connect-src",
+            text,
+        )
+    )
     failures += check(
         has_real_policy,
         "G2: frontend-stack.ts has a real CSP policy value (default-src or script-src)",
@@ -488,15 +532,15 @@ def check_g_frontend_stack_csp() -> list[str]:
 # Check H — XSS hostile-string regression (static + doc assertions)
 # ---------------------------------------------------------------------------
 
+
 def check_h_xss_hostile_regression() -> list[str]:
     print("\nCheck H: XSS hostile-string regression …")
     failures: list[str] = []
 
     # H1: hostile string must not appear in frontend/src/
     if FRONTEND_SRC.is_dir():
-        all_src_files: list[Path] = (
-            list(FRONTEND_SRC.rglob("*.tsx")) +
-            list(FRONTEND_SRC.rglob("*.ts"))
+        all_src_files: list[Path] = list(FRONTEND_SRC.rglob("*.tsx")) + list(
+            FRONTEND_SRC.rglob("*.ts")
         )
         for f in all_src_files:
             src = read(f)
@@ -527,11 +571,14 @@ def check_h_xss_hostile_regression() -> list[str]:
         )
 
     # H3: upload filenames called out as untrusted alongside the three channels
-    h3 = bool(re.search(
-        r"upload.filename|filename.*untrusted|untrusted.*filename|"
-        r"filename.*attacker|filename.*hostile|filename.*escaped",
-        doc_text, re.IGNORECASE,
-    ))
+    h3 = bool(
+        re.search(
+            r"upload.filename|filename.*untrusted|untrusted.*filename|"
+            r"filename.*attacker|filename.*hostile|filename.*escaped",
+            doc_text,
+            re.IGNORECASE,
+        )
+    )
     failures += check(
         h3,
         "H3: upload filenames documented as untrusted alongside the hostile channels",
@@ -541,14 +588,20 @@ def check_h_xss_hostile_regression() -> list[str]:
     )
 
     # H4: user UI and admin UI both mentioned as places where escaping applies
-    h4_user = bool(re.search(
-        r"user.?UI|reviewer.?UI|reviewer.*escap|user.*escap|both.*UI|UI.*both",
-        doc_text, re.IGNORECASE,
-    ))
-    h4_admin = bool(re.search(
-        r"admin.?UI|admin.*escap|escap.*admin",
-        doc_text, re.IGNORECASE,
-    ))
+    h4_user = bool(
+        re.search(
+            r"user.?UI|reviewer.?UI|reviewer.*escap|user.*escap|both.*UI|UI.*both",
+            doc_text,
+            re.IGNORECASE,
+        )
+    )
+    h4_admin = bool(
+        re.search(
+            r"admin.?UI|admin.*escap|escap.*admin",
+            doc_text,
+            re.IGNORECASE,
+        )
+    )
     failures += check(
         h4_user,
         "H4a: escaping applies to user/reviewer UI",
@@ -567,6 +620,7 @@ def check_h_xss_hostile_regression() -> list[str]:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> int:
     print("Frontend + admin-UI token storage and XSS posture gate (issue #72)")
     print("=" * 70)
@@ -583,10 +637,7 @@ def main() -> int:
 
     print("\n" + "=" * 70)
     if all_failures:
-        print(
-            f"\nFAIL: {len(all_failures)} check(s) failed.\n"
-            "See output above for details."
-        )
+        print(f"\nFAIL: {len(all_failures)} check(s) failed.\nSee output above for details.")
         return 1
 
     print("\nPASS: all XSS posture checks passed (issue #72).")

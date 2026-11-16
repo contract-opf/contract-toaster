@@ -64,6 +64,7 @@ from fastapi.security import HTTPAuthorizationCredentials  # noqa: E402, F401
 # RSA key-pair helpers (generated once per test module run)
 # ---------------------------------------------------------------------------
 
+
 def _b64url_int(n: int) -> str:
     """Encode an integer as a base64url string (no padding), for JWK format."""
     length = math.ceil(n.bit_length() / 8)
@@ -167,7 +168,10 @@ def _get_key() -> "_KeyFixture":
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _patch_env(pool_id: str, client_id: str, region: str, allowed_domains: str | None = "teamexos.com"):
+
+def _patch_env(
+    pool_id: str, client_id: str, region: str, allowed_domains: str | None = "teamexos.com"
+):
     """Context manager: set Cognito env vars, clear lru_cache on exit.
 
     `allowed_domains` sets ALLOWED_EMAIL_DOMAINS (issue #274 — the env-driven
@@ -197,7 +201,9 @@ def _patch_jwks(jwks: dict):
     return unittest.mock.patch.object(auth_module, "_fetch_jwks", side_effect=_fake_fetch)
 
 
-def _call_verify(token: str, key: "_KeyFixture", allowed_domains: str | None = "teamexos.com") -> dict:
+def _call_verify(
+    token: str, key: "_KeyFixture", allowed_domains: str | None = "teamexos.com"
+) -> dict:
     """Call _verify_cognito_token with env + JWKS patched."""
     import auth as auth_module  # noqa: PLC0415
 
@@ -236,6 +242,7 @@ def _assert_http_exc(
 # ---------------------------------------------------------------------------
 # Test cases
 # ---------------------------------------------------------------------------
+
 
 def test_t1_happy_path(key: "_KeyFixture") -> list[str]:
     """T1: valid token with correct claims must succeed and return claims."""
@@ -402,6 +409,7 @@ def test_t10_no_bearer_token() -> list[str]:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> int:
     print("Behavioral JWT auth tests — backend/src/auth.py (issue #55)")

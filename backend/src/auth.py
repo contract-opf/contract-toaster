@@ -129,10 +129,7 @@ def _fetch_jwks(jwks_url: str) -> dict[str, Any]:
 
 
 def _jwks_url(pool_id: str, region: str) -> str:
-    return (
-        f"https://cognito-idp.{region}.amazonaws.com/{pool_id}"
-        f"/.well-known/jwks.json"
-    )
+    return f"https://cognito-idp.{region}.amazonaws.com/{pool_id}/.well-known/jwks.json"
 
 
 def _verify_cognito_token(token: str) -> dict[str, Any]:
@@ -298,7 +295,9 @@ def get_current_user(
     if mode == demo_auth.AUTH_MODE_PASSWORD:
         token = bearer_token or session_cookie
         if not token:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated.")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated."
+            )
         return demo_auth.verify_demo_token(token)
 
     if mode == demo_auth.AUTH_MODE_BOTH:

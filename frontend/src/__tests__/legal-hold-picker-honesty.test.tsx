@@ -57,17 +57,17 @@ function stub({ reviewsOk = true, usersOk = true, reviews = [REVIEW] } = {}) {
     const pathname = new URL(url, 'http://localhost').pathname;
     if (pathname === '/api/reviews') {
       return reviewsOk
-        // eslint-disable-next-line @typescript-eslint/require-await
-        ? ({ ok: true, status: 200, json: async () => ({ reviews }) } as Response)
-        // eslint-disable-next-line @typescript-eslint/require-await
-        : ({ ok: false, status: 404, json: async () => ({}) } as Response);
+        ? // eslint-disable-next-line @typescript-eslint/require-await
+          ({ ok: true, status: 200, json: async () => ({ reviews }) } as Response)
+        : // eslint-disable-next-line @typescript-eslint/require-await
+          ({ ok: false, status: 404, json: async () => ({}) } as Response);
     }
     if (pathname === '/api/users') {
       return usersOk
-        // eslint-disable-next-line @typescript-eslint/require-await
-        ? ({ ok: true, status: 200, json: async () => ({ users: [] }) } as Response)
-        // eslint-disable-next-line @typescript-eslint/require-await
-        : ({ ok: false, status: 500, json: async () => ({}) } as Response);
+        ? // eslint-disable-next-line @typescript-eslint/require-await
+          ({ ok: true, status: 200, json: async () => ({ users: [] }) } as Response)
+        : // eslint-disable-next-line @typescript-eslint/require-await
+          ({ ok: false, status: 500, json: async () => ({}) } as Response);
     }
     if (pathname === '/api/admin/retention') {
       // eslint-disable-next-line @typescript-eslint/require-await

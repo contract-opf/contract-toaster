@@ -60,7 +60,7 @@ interface StyleRule {
 const ORBIT_CSS = path.join(
   path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..'),
   'orbit-diner',
-  'orbit.css'
+  'orbit.css',
 );
 
 const ruleCache = new Map<OrbitMode, StyleRule[]>();
@@ -119,8 +119,7 @@ export function matchesSafely(el: Element, selector: string): boolean {
 
 function specificity(selector: string): number {
   const ids = (selector.match(/#[\w-]+/g) ?? []).length;
-  const classes = (selector.match(/\.[\w-]+|\[[^\]]*\]|:(?!:)[a-z-]+(\([^)]*\))?/gi) ?? [])
-    .length;
+  const classes = (selector.match(/\.[\w-]+|\[[^\]]*\]|:(?!:)[a-z-]+(\([^)]*\))?/gi) ?? []).length;
   const elements = (selector.match(/(^|[\s>+~])[a-z][\w-]*/gi) ?? []).length;
   return ids * 10000 + classes * 100 + elements;
 }
@@ -134,7 +133,7 @@ function specificity(selector: string): number {
 export function resolveStyle(
   el: Element,
   properties: string[],
-  mode: OrbitMode
+  mode: OrbitMode,
 ): string | undefined {
   let bestRank: [number, number, number] | null = null;
   let bestValue: string | undefined;

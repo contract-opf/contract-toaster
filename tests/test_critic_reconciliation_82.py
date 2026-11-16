@@ -113,7 +113,9 @@ def _primary_accept() -> dict[str, Any]:
     return _load_fixture("primary_accept_valid.json")
 
 
-def _detector_fire(topic_id: str = "one-way-confidentiality", rule_id: str = "one-way-confidentiality") -> dict[str, Any]:
+def _detector_fire(
+    topic_id: str = "one-way-confidentiality", rule_id: str = "one-way-confidentiality"
+) -> dict[str, Any]:
     return {
         "section_ref": "12",
         "section_title": "Confidentiality",
@@ -148,10 +150,14 @@ def test_primary_only_issue_survives(failures: list[str]) -> None:
     if len(result["issues"]) != 1:
         failures.append(f"[1b] Expected exactly 1 issue (kept); got {len(result['issues'])}")
     elif result["issues"][0]["provenance"] != "model":
-        failures.append(f"[1c] A kept primary issue's provenance must remain 'model'; got {result['issues'][0]['provenance']!r}")
+        failures.append(
+            f"[1c] A kept primary issue's provenance must remain 'model'; got {result['issues'][0]['provenance']!r}"
+        )
     overrides = (result["critic_delta"] or {}).get("overrides") or []
     if overrides:
-        failures.append(f"[1d] A critic that changed nothing records no override; got {overrides!r}")
+        failures.append(
+            f"[1d] A critic that changed nothing records no override; got {overrides!r}"
+        )
 
     # No critic, no final review: the primary is never reconciled alone.
     try:
@@ -172,11 +178,15 @@ def test_critic_added_issue_appended_with_attribution(failures: list[str]) -> No
     result = recon.reconcile(primary_result=primary, critic_result=critic, detector_fires=[])
 
     if len(result["issues"]) != 1:
-        failures.append(f"[2a] Expected exactly 1 issue (critic-added); got {len(result['issues'])}")
+        failures.append(
+            f"[2a] Expected exactly 1 issue (critic-added); got {len(result['issues'])}"
+        )
         return
     added = result["issues"][0]
     if added["provenance"] != "critic-added":
-        failures.append(f"[2b] Critic-added issue must carry provenance='critic-added'; got {added['provenance']!r}")
+        failures.append(
+            f"[2b] Critic-added issue must carry provenance='critic-added'; got {added['provenance']!r}"
+        )
     if added["playbook_topic_id"] != "non-exclusive-arrangement":
         failures.append(f"[2c] Unexpected critic-added issue content: {added!r}")
 
@@ -184,18 +194,27 @@ def test_critic_added_issue_appended_with_attribution(failures: list[str]) -> No
         failures.append("[2d] critic_delta must be non-null when the critic added an issue.")
     else:
         if len(result["critic_delta"]["added_issues"]) != 1:
-            failures.append(f"[2e] critic_delta.added_issues must record the added issue; got {result['critic_delta']['added_issues']!r}")
+            failures.append(
+                f"[2e] critic_delta.added_issues must record the added issue; got {result['critic_delta']['added_issues']!r}"
+            )
         if result["critic_delta"]["contested_replacements"] != []:
-            failures.append("[2f] critic_delta.contested_replacements must be empty for this fixture.")
+            failures.append(
+                "[2f] critic_delta.contested_replacements must be empty for this fixture."
+            )
 
     if result["decision"] != "REQUEST_CHANGE":
-        failures.append(f"[2g] A critic-added issue must force REQUEST_CHANGE; got {result['decision']!r}")
+        failures.append(
+            f"[2g] A critic-added issue must force REQUEST_CHANGE; got {result['decision']!r}"
+        )
     computed = [
-        o for o in (result["critic_delta"] or {}).get("overrides") or []
+        o
+        for o in (result["critic_delta"] or {}).get("overrides") or []
         if o.get("source") == "computed"
     ]
     if [o.get("change") for o in computed] != ["added"]:
-        failures.append(f"[2h] The addition must be recorded as one computed 'added' override; got {computed!r}")
+        failures.append(
+            f"[2h] The addition must be recorded as one computed 'added' override; got {computed!r}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -211,7 +230,9 @@ def test_revised_replacement_is_the_critics(failures: list[str]) -> None:
     result = recon.reconcile(primary_result=primary, critic_result=critic, detector_fires=[])
 
     if len(result["issues"]) != 1:
-        failures.append(f"[3a] Revising an issue must not add/remove issues; got {len(result['issues'])}")
+        failures.append(
+            f"[3a] Revising an issue must not add/remove issues; got {len(result['issues'])}"
+        )
     else:
         expected = dict(critic["issues"][0])
         expected["provenance"] = "model"  # the primary raised it too
@@ -229,25 +250,37 @@ def test_revised_replacement_is_the_critics(failures: list[str]) -> None:
         o for o in result["critic_delta"]["overrides"] if o.get("source") == "critic"
     ]
     if len(critic_overrides) != 1:
-        failures.append(f"[3d] Expected the critic's one override recorded; got {critic_overrides!r}")
+        failures.append(
+            f"[3d] Expected the critic's one override recorded; got {critic_overrides!r}"
+        )
     else:
         override = critic_overrides[0]
-        if override.get("primary_value") != (
-            "Each party's aggregate liability under this Agreement shall not exceed $150,000."
-        ) or override.get("critic_value") != (
-            "Each party's aggregate liability under this Agreement shall not exceed $150,000, "
-            "except in cases of gross negligence or willful misconduct."
-        ) or not override.get("reason"):
-            failures.append(f"[3e] The override must carry both versions and the reason: {override!r}")
+        if (
+            override.get("primary_value")
+            != ("Each party's aggregate liability under this Agreement shall not exceed $150,000.")
+            or override.get("critic_value")
+            != (
+                "Each party's aggregate liability under this Agreement shall not exceed $150,000, "
+                "except in cases of gross negligence or willful misconduct."
+            )
+            or not override.get("reason")
+        ):
+            failures.append(
+                f"[3e] The override must carry both versions and the reason: {override!r}"
+            )
 
     # The deprecated array still reaches the #36 UI in its own shape.
     contested = result["critic_delta"]["contested_replacements"]
     if len(contested) != 1:
-        failures.append(f"[3f] Expected the deprecated contested replacement forwarded; got {contested!r}")
+        failures.append(
+            f"[3f] Expected the deprecated contested replacement forwarded; got {contested!r}"
+        )
     else:
         for required_field in ("section_ref", "primary_replacement_text", "critic_objection"):
             if required_field not in contested[0]:
-                failures.append(f"[3g] Contested-replacement entry missing '{required_field}' (issue #36 UI shape): {contested[0]!r}")
+                failures.append(
+                    f"[3g] Contested-replacement entry missing '{required_field}' (issue #36 UI shape): {contested[0]!r}"
+                )
 
     if result["critic_delta"]["added_issues"] != []:
         failures.append("[3h] added_issues must be empty for this fixture.")
@@ -267,12 +300,18 @@ def test_detector_fire_survives_both_models_silent(failures: list[str]) -> None:
     result = recon.reconcile(primary_result=primary, critic_result=critic, detector_fires=[fire])
 
     if len(result["issues"]) != 1:
-        failures.append(f"[4a] Expected the detector fire to survive as the sole issue; got {len(result['issues'])}")
+        failures.append(
+            f"[4a] Expected the detector fire to survive as the sole issue; got {len(result['issues'])}"
+        )
     elif result["issues"][0]["provenance"] != "detector:one-way-confidentiality":
-        failures.append(f"[4b] Detector fire provenance must be preserved; got {result['issues'][0]['provenance']!r}")
+        failures.append(
+            f"[4b] Detector fire provenance must be preserved; got {result['issues'][0]['provenance']!r}"
+        )
 
     if result["decision"] != "REQUEST_CHANGE":
-        failures.append(f"[4c] A detector fire must force REQUEST_CHANGE even with both models silent; got {result['decision']!r}")
+        failures.append(
+            f"[4c] A detector fire must force REQUEST_CHANGE even with both models silent; got {result['decision']!r}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -287,7 +326,9 @@ def test_decision_moves_accept_to_request_change_via_critic(failures: list[str])
 
     result = recon.reconcile(primary_result=primary, critic_result=critic, detector_fires=[])
     if result["decision"] != "REQUEST_CHANGE":
-        failures.append(f"[5a] Expected ACCEPT -> REQUEST_CHANGE via critic; got {result['decision']!r}")
+        failures.append(
+            f"[5a] Expected ACCEPT -> REQUEST_CHANGE via critic; got {result['decision']!r}"
+        )
 
 
 def test_critic_accept_never_reverses_detector_fire(failures: list[str]) -> None:
@@ -313,7 +354,9 @@ def test_critic_accept_never_reverses_detector_fire(failures: list[str]) -> None
             f"(or a primary hard rejection); got {result['decision']!r}"
         )
     if len(result["issues"]) != 2:
-        failures.append(f"[5c] Expected both the primary issue and the detector fire to survive; got {len(result['issues'])}")
+        failures.append(
+            f"[5c] Expected both the primary issue and the detector fire to survive; got {len(result['issues'])}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -344,7 +387,9 @@ def test_critic_schema_invalid_after_retry_is_terminal(failures: list[str]) -> N
     if critic_result.get("status") != "ERROR":
         failures.append(f"[6a] Expected terminal ERROR; got {critic_result!r}")
     if critic_result.get("attempts") != 2:
-        failures.append(f"[6b] Expected exactly 2 attempts (bounded retry budget = 1); got {critic_result.get('attempts')!r}")
+        failures.append(
+            f"[6b] Expected exactly 2 attempts (bounded retry budget = 1); got {critic_result.get('attempts')!r}"
+        )
     if len(client.calls) != 2:
         failures.append(f"[6c] Expected exactly 2 model invocations; got {len(client.calls)}")
 
@@ -352,9 +397,13 @@ def test_critic_schema_invalid_after_retry_is_terminal(failures: list[str]) -> N
         failures.append(f"[6d] Expected 2 ledger rows (retry, failure); got {len(ledger)}")
     else:
         if ledger[0].outcome != "retry" or ledger[0].pass_name != "critic":
-            failures.append(f"[6e] First ledger row must be outcome=retry, pass_name=critic; got {ledger[0]!r}")
+            failures.append(
+                f"[6e] First ledger row must be outcome=retry, pass_name=critic; got {ledger[0]!r}"
+            )
         if ledger[1].outcome != "failure":
-            failures.append(f"[6f] Second (terminal) ledger row must be outcome=failure; got {ledger[1]!r}")
+            failures.append(
+                f"[6f] Second (terminal) ledger row must be outcome=failure; got {ledger[1]!r}"
+            )
 
     # Composing this into a two-pass review must NEVER produce a silent
     # single-pass DONE -- the primary's perfectly good output must not be
@@ -366,9 +415,13 @@ def test_critic_schema_invalid_after_retry_is_terminal(failures: list[str]) -> N
         detector_fires=[],
     )
     if composed.get("status") != "ERROR":
-        failures.append(f"[6g] A failed critic pass must make the composed review terminal ERROR; got {composed!r}")
+        failures.append(
+            f"[6g] A failed critic pass must make the composed review terminal ERROR; got {composed!r}"
+        )
     if "result" in composed:
-        failures.append(f"[6h] A failed critic pass must NEVER yield a reconciled 'result' (silent single-pass DONE); got {composed!r}")
+        failures.append(
+            f"[6h] A failed critic pass must NEVER yield a reconciled 'result' (silent single-pass DONE); got {composed!r}"
+        )
 
 
 def test_critic_success_composes_to_ok_reconciled_result(failures: list[str]) -> None:
@@ -395,10 +448,14 @@ def test_critic_success_composes_to_ok_reconciled_result(failures: list[str]) ->
         detector_fires=[],
     )
     if composed.get("status") != "OK":
-        failures.append(f"[6j] Expected composed status=OK when both passes succeed; got {composed!r}")
+        failures.append(
+            f"[6j] Expected composed status=OK when both passes succeed; got {composed!r}"
+        )
         return
     if composed["result"]["decision"] != "REQUEST_CHANGE":
-        failures.append(f"[6k] Expected the reconciled result to reflect the critic-added issue; got {composed['result']!r}")
+        failures.append(
+            f"[6k] Expected the reconciled result to reflect the critic-added issue; got {composed['result']!r}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -409,7 +466,9 @@ def test_critic_success_composes_to_ok_reconciled_result(failures: list[str]) ->
 def test_critic_invoked_with_manifest_input_on_pinned_model(failures: list[str]) -> None:
     resolved_critic_id = model_client.critic_model_id()
     if resolved_critic_id != _CRITIC_MODEL_ID:
-        failures.append(f"[7a] Expected pinned critic model id {_CRITIC_MODEL_ID!r}; policy resolved {resolved_critic_id!r}")
+        failures.append(
+            f"[7a] Expected pinned critic model id {_CRITIC_MODEL_ID!r}; policy resolved {resolved_critic_id!r}"
+        )
 
     responses = {resolved_critic_id: [_load_fixture_text("critic_added_issue_valid.json")]}
     client = model_client.FakeBedrockClient(responses)
@@ -432,7 +491,9 @@ def test_critic_invoked_with_manifest_input_on_pinned_model(failures: list[str])
         return
     call = client.calls[0]
     if call["model_id"] != resolved_critic_id:
-        failures.append(f"[7d] Critic must be invoked on the pinned Sonnet id; got {call['model_id']!r}")
+        failures.append(
+            f"[7d] Critic must be invoked on the pinned Sonnet id; got {call['model_id']!r}"
+        )
 
     user_prompt = call["user_prompt"]
     # Issue #627 removed the two permanently-empty manifest blocks; the
@@ -441,22 +502,35 @@ def test_critic_invoked_with_manifest_input_on_pinned_model(failures: list[str])
     required_tags_in_order = ["<PRIMARY_REVIEWER_OUTPUT>"]
     positions = [user_prompt.find(tag) for tag in required_tags_in_order]
     if any(pos == -1 for pos in positions):
-        failures.append(f"[7e] Critic user prompt missing a required manifest block: {dict(zip(required_tags_in_order, positions))}")  # noqa: B905
+        failures.append(
+            f"[7e] Critic user prompt missing a required manifest block: {dict(zip(required_tags_in_order, positions))}"  # noqa: B905
+        )
     elif positions != sorted(positions):
-        failures.append(f"[7f] Critic user prompt manifest blocks out of order: {dict(zip(required_tags_in_order, positions))}")  # noqa: B905
+        failures.append(
+            f"[7f] Critic user prompt manifest blocks out of order: {dict(zip(required_tags_in_order, positions))}"  # noqa: B905
+        )
     for forbidden_tag in ("<RETRIEVED_PRECEDENT>", "<COUNTERPARTY_DOCUMENT>"):
         if forbidden_tag in user_prompt:
-            failures.append(f"[7g] Critic prompt must not include {forbidden_tag} -- this call passes no document, and retrieved precedent is primary-only.")
+            failures.append(
+                f"[7g] Critic prompt must not include {forbidden_tag} -- this call passes no document, and retrieved precedent is primary-only."
+            )
 
     system_prompt = call["system_prompt"]
     if pp.REVIEW_GUIDANCE_BLOCK not in system_prompt:
-        failures.append("[7h] Critic system prompt must include the shared review-guidance block (same manifest as primary).")
+        failures.append(
+            "[7h] Critic system prompt must include the shared review-guidance block (same manifest as primary)."
+        )
     # Issue #267: the shared assembler now projects the playbook down to
     # review-knowledge fields only (governance metadata like legal_approval
     # is excluded) -- the critic prompt carries that PROJECTED view, not the
     # raw playbook dict.
-    if json.dumps(pp.project_playbook_for_prompt(_sample_playbook()), sort_keys=True) not in system_prompt:
-        failures.append("[7i] Critic system prompt must include the projected playbook JSON (same manifest/projection as primary, issue #267).")
+    if (
+        json.dumps(pp.project_playbook_for_prompt(_sample_playbook()), sort_keys=True)
+        not in system_prompt
+    ):
+        failures.append(
+            "[7i] Critic system prompt must include the projected playbook JSON (same manifest/projection as primary, issue #267)."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -483,9 +557,7 @@ _V2_SCHEMA_PATH = pp.OUTPUT_SCHEMA_V2_PATH
 _V2_CLEAN_CRITIC_REPLACEMENT_TEXT = "This Agreement is non-exclusive."
 
 
-def _v2_critic_response_with_replacement_text(
-    text: str, topic_id: str = "exclusivity"
-) -> str:
+def _v2_critic_response_with_replacement_text(text: str, topic_id: str = "exclusivity") -> str:
     """The shared critic fixture, projected back onto the V2 issue shape:
     `issue_key` dropped (v2 has no such property and forbids extras),
     `proposed_replacement_text` supplied (v2 requires it)."""
@@ -513,7 +585,9 @@ def _critic_response_with_replacement_text(text: str, topic_id: str = "exclusivi
     return _v2_critic_response_with_replacement_text(text, topic_id)
 
 
-def test_critic_replacement_text_violation_then_clean_retries_and_succeeds(failures: list[str]) -> None:
+def test_critic_replacement_text_violation_then_clean_retries_and_succeeds(
+    failures: list[str],
+) -> None:
     # "indemnify" is in exclusivity's must_not_introduce list
     # (synthetic-generic-v1.0.0.json).
     violating = _critic_response_with_replacement_text(
@@ -540,16 +614,27 @@ def test_critic_replacement_text_violation_then_clean_retries_and_succeeds(failu
     )
 
     if critic_result.get("status") != "OK":
-        failures.append(f"[8a] Expected status=OK after a replacement-text-violation retry; got {critic_result!r}")
+        failures.append(
+            f"[8a] Expected status=OK after a replacement-text-violation retry; got {critic_result!r}"
+        )
     if critic_result.get("attempts") != 2:
-        failures.append(f"[8b] Expected exactly 2 attempts (same bounded-retry budget as schema mismatch); got {critic_result.get('attempts')!r}")
+        failures.append(
+            f"[8b] Expected exactly 2 attempts (same bounded-retry budget as schema mismatch); got {critic_result.get('attempts')!r}"
+        )
 
-    expected_clean_text = json.loads(clean)["critic_delta"]["added_issues"][0]["proposed_replacement_text"]
+    expected_clean_text = json.loads(clean)["critic_delta"]["added_issues"][0][
+        "proposed_replacement_text"
+    ]
     got_text = (
-        critic_result.get("response", {}).get("critic_delta", {}).get("added_issues", [{}])[0].get("proposed_replacement_text")
+        critic_result.get("response", {})
+        .get("critic_delta", {})
+        .get("added_issues", [{}])[0]
+        .get("proposed_replacement_text")
     )
     if got_text != expected_clean_text:
-        failures.append(f"[8c] Final response's replacement text must be the clean second attempt's, unmodified; got {got_text!r}")
+        failures.append(
+            f"[8c] Final response's replacement text must be the clean second attempt's, unmodified; got {got_text!r}"
+        )
 
     if len(ledger) != 2:
         failures.append(f"[8d] Expected 2 ledger rows (retry, success); got {len(ledger)}")
@@ -557,12 +642,18 @@ def test_critic_replacement_text_violation_then_clean_retries_and_succeeds(failu
         if ledger[0].outcome != "retry":
             failures.append(f"[8e] First ledger row must be outcome=retry; got {ledger[0]!r}")
         if ledger[0].replacement_text_failures != ["must_not_introduce_violation"]:
-            failures.append(f"[8f] First ledger row must record the failure code; got {ledger[0].replacement_text_failures!r}")
+            failures.append(
+                f"[8f] First ledger row must record the failure code; got {ledger[0].replacement_text_failures!r}"
+            )
         if ledger[1].outcome != "success" or ledger[1].replacement_text_failures != []:
-            failures.append(f"[8g] Second (clean) attempt's ledger row must be outcome=success with no failures; got {ledger[1]!r}")
+            failures.append(
+                f"[8g] Second (clean) attempt's ledger row must be outcome=success with no failures; got {ledger[1]!r}"
+            )
 
 
-def test_critic_replacement_text_violation_on_final_attempt_demotes_to_flag_only(failures: list[str]) -> None:
+def test_critic_replacement_text_violation_on_final_attempt_demotes_to_flag_only(
+    failures: list[str],
+) -> None:
     # exclusivity's max_chars is 1200 (synthetic-generic-v1.0.0.json).
     over_length_text = "X" * 1300
     violating = _critic_response_with_replacement_text(over_length_text)
@@ -581,21 +672,35 @@ def test_critic_replacement_text_violation_on_final_attempt_demotes_to_flag_only
     )
 
     if critic_result.get("status") != "OK":
-        failures.append(f"[8h] A still-violating replacement on the final attempt must demote to flag-only, status=OK; got {critic_result!r}")
+        failures.append(
+            f"[8h] A still-violating replacement on the final attempt must demote to flag-only, status=OK; got {critic_result!r}"
+        )
     if critic_result.get("attempts") != 2:
-        failures.append(f"[8i] Expected exactly 2 attempts (bounded retry budget exhausted); got {critic_result.get('attempts')!r}")
+        failures.append(
+            f"[8i] Expected exactly 2 attempts (bounded retry budget exhausted); got {critic_result.get('attempts')!r}"
+        )
 
     added = critic_result.get("response", {}).get("critic_delta", {}).get("added_issues", [])
     if not added or added[0].get("proposed_replacement_text") != "":
-        failures.append(f"[8j] The violating critic-added issue must be demoted to flag-only; got {added!r}")
+        failures.append(
+            f"[8j] The violating critic-added issue must be demoted to flag-only; got {added!r}"
+        )
 
     if len(ledger) != 2:
-        failures.append(f"[8k] Expected 2 ledger rows (retry, success-with-demotion); got {len(ledger)}")
+        failures.append(
+            f"[8k] Expected 2 ledger rows (retry, success-with-demotion); got {len(ledger)}"
+        )
     else:
         if ledger[0].replacement_text_failures != ["max_chars_exceeded"]:
-            failures.append(f"[8l] First ledger row must record max_chars_exceeded; got {ledger[0].replacement_text_failures!r}")
-        if ledger[1].outcome != "success" or ledger[1].replacement_text_failures != ["max_chars_exceeded"]:
-            failures.append(f"[8m] Final ledger row must be outcome=success and still record the triggering failure; got {ledger[1]!r}")
+            failures.append(
+                f"[8l] First ledger row must record max_chars_exceeded; got {ledger[0].replacement_text_failures!r}"
+            )
+        if ledger[1].outcome != "success" or ledger[1].replacement_text_failures != [
+            "max_chars_exceeded"
+        ]:
+            failures.append(
+                f"[8m] Final ledger row must be outcome=success and still record the triggering failure; got {ledger[1]!r}"
+            )
 
 
 def test_run_critic_pass_rejects_inference_profile_before_any_call(failures: list[str]) -> None:
@@ -610,11 +715,15 @@ def test_run_critic_pass_rejects_inference_profile_before_any_call(failures: lis
             model_id="us.anthropic.claude-sonnet-4-6",
             ledger_write=ledger.append,
         )
-        failures.append("[7j] run_critic_pass must reject a cross-region inference-profile model_id before any invocation.")
+        failures.append(
+            "[7j] run_critic_pass must reject a cross-region inference-profile model_id before any invocation."
+        )
     except model_client.ModelPolicyViolation:
         pass
     if client.calls:
-        failures.append(f"[7k] Model client must never be invoked for a rejected inference-profile id; got {len(client.calls)} call(s).")
+        failures.append(
+            f"[7k] Model client must never be invoked for a rejected inference-profile id; got {len(client.calls)} call(s)."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -655,7 +764,9 @@ def main() -> int:
     if failures:
         print(f"FAIL: {len(failures)} issue(s) found.")
         return 1
-    print("PASS: all critic pass + reconciliation (issue #82, rules per #138) assertions satisfied.")
+    print(
+        "PASS: all critic pass + reconciliation (issue #82, rules per #138) assertions satisfied."
+    )
     return 0
 
 

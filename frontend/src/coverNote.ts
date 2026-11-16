@@ -47,15 +47,12 @@ export interface CoverNoteResult {
   lastGenerationCostUsdCents: number | null;
 }
 
-export type CoverNoteOutcome =
-  | ({ ok: true } & CoverNoteResult)
-  | { ok: false };
+export type CoverNoteOutcome = ({ ok: true } & CoverNoteResult) | { ok: false };
 
 /** The quiet, non-alarming copy for a degraded generation (issue #499 AC:
  * "failure degrades to a quiet ... with retry"). Shared so neither surface
  * invents its own wording. */
-export const COVER_NOTE_FAILURE_COPY =
-  "Couldn't butter this one — the redline is unaffected.";
+export const COVER_NOTE_FAILURE_COPY = "Couldn't butter this one — the redline is unaffected.";
 
 function parseCoverNoteResponse(body: Record<string, unknown>): CoverNoteResult {
   return {

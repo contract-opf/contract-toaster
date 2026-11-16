@@ -16,11 +16,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
-import {
-  DEFAULT_PLAYBOOKS,
-  findReviewResult,
-  pressSubmit,
-} from './support/consoleSurface';
+import { DEFAULT_PLAYBOOKS, findReviewResult, pressSubmit } from './support/consoleSurface';
 import { FAVICON_BADGE_DONE, FAVICON_BADGE_FAILED } from '../toaster/faviconFrames';
 
 vi.mock('aws-amplify/auth', () => ({
@@ -127,8 +123,12 @@ function stubPollingFetch(reviewId: string, detail: { current: Record<string, un
         return { ok: true, status: 200, json: async () => DEFAULT_PLAYBOOKS } as Response;
       }
       if (method === 'POST' && pathname === '/api/reviews') {
-        // eslint-disable-next-line @typescript-eslint/require-await
-        return { ok: true, status: 200, json: async () => ({ review_id: reviewId, resumed: false }) } as Response;
+        return {
+          ok: true,
+          status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
+          json: async () => ({ review_id: reviewId, resumed: false }),
+        } as Response;
       }
       if (pathname === `/api/reviews/${reviewId}`) {
         // eslint-disable-next-line @typescript-eslint/require-await
@@ -193,7 +193,12 @@ describe('issue #497 — wired into the real ReviewSubmission panel', () => {
       expect(document.title).toBe('Reading your contract against the playbook… — Contract Toaster'),
     );
 
-    detail.current = { ...detail.current, status: 'DONE', decision: 'ACCEPT', progress_stage: 'redline' };
+    detail.current = {
+      ...detail.current,
+      status: 'DONE',
+      decision: 'ACCEPT',
+      progress_stage: 'redline',
+    };
     await waitFor(() => expect(document.title).toBe('Contract Toaster'), { timeout: 6000 });
   });
 
@@ -265,9 +270,7 @@ describe('issue #497 — wired into the real ReviewSubmission panel', () => {
 
     fireEvent.click(screen.getByTestId('notify-toggle'));
     await waitFor(() =>
-      expect(
-        (screen.getByTestId('notify-toggle').textContent ?? '').toLowerCase(),
-      ).toContain('on'),
+      expect((screen.getByTestId('notify-toggle').textContent ?? '').toLowerCase()).toContain('on'),
     );
 
     setHidden(true);
@@ -306,13 +309,16 @@ describe('issue #497 — wired into the real ReviewSubmission panel', () => {
 
     fireEvent.click(screen.getByTestId('notify-toggle'));
     await waitFor(() =>
-      expect(
-        (screen.getByTestId('notify-toggle').textContent ?? '').toLowerCase(),
-      ).toContain('on'),
+      expect((screen.getByTestId('notify-toggle').textContent ?? '').toLowerCase()).toContain('on'),
     );
 
     setHidden(true);
-    detail.current = { ...detail.current, status: 'ERROR', failing_stage: 'critic_pass', reason: 'llm_timeout' };
+    detail.current = {
+      ...detail.current,
+      status: 'ERROR',
+      failing_stage: 'critic_pass',
+      reason: 'llm_timeout',
+    };
 
     await waitFor(() => expect(MockNotification.instances).toHaveLength(1), { timeout: 6000 });
     expect(MockNotification.instances[0].title).toBe('That one burnt — tap for why');

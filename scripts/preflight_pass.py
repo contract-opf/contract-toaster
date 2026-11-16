@@ -281,9 +281,7 @@ def compute_document_stats(docx_bytes: bytes) -> dict[str, Any]:
                 excerpt_parts.append(piece)
                 excerpt_len += len(piece)
 
-    page_estimate = (
-        max(1, round(word_count / WORDS_PER_PAGE_ESTIMATE)) if word_count else 0
-    )
+    page_estimate = max(1, round(word_count / WORDS_PER_PAGE_ESTIMATE)) if word_count else 0
 
     return {
         "word_count": word_count,
@@ -335,10 +333,10 @@ PREFLIGHT_SYSTEM_PROMPT = (
     "on, or advise on any clause. Given a short excerpt from an uploaded "
     "document, return ONLY the four fields the schema asks for: your best "
     "guess at the agreement TYPE (pick the single closest match from the "
-    "allowed list; never invent a new one -- if nothing fits, say \"Other\"), "
-    "which PAPER SIDE the document appears to be drafted on (\"ours\" if it "
-    "reads like the reviewing organization's own template, \"counterparty\" "
-    "if it reads like the other side's template, \"unclear\" if you cannot "
+    'allowed list; never invent a new one -- if nothing fits, say "Other"), '
+    'which PAPER SIDE the document appears to be drafted on ("ours" if it '
+    'reads like the reviewing organization\'s own template, "counterparty" '
+    'if it reads like the other side\'s template, "unclear" if you cannot '
     "tell), a confidence score between 0 and 1, and a one-sentence, "
     "plain-text summary of what the document is. Paper side is a neutral, "
     "factual observation -- this tool reviews both sides' paper equally, so "
@@ -379,9 +377,7 @@ def normalize_agreement_type_label(value: Any) -> str | None:
     """
     if not isinstance(value, str):
         return None
-    text = " ".join(_CONTROL_CHAR_RE.sub("", value).split())[
-        :AGREEMENT_TYPE_MAX_CHARS
-    ].strip()
+    text = " ".join(_CONTROL_CHAR_RE.sub("", value).split())[:AGREEMENT_TYPE_MAX_CHARS].strip()
     return text or None
 
 
@@ -533,9 +529,7 @@ def _sanitize_summary(value: Any) -> str | None:
     return text[:SUMMARY_MAX_CHARS]
 
 
-def sanitize_classification(
-    raw: dict[str, Any], known_types: list[str]
-) -> dict[str, Any]:
+def sanitize_classification(raw: dict[str, Any], known_types: list[str]) -> dict[str, Any]:
     """Neutralize a cheap-model classification response into render-safe,
     enum-constrained fields. Every input field is UNTRUSTED MODEL OUTPUT --
     the model's own words, produced from reading an untrusted document -- so
@@ -555,9 +549,7 @@ def sanitize_classification(
     defaults rather than propagating a model-shaped exception.
     """
     guess = raw.get("agreement_type_guess")
-    agreement_type_guess = (
-        guess if isinstance(guess, str) and guess in known_types else None
-    )
+    agreement_type_guess = guess if isinstance(guess, str) and guess in known_types else None
 
     side = raw.get("paper_side")
     paper_side = side if isinstance(side, str) and side in PAPER_SIDES else "unclear"

@@ -169,7 +169,9 @@ def test_the_prompt_carries_document_playbook_and_primary_output(
     system = c.critic_call["system_prompt"]
 
     if c.doc_text not in user:
-        failures.append("[1a] the critic's user prompt does not contain the document text, verbatim")
+        failures.append(
+            "[1a] the critic's user prompt does not contain the document text, verbatim"
+        )
     if "<COUNTERPARTY_DOCUMENT>" not in user:
         failures.append("[1b] the document is not inside its delimited block")
 
@@ -184,11 +186,15 @@ def test_the_prompt_carries_document_playbook_and_primary_output(
                     f"[1d] the first reviewer's issue {issue['issue_key']} is not in the critic's prompt"
                 )
         if c.primary_response["block_patches"][0]["block_id"] not in carried:
-            failures.append("[1e] the first reviewer's block transcript is not in the critic's prompt")
+            failures.append(
+                "[1e] the first reviewer's block transcript is not in the critic's prompt"
+            )
 
     projected = json.dumps(pp.project_playbook_for_prompt(c.bundle), sort_keys=True)
     if projected not in system:
-        failures.append("[1f] the critic's system prompt does not carry the projected playbook knowledge")
+        failures.append(
+            "[1f] the critic's system prompt does not carry the projected playbook knowledge"
+        )
 
     # Order (issue #148): the document, THEN the instruction, THEN the first
     # reviewer's output. The document leads because it is the prompt-cache
@@ -218,17 +224,25 @@ def test_the_prompt_states_the_sceptical_review_instruction(
         if phrase.lower() not in flat:
             failures.append(f"[2a] the composed critic prompt never says {phrase!r}")
     if pp.CRITIC_SCEPTICAL_INSTRUCTION not in c.critic_call["user_prompt"]:
-        failures.append("[2b] CRITIC_SCEPTICAL_INSTRUCTION is not in the prompt run_critic_pass sends, verbatim")
+        failures.append(
+            "[2b] CRITIC_SCEPTICAL_INSTRUCTION is not in the prompt run_critic_pass sends, verbatim"
+        )
     # The order is stated, not just implied.
     first = flat.find("first re-derive")
     then = flat.find("only then compare")
     if not 0 <= first < then:
-        failures.append("[2c] the instruction must say FIRST re-derive and ONLY THEN compare, in that order")
+        failures.append(
+            "[2c] the instruction must say FIRST re-derive and ONLY THEN compare, in that order"
+        )
     # And the bar: a sound review is kept exactly, not polished.
     if "keep its issue and its edit exactly as they are" not in flat:
-        failures.append("[2d] the instruction must say a correct issue and edit are kept exactly as they are")
+        failures.append(
+            "[2d] the instruction must say a correct issue and edit are kept exactly as they are"
+        )
     if "no minimum number of findings" not in flat:
-        failures.append("[2e] the no-minimum rule must survive: a critic with authority must not manufacture overrides")
+        failures.append(
+            "[2e] the no-minimum rule must survive: a critic with authority must not manufacture overrides"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -248,13 +262,20 @@ def test_the_role_is_the_senior_reviewer_with_the_last_word(
         if needle not in flat:
             failures.append(f"[3a] the critic prompt never says {needle!r}")
     if "adversarial second reader" in flat:
-        failures.append("[3b] the prompt still frames the critic as the #618 'adversarial second reader'")
+        failures.append(
+            "[3b] the prompt still frames the critic as the #618 'adversarial second reader'"
+        )
     if "adversarial" not in flat:
-        failures.append("[3c] the re-review must still be called adversarial -- it is not a second primary")
+        failures.append(
+            "[3c] the re-review must still be called adversarial -- it is not a second primary"
+        )
     user = c.critic_call["user_prompt"]
     at_role = user.find(pp.CRITIC_TASKING_BLOCK)
     if not (
-        0 <= user.find("</COUNTERPARTY_DOCUMENT>") < at_role < user.find("<PRIMARY_REVIEWER_OUTPUT>")
+        0
+        <= user.find("</COUNTERPARTY_DOCUMENT>")
+        < at_role
+        < user.find("<PRIMARY_REVIEWER_OUTPUT>")
     ):
         failures.append(
             "[3d] the role must open the critic's role suffix: after the shared document "
@@ -278,9 +299,13 @@ def test_the_critic_reads_the_same_playbook_knowledge_as_the_primary(
     system = c.critic_call["system_prompt"]
     modes = pp.render_replacement_text_modes_block(c.bundle)
     if modes is not None and modes not in system:
-        failures.append("[4b] the pen-rule block the instruction holds the first reviewer to is not in the critic's system prompt")
+        failures.append(
+            "[4b] the pen-rule block the instruction holds the first reviewer to is not in the critic's system prompt"
+        )
     if "Do NOT add any other top-level key" not in system:
-        failures.append("[4c] the shared output contract changed; the critic's extra key is announced by the tasking")
+        failures.append(
+            "[4c] the shared output contract changed; the critic's extra key is announced by the tasking"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -293,8 +318,14 @@ def test_the_prompt_states_the_final_result_contract(failures: list[str], c: _Co
     for needle, why in (
         ("YOUR RESPONSE IS THE FINAL RESULT", "the framing of the output"),
         ('"block_patches", "block_ops" and "verdict_summary"', "the carriers it authors itself"),
-        ("anchored to the SAME block ids the document shows", "block anchoring against the shared map"),
-        ('ONE top-level key beyond the ones the OUTPUT CONTRACT lists: "critic_delta"', "the extra key"),
+        (
+            "anchored to the SAME block ids the document shows",
+            "block anchoring against the shared map",
+        ),
+        (
+            'ONE top-level key beyond the ones the OUTPUT CONTRACT lists: "critic_delta"',
+            "the extra key",
+        ),
         ("FIRST REVIEWER's issue_key", "which key issue_id names"),
         ('"KEEP"', "disposition vocabulary"),
         ('"REVISE"', "disposition vocabulary"),
@@ -321,7 +352,10 @@ def test_the_prompt_states_the_final_result_contract(failures: list[str], c: _Co
         ("critic_value", f"{pp._OVERRIDE_POINTER}/critic_value"),
     ):
         cap = pp.schema_max_length(schema, pointer)
-        if cap is None or f'"{label}": at most {cap} characters' not in c.critic_call["user_prompt"]:
+        if (
+            cap is None
+            or f'"{label}": at most {cap} characters' not in c.critic_call["user_prompt"]
+        ):
             failures.append(f"[5b] the critic prompt does not state {label}'s budget ({cap})")
 
     # The deprecated channels are still asked for -- the reconciler reads them this release.
@@ -331,7 +365,9 @@ def test_the_prompt_states_the_final_result_contract(failures: list[str], c: _Co
     if "deprecated" not in flat.lower():
         failures.append("[5d] the prompt does not tell the critic those arrays are deprecated")
     if "Never silently rewrite" in flat:
-        failures.append("[5e] 'never silently rewrite' contradicts ADR 0001: the critic has the last word")
+        failures.append(
+            "[5e] 'never silently rewrite' contradicts ADR 0001: the critic has the last word"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -358,13 +394,18 @@ def test_the_no_document_variant_keeps_the_order_and_the_bar(
         if needle not in lowered:
             failures.append(f"[6c] the no-document prompt never says {needle!r}")
     if "anchored to the SAME block ids" in flat:
-        failures.append("[6d] the no-document prompt tells the critic to author edits it cannot address")
+        failures.append(
+            "[6d] the no-document prompt tells the critic to author edits it cannot address"
+        )
     # [6e] (independent review of #137): the WHOLE composed no-document block
     # -- duties and their intro included, not just the final-result passage --
     # must never tell the critic to author block edits, and must still tell it
     # to leave both arrays empty.
     nodoc_block = " ".join(pp.CRITIC_TASKING_BLOCK_NO_DOCUMENT.split())
-    for authoring in ('your own edit in YOUR "block_patches"', "Fix each one in YOUR OWN final result"):
+    for authoring in (
+        'your own edit in YOUR "block_patches"',
+        "Fix each one in YOUR OWN final result",
+    ):
         if authoring in nodoc_block:
             failures.append(f"[6e] the no-document tasking still says: {authoring!r}")
     if 'leave "block_patches" and "block_ops" empty' not in nodoc_block:

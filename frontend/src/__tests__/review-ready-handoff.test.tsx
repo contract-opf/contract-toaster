@@ -29,11 +29,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
-import {
-  DEFAULT_PLAYBOOKS,
-  findReviewResult,
-  pressSubmit,
-} from './support/consoleSurface';
+import { DEFAULT_PLAYBOOKS, findReviewResult, pressSubmit } from './support/consoleSurface';
 import * as sounds from '../toaster/sounds';
 
 vi.mock('aws-amplify/auth', () => ({
@@ -177,9 +173,7 @@ describe('completion handoff — automatic save', () => {
     await submitAndReachResult();
 
     // Nothing in this test ever clicked the download button.
-    await waitFor(() =>
-      expect(fetchedPaths(fetchMock)).toContain('/api/reviews/rev-448/output'),
-    );
+    await waitFor(() => expect(fetchedPaths(fetchMock)).toContain('/api/reviews/rev-448/output'));
     await waitFor(() => expect(anchorClickSpy).toHaveBeenCalledTimes(1));
 
     const anchors = createdAnchors();
@@ -247,8 +241,12 @@ describe('completion handoff — automatic save', () => {
       if (method === 'POST' && pathname === '/api/reviews') {
         submitCount += 1;
         const reviewId = submitCount === 1 ? 'rev-A' : 'rev-B';
-        // eslint-disable-next-line @typescript-eslint/require-await
-        return { ok: true, status: 200, json: async () => ({ review_id: reviewId, resumed: false }) } as Response;
+        return {
+          ok: true,
+          status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
+          json: async () => ({ review_id: reviewId, resumed: false }),
+        } as Response;
       }
       if (pathname === '/api/reviews/rev-A') {
         return {
@@ -282,8 +280,12 @@ describe('completion handoff — automatic save', () => {
         return outputAPromise;
       }
       if (pathname === '/api/reviews/rev-B/output') {
-        // eslint-disable-next-line @typescript-eslint/require-await
-        return { ok: true, status: 200, json: async () => ({ url: PRESIGNED_URL_B, expires_in: 60 }) } as Response;
+        return {
+          ok: true,
+          status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
+          json: async () => ({ url: PRESIGNED_URL_B, expires_in: 60 }),
+        } as Response;
       }
       // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
@@ -298,9 +300,7 @@ describe('completion handoff — automatic save', () => {
     await findReviewResult();
 
     // Review A's automatic save is now in flight, blocked on outputAPromise.
-    await waitFor(() =>
-      expect(fetchedPaths(fetchMock)).toContain('/api/reviews/rev-A/output'),
-    );
+    await waitFor(() => expect(fetchedPaths(fetchMock)).toContain('/api/reviews/rev-A/output'));
 
     // Resubmit before it resolves — this is handleSubmit's reset racing the
     // pending fetch's continuation.
@@ -353,9 +353,7 @@ describe('completion handoff — the download gate is not bypassed', () => {
     // And the manual path is untouched — the attorney, having passed the
     // indicator, can still save with one click.
     fireEvent.click(screen.getByTestId('review-download-button'));
-    await waitFor(() =>
-      expect(fetchedPaths(fetchMock)).toContain('/api/reviews/rev-448/output'),
-    );
+    await waitFor(() => expect(fetchedPaths(fetchMock)).toContain('/api/reviews/rev-448/output'));
     await waitFor(() => expect(anchorClickSpy).toHaveBeenCalledTimes(1));
   });
 
@@ -365,9 +363,7 @@ describe('completion handoff — the download gate is not bypassed', () => {
     await submitAndReachResult();
 
     expect(screen.queryByTestId('review-critic-delta')).toBeNull();
-    await waitFor(() =>
-      expect(fetchedPaths(fetchMock)).toContain('/api/reviews/rev-448/output'),
-    );
+    await waitFor(() => expect(fetchedPaths(fetchMock)).toContain('/api/reviews/rev-448/output'));
   });
 });
 
@@ -394,23 +390,57 @@ const RECONCILER_OVERRIDES = (
 describe('completion handoff — the gate keys on `critic_delta.overrides` (issue #167)', () => {
   it.each([
     ['the real reconciler overrides record', RECONCILER_OVERRIDES],
-    ['a computed added issue alone', [{ source: 'computed', change: 'added', issue_id: null, field: 'decision' }]],
-    ['a computed drop alone', [{ source: 'computed', change: 'dropped', issue_id: 'I4', field: 'decision', retained: false }]],
-    ['a hard rejection put back alone', [{ source: 'computed', change: 'dropped', issue_id: 'I3', field: 'decision', retained: true }]],
-    ['a computed replacement alone', [{ source: 'computed', change: 'replaced', issue_id: 'I2', field: 'replacement_text' }]],
-    ['a change the critic stated itself alone', [{ source: 'critic', issue_id: 'I1', field: 'rationale' }]],
-  ])('a delta carrying only overrides (%s) shows the indicator and suppresses the automatic save', async (_label, overrides) => {
-    const fetchMock = stubFetch(doneRoutes({ dispositions: [], overrides }));
+    [
+      'a computed added issue alone',
+      [{ source: 'computed', change: 'added', issue_id: null, field: 'decision' }],
+    ],
+    [
+      'a computed drop alone',
+      [
+        {
+          source: 'computed',
+          change: 'dropped',
+          issue_id: 'I4',
+          field: 'decision',
+          retained: false,
+        },
+      ],
+    ],
+    [
+      'a hard rejection put back alone',
+      [
+        {
+          source: 'computed',
+          change: 'dropped',
+          issue_id: 'I3',
+          field: 'decision',
+          retained: true,
+        },
+      ],
+    ],
+    [
+      'a computed replacement alone',
+      [{ source: 'computed', change: 'replaced', issue_id: 'I2', field: 'replacement_text' }],
+    ],
+    [
+      'a change the critic stated itself alone',
+      [{ source: 'critic', issue_id: 'I1', field: 'rationale' }],
+    ],
+  ])(
+    'a delta carrying only overrides (%s) shows the indicator and suppresses the automatic save',
+    async (_label, overrides) => {
+      const fetchMock = stubFetch(doneRoutes({ dispositions: [], overrides }));
 
-    await submitAndReachResult();
+      await submitAndReachResult();
 
-    await screen.findByTestId('review-critic-delta');
-    expect(screen.getByTestId('review-ready-announcement').textContent).toContain(
-      'adversarial critic flagged this review',
-    );
-    expect(fetchedPaths(fetchMock)).not.toContain('/api/reviews/rev-448/output');
-    expect(anchorClickSpy).not.toHaveBeenCalled();
-  });
+      await screen.findByTestId('review-critic-delta');
+      expect(screen.getByTestId('review-ready-announcement').textContent).toContain(
+        'adversarial critic flagged this review',
+      );
+      expect(fetchedPaths(fetchMock)).not.toContain('/api/reviews/rev-448/output');
+      expect(anchorClickSpy).not.toHaveBeenCalled();
+    },
+  );
 
   it('the indicator renders each override count the receipt prints for the real record', async () => {
     stubFetch(doneRoutes({ dispositions: [], overrides: RECONCILER_OVERRIDES }));
@@ -433,13 +463,13 @@ describe('completion handoff — the gate keys on `critic_delta.overrides` (issu
     await submitAndReachResult();
 
     expect(screen.queryByTestId('review-critic-delta')).toBeNull();
-    await waitFor(() =>
-      expect(fetchedPaths(fetchMock)).toContain('/api/reviews/rev-448/output'),
-    );
+    await waitFor(() => expect(fetchedPaths(fetchMock)).toContain('/api/reviews/rev-448/output'));
   });
 
   it('still gates on the deprecated arrays while the overrides record nothing', async () => {
-    const fetchMock = stubFetch(doneRoutes({ overrides: [], added_issues: [{ topic: 'indemnity' }] }));
+    const fetchMock = stubFetch(
+      doneRoutes({ overrides: [], added_issues: [{ topic: 'indemnity' }] }),
+    );
 
     await submitAndReachResult();
 

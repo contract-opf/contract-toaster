@@ -187,11 +187,17 @@ def test_lineage_record_carries_prompt_omissions(failures: list[str]) -> None:
         return
     kinds = " ".join(prompt_omissions.keys())
     if "posture" not in kinds:
-        failures.append(f"[5c] expected a 'posture' omission recorded; got keys {list(prompt_omissions)!r}")
+        failures.append(
+            f"[5c] expected a 'posture' omission recorded; got keys {list(prompt_omissions)!r}"
+        )
     if "binding" not in kinds:
-        failures.append(f"[5d] expected a 'binding' omission recorded; got keys {list(prompt_omissions)!r}")
+        failures.append(
+            f"[5d] expected a 'binding' omission recorded; got keys {list(prompt_omissions)!r}"
+        )
     if "guidance" not in kinds:
-        failures.append(f"[5e] expected a 'guidance' omission recorded; got keys {list(prompt_omissions)!r}")
+        failures.append(
+            f"[5e] expected a 'guidance' omission recorded; got keys {list(prompt_omissions)!r}"
+        )
     # Substance-free: counts only, never a value that looks like it could be
     # document/clause text (a plain int per kind, not a nested dict/list of
     # strings pulled from the document).
@@ -222,9 +228,13 @@ def test_lineage_record_omits_nothing_extra_for_a_full_playbook(failures: list[s
     record = knowledge.lineage_record()
     prompt_omissions = record.get("prompt_omissions") or {}
     if any(k.startswith("posture") for k in prompt_omissions):
-        failures.append(f"[6a] full fixture has real posture; must not record a posture omission: {prompt_omissions!r}")
+        failures.append(
+            f"[6a] full fixture has real posture; must not record a posture omission: {prompt_omissions!r}"
+        )
     if any(k.startswith("binding") for k in prompt_omissions):
-        failures.append(f"[6b] full fixture has a real Floor invariant; must not record a binding omission: {prompt_omissions!r}")
+        failures.append(
+            f"[6b] full fixture has a real Floor invariant; must not record a binding omission: {prompt_omissions!r}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -330,9 +340,13 @@ def test_run_review_surfaces_opf_knowledge_lineage(failures: list[str]) -> None:
         return
     prompt_omissions = lineage.get("prompt_omissions") or {}
     if not any(k.startswith("posture") for k in prompt_omissions):
-        failures.append(f"[7c] expected a posture omission on the result's lineage record: {prompt_omissions!r}")
+        failures.append(
+            f"[7c] expected a posture omission on the result's lineage record: {prompt_omissions!r}"
+        )
     if not any(k.startswith("binding") for k in prompt_omissions):
-        failures.append(f"[7d] expected a binding omission on the result's lineage record: {prompt_omissions!r}")
+        failures.append(
+            f"[7d] expected a binding omission on the result's lineage record: {prompt_omissions!r}"
+        )
 
 
 def test_analysis_fields_allowlist_carries_the_lineage_key(failures: list[str]) -> None:

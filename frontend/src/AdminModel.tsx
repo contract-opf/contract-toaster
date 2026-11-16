@@ -171,8 +171,7 @@ const ROLE_LABEL: Record<Role, string> = {
 };
 
 const ROLE_DESCRIPTION: Record<Role, string> = {
-  primary:
-    'the initial review: reads the contract and the playbook and proposes the markup',
+  primary: 'the initial review: reads the contract and the playbook and proposes the markup',
   critic:
     "the senior reviewer: reads the contract, the playbook and the reviewer's proposed changes, and has the last word on what goes into the redline",
 };
@@ -221,11 +220,7 @@ const USD_MAX_DECIMALS = 8;
 
 export function formatUsd(amount: number): string {
   let decimals = USD_MIN_DECIMALS;
-  while (
-    amount > 0 &&
-    decimals < USD_MAX_DECIMALS &&
-    Number(amount.toFixed(decimals)) === 0
-  ) {
+  while (amount > 0 && decimals < USD_MAX_DECIMALS && Number(amount.toFixed(decimals)) === 0) {
     decimals += 1;
   }
   return `$${amount.toFixed(decimals)}`;
@@ -241,11 +236,11 @@ function isModelSelectionSettings(data: unknown): data is ModelSelectionSettings
   const candidate = data as Partial<ModelSelectionSettings> | null | undefined;
   return Boolean(
     candidate &&
-      Array.isArray(candidate.selectable) &&
-      candidate.default_primary &&
-      candidate.default_critic &&
-      candidate.pricing_basis_primary &&
-      candidate.pricing_basis_critic,
+    Array.isArray(candidate.selectable) &&
+    candidate.default_primary &&
+    candidate.default_critic &&
+    candidate.pricing_basis_primary &&
+    candidate.pricing_basis_critic,
   );
 }
 
@@ -352,7 +347,9 @@ function ModelRoleField({
               marginBottom: '0.5rem',
             }}
           >
-            <span style={{ fontWeight: 600, fontSize: 'var(--ct-text-sm)' }}>{chosen.display_name}</span>
+            <span style={{ fontWeight: 600, fontSize: 'var(--ct-text-sm)' }}>
+              {chosen.display_name}
+            </span>
             <CtChip
               variant={
                 chosen.tier === 'Highest'
@@ -601,9 +598,7 @@ export default function AdminModel({
         setApiKey('');
         setNotice('Key saved. New reviews will use it from now on.');
       } catch (err) {
-        setActionError(
-          toUserMessage(err, "We couldn't save that key. Please try again."),
-        );
+        setActionError(toUserMessage(err, "We couldn't save that key. Please try again."));
       } finally {
         setSaving(false);
       }
@@ -636,9 +631,7 @@ export default function AdminModel({
           : 'Saved key cleared. No key is configured, so reviews will fail until you set one.',
       );
     } catch (err) {
-      setActionError(
-        toUserMessage(err, "We couldn't clear that key. Please try again."),
-      );
+      setActionError(toUserMessage(err, "We couldn't clear that key. Please try again."));
     } finally {
       setSaving(false);
     }
@@ -696,9 +689,7 @@ export default function AdminModel({
         <CtCard data-testid="admin-model-selection-body">
           {/* eslint-disable-next-line @typescript-eslint/no-misused-promises */}
           <form onSubmit={handleSaveModels} className="ct-stack">
-            <p>
-              Every review runs twice, and you pick the model for each pass separately.
-            </p>
+            <p>Every review runs twice, and you pick the model for each pass separately.</p>
             <p data-testid="admin-model-role-primary-description">
               <strong>{ROLE_LABEL.primary}</strong> — {ROLE_DESCRIPTION.primary}
             </p>
@@ -706,21 +697,20 @@ export default function AdminModel({
               <strong>{ROLE_LABEL.critic}</strong> — {ROLE_DESCRIPTION.critic}
             </p>
             <p>
-              The critic should be at least as capable as the reviewer: it reads the
-              reviewer&apos;s work and has the final say, so a weaker critic limits the
-              quality of the redline.
+              The critic should be at least as capable as the reviewer: it reads the reviewer&apos;s
+              work and has the final say, so a weaker critic limits the quality of the redline.
             </p>
             <p data-testid="admin-model-cache-reuse-note">
-              By default both passes run on the same model, so the critic reuses the
-              reviewer&apos;s cached playbook and contract. Picking two different models
-              loses that reuse within each review.
+              By default both passes run on the same model, so the critic reuses the reviewer&apos;s
+              cached playbook and contract. Picking two different models loses that reuse within
+              each review.
             </p>
 
             <CtBanner variant="muted" data-testid="admin-model-tier-caveat">
               Prices are worked out from this deployment&apos;s own cost model for a typical
-              ten-page agreement — the document is only a slice of what each pass reads, so
-              they don&apos;t scale per page. Tier labels are our assessment of relative
-              capability, not a benchmark score.
+              ten-page agreement — the document is only a slice of what each pass reads, so they
+              don&apos;t scale per page. Tier labels are our assessment of relative capability, not
+              a benchmark score.
             </CtBanner>
 
             {/* Issue #607 (#602 split): the two role selects are the
@@ -821,9 +811,8 @@ export default function AdminModel({
         <CtCard data-testid="admin-model-unavailable">
           <div className="ct-stack">
             <p>
-              This deployment doesn&apos;t manage a model API key here. It reviews documents
-              through its own configured model provider, set by whoever operates the
-              deployment.
+              This deployment doesn&apos;t manage a model API key here. It reviews documents through
+              its own configured model provider, set by whoever operates the deployment.
             </p>
           </div>
         </CtCard>
@@ -831,15 +820,15 @@ export default function AdminModel({
         <CtCard data-testid="admin-model-panel-body">
           <div className="ct-stack">
             <p>
-              One key serves everyone on this instance — every review runs against it, and
-              it bills to whichever account issued it.
+              One key serves everyone on this instance — every review runs against it, and it bills
+              to whichever account issued it.
             </p>
 
             {settings.model_provider !== 'openrouter' && (
               <CtBanner variant="warn" data-testid="admin-model-provider-warning">
                 Heads up: this deployment is currently set to use{' '}
-                <strong>{settings.model_provider}</strong>, so a key saved here won&apos;t be
-                used until it&apos;s switched to OpenRouter.
+                <strong>{settings.model_provider}</strong>, so a key saved here won&apos;t be used
+                until it&apos;s switched to OpenRouter.
               </CtBanner>
             )}
 
@@ -870,8 +859,8 @@ export default function AdminModel({
                 </>
               ) : settings.key_source === 'env' ? (
                 <>
-                  No key is saved here. Reviews are using the key from the deployment
-                  environment, fingerprint{' '}
+                  No key is saved here. Reviews are using the key from the deployment environment,
+                  fingerprint{' '}
                   <strong data-testid="admin-model-key-fingerprint">
                     <code>{settings.key_fingerprint}</code>
                   </strong>
@@ -886,7 +875,9 @@ export default function AdminModel({
 
             {/* eslint-disable-next-line @typescript-eslint/no-misused-promises */}
             <form onSubmit={handleSave} className="ct-stack">
-              <CtField label={settings.key_source === 'admin' ? 'Replace the key' : 'OpenRouter API key'}>
+              <CtField
+                label={settings.key_source === 'admin' ? 'Replace the key' : 'OpenRouter API key'}
+              >
                 <input
                   id="admin-model-key-input"
                   data-testid="admin-model-key-input"
@@ -941,4 +932,3 @@ export default function AdminModel({
     </section>
   );
 }
-

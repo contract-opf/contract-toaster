@@ -235,7 +235,8 @@ const REMOVE_HELP_TITLE =
 // the button's own text while armed, so this doubles as the "confirm copy
 // explaining the difference" itself — REMOVE_HELP_TITLE above is the fuller
 // hover explanation, this is what the button says out loud.
-const REMOVE_CONFIRM_TEXT = 'Click again to permanently delete (not reversible — use Deprovision to keep history)';
+const REMOVE_CONFIRM_TEXT =
+  'Click again to permanently delete (not reversible — use Deprovision to keep history)';
 
 /** Characters used by the "Generate" password button (issue #474). Excludes
  * visually-ambiguous characters (0/O, 1/l/I) — this is typed/read by a human
@@ -247,9 +248,10 @@ const GENERATED_PASSWORD_ALPHABET =
 function generatePassword(length = 16): string {
   const values = new Uint32Array(length);
   crypto.getRandomValues(values);
-  return Array.from(values, (n) => GENERATED_PASSWORD_ALPHABET[n % GENERATED_PASSWORD_ALPHABET.length]).join(
-    '',
-  );
+  return Array.from(
+    values,
+    (n) => GENERATED_PASSWORD_ALPHABET[n % GENERATED_PASSWORD_ALPHABET.length],
+  ).join('');
 }
 
 export default function AdminUsers({
@@ -304,9 +306,7 @@ export default function AdminUsers({
   // returns it (backend/src/users.py's public_user_view strips
   // password_hash and the create response never carries the plaintext
   // either). Cleared the moment the form is reopened or closed.
-  const [addResult, setAddResult] = useState<{ identity: string; password?: string } | null>(
-    null,
-  );
+  const [addResult, setAddResult] = useState<{ identity: string; password?: string } | null>(null);
 
   const loadUsers = useCallback(async () => {
     try {
@@ -333,8 +333,7 @@ export default function AdminUsers({
       // cannot render alongside it (issue #439).
       setUsersLoad({
         status: 'failed',
-        message:
-          toUserMessage(err, "We couldn't load the users list. Please try again."),
+        message: toUserMessage(err, "We couldn't load the users list. Please try again."),
       });
     }
   }, []);
@@ -359,8 +358,7 @@ export default function AdminUsers({
     } catch (err) {
       setSyncLoad({
         status: 'failed',
-        message:
-          toUserMessage(err, "We couldn't load the sync status. Please try again."),
+        message: toUserMessage(err, "We couldn't load the sync status. Please try again."),
       });
     }
   }, []);
@@ -522,9 +520,7 @@ export default function AdminUsers({
         // optimistic UI for an access-control mutation.
         await loadUsers();
       } catch (err) {
-        setActionError(
-          toUserMessage(err, "We couldn't update that user. Please try again."),
-        );
+        setActionError(toUserMessage(err, "We couldn't update that user. Please try again."));
       } finally {
         setPendingSub(null);
       }
@@ -554,9 +550,7 @@ export default function AdminUsers({
         }
         await loadUsers();
       } catch (err) {
-        setActionError(
-          toUserMessage(err, "We couldn't remove that user. Please try again."),
-        );
+        setActionError(toUserMessage(err, "We couldn't remove that user. Please try again."));
       } finally {
         setPendingSub(null);
       }
@@ -634,14 +628,20 @@ export default function AdminUsers({
         resetAddUserForm();
         setAddResult({ identity, password: passwordUsed });
       } catch (err) {
-        setAddError(
-          toUserMessage(err, "We couldn't add that user. Please try again."),
-        );
+        setAddError(toUserMessage(err, "We couldn't add that user. Please try again."));
       } finally {
         setAddSubmitting(false);
       }
     },
-    [activeAddUserType, addEmail, addIsAdmin, addPassword, addUsername, loadUsers, resetAddUserForm],
+    [
+      activeAddUserType,
+      addEmail,
+      addIsAdmin,
+      addPassword,
+      addUsername,
+      loadUsers,
+      resetAddUserForm,
+    ],
   );
 
   if (isForbidden) {
@@ -688,9 +688,8 @@ export default function AdminUsers({
                 ) : (
                   <div>
                     <p>
-                      Added <strong>{addResult.identity}</strong>. This password is shown once —
-                      it is never stored or returned by the server again, so share it now or
-                      it's gone:
+                      Added <strong>{addResult.identity}</strong>. This password is shown once — it
+                      is never stored or returned by the server again, so share it now or it's gone:
                     </p>
                     <p className="ct-mono" data-testid="admin-users-add-password-once">
                       {addResult.password}
@@ -901,7 +900,9 @@ export default function AdminUsers({
                                   size="sm"
                                   disabled={pendingSub === u.cognito_sub || isLastActiveAdmin}
                                   title={isLastActiveAdmin ? LAST_ADMIN_TITLE : undefined}
-                                  onClick={() => void applyUpdate(u.cognito_sub, { status: 'suspended' })}
+                                  onClick={() =>
+                                    void applyUpdate(u.cognito_sub, { status: 'suspended' })
+                                  }
                                 >
                                   Suspend
                                 </CtButton>
@@ -921,7 +922,9 @@ export default function AdminUsers({
                                   isLastActiveAdmin
                                 }
                                 title={isLastActiveAdmin ? LAST_ADMIN_TITLE : undefined}
-                                onClick={() => void applyUpdate(u.cognito_sub, { status: 'deprovisioned' })}
+                                onClick={() =>
+                                  void applyUpdate(u.cognito_sub, { status: 'deprovisioned' })
+                                }
                               >
                                 Deprovision
                               </CtButton>
@@ -931,7 +934,9 @@ export default function AdminUsers({
                                   variant="secondary"
                                   size="sm"
                                   disabled={pendingSub === u.cognito_sub}
-                                  onClick={() => void applyUpdate(u.cognito_sub, { status: 'active' })}
+                                  onClick={() =>
+                                    void applyUpdate(u.cognito_sub, { status: 'active' })
+                                  }
                                 >
                                   Reactivate
                                 </CtButton>
@@ -950,8 +955,12 @@ export default function AdminUsers({
                                 disabled={
                                   pendingSub === u.cognito_sub || (u.is_admin && isLastActiveAdmin)
                                 }
-                                title={u.is_admin && isLastActiveAdmin ? LAST_ADMIN_TITLE : undefined}
-                                onClick={() => void applyUpdate(u.cognito_sub, { is_admin: !u.is_admin })}
+                                title={
+                                  u.is_admin && isLastActiveAdmin ? LAST_ADMIN_TITLE : undefined
+                                }
+                                onClick={() =>
+                                  void applyUpdate(u.cognito_sub, { is_admin: !u.is_admin })
+                                }
                               >
                                 {u.is_admin ? 'Revoke admin' : 'Grant admin'}
                               </CtButton>
@@ -1020,7 +1029,9 @@ export default function AdminUsers({
               </CtField>
             </div>
           </CtCard>
-        ) : <div />}
+        ) : (
+          <div />
+        )}
 
         <div className="ct-stack">
           {showSyncCard && (
@@ -1028,11 +1039,15 @@ export default function AdminUsers({
               <strong>Workspace sync status</strong>
               {syncLoad.status === 'ready' ? (
                 <ul>
-                  <li data-testid="sync-last-run">Last run: {formatTimestamp(syncLoad.data.last_run_at)}</li>
+                  <li data-testid="sync-last-run">
+                    Last run: {formatTimestamp(syncLoad.data.last_run_at)}
+                  </li>
                   <li data-testid="sync-outcome">
                     Outcome:{' '}
                     {syncLoad.data.last_run_outcome === 'directory_unavailable' ? (
-                      <CtChip variant="danger">directory unavailable — fail-closed, no changes made</CtChip>
+                      <CtChip variant="danger">
+                        directory unavailable — fail-closed, no changes made
+                      </CtChip>
                     ) : syncLoad.data.last_run_outcome ? (
                       <CtChip variant="ok">{syncLoad.data.last_run_outcome}</CtChip>
                     ) : (
@@ -1071,10 +1086,11 @@ export default function AdminUsers({
               <summary>Emergency admin recovery (read-only)</summary>
               <p>
                 If the last admin is locked out, recovery does not go through this screen. A
-                dedicated, normally-unused break-glass IAM role (SSO + MFA, CloudTrail-logged)
-                can restore admin access directly. Every use is recorded in the audit log with
+                dedicated, normally-unused break-glass IAM role (SSO + MFA, CloudTrail-logged) can
+                restore admin access directly. Every use is recorded in the audit log with
                 <code> reason=emergency-override</code>. See RUNBOOK.md → &quot;Break-glass:
-                restoring admin access&quot; for the procedure. This UI cannot invoke emergency recovery.
+                restoring admin access&quot; for the procedure. This UI cannot invoke emergency
+                recovery.
               </p>
             </details>
           </CtBanner>

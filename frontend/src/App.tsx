@@ -626,10 +626,7 @@ export function AppContent({
             (Docker Compose) target — an SSO row's password lives with
             Google, not here (issue #469). */}
         {isPasswordMode() && (
-          <ChangePassword
-            controlId={CHANGE_PASSWORD_ANCHOR}
-            onChanged={handleCredentialsRotated}
-          />
+          <ChangePassword controlId={CHANGE_PASSWORD_ANCHOR} onChanged={handleCredentialsRotated} />
         )}
         <CtButton type="button" variant="ghost" onClick={signOut}>
           Sign out
@@ -665,7 +662,9 @@ export function AppContent({
         className="ct-tabpanel"
         hidden={activeTab !== 'review'}
       >
-        <ErrorBoundary name="review"><ReviewSubmission /></ErrorBoundary>
+        <ErrorBoundary name="review">
+          <ReviewSubmission />
+        </ErrorBoundary>
       </section>
 
       {/* History — mounted for every signed-in user, not inside the isAdmin
@@ -814,7 +813,9 @@ export function AppContent({
             <span data-testid="version-display">
               Version {versionInfo.version} ({versionInfo.commit.slice(0, 8)})
             </span>
-            {buildTimestamp && <span data-testid="version-built-at"> · Built {buildTimestamp}</span>}
+            {buildTimestamp && (
+              <span data-testid="version-built-at"> · Built {buildTimestamp}</span>
+            )}
           </>
         ) : (
           <span data-testid="version-loading">Loading version…</span>

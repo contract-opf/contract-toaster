@@ -191,9 +191,7 @@ class SyntheticRepo:
             env=env,
             cwd=str(self.root),
         )
-        ran = (
-            self.ledger.read_text().split() if self.ledger.exists() else []
-        )
+        ran = self.ledger.read_text().split() if self.ledger.exists() else []
         return proc, ran
 
 
@@ -407,14 +405,11 @@ def check_all_matches_skipped_is_not_green() -> list[str]:
 
         # The same selection with SKIP_INFRA unset runs it: proof the previous
         # result is SKIP_INFRA's exclusion and not an unselectable file.
-        proc, ran = repo.run(
-            "--only", "tests/test_infra_epsilon_68.py", skip_infra=False
-        )
+        proc, ran = repo.run("--only", "tests/test_infra_epsilon_68.py", skip_infra=False)
         failures += _assert(
             proc.returncode == RC_GREEN and ran == ["test_infra_epsilon_68.py"],
             "the same file runs, and is green, with SKIP_INFRA unset",
-            detail=f"returncode={proc.returncode} ran={ran}\n"
-            f"{proc.stdout + proc.stderr}",
+            detail=f"returncode={proc.returncode} ran={ran}\n{proc.stdout + proc.stderr}",
         )
     return failures
 

@@ -60,7 +60,12 @@ describe('version footer re-fetches after a backend redeploy (#592)', () => {
   it('updates the rendered footer text once the backend reports a new version', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
 
-    let currentVersion = { version: '0', commit: 'aaaaaaaa11111111', image_digest: '', uptime_seconds: 0 };
+    let currentVersion = {
+      version: '0',
+      commit: 'aaaaaaaa11111111',
+      image_digest: '',
+      uptime_seconds: 0,
+    };
     // eslint-disable-next-line @typescript-eslint/require-await
     const impl = vi.fn(async (input: RequestInfo | URL) => {
       // eslint-disable-next-line @typescript-eslint/no-base-to-string
@@ -85,7 +90,12 @@ describe('version footer re-fetches after a backend redeploy (#592)', () => {
     expect(footer).toHaveTextContent('Version 0 (aaaaaaaa)');
 
     // Simulate a backend redeploy: the endpoint now reports a new build.
-    currentVersion = { version: '1', commit: 'bbbbbbbb22222222', image_digest: '', uptime_seconds: 0 };
+    currentVersion = {
+      version: '1',
+      commit: 'bbbbbbbb22222222',
+      image_digest: '',
+      uptime_seconds: 0,
+    };
 
     // Advance past the poll interval so the app re-fetches /version on its
     // own, with no reload and no user interaction.
@@ -100,7 +110,12 @@ describe('version footer re-fetches after a backend redeploy (#592)', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
 
     let versionShouldFail = true;
-    const goodVersion = { version: '2', commit: 'cccccccc33333333', image_digest: '', uptime_seconds: 0 };
+    const goodVersion = {
+      version: '2',
+      commit: 'cccccccc33333333',
+      image_digest: '',
+      uptime_seconds: 0,
+    };
     // eslint-disable-next-line @typescript-eslint/require-await
     const impl = vi.fn(async (input: RequestInfo | URL) => {
       // eslint-disable-next-line @typescript-eslint/no-base-to-string
@@ -157,7 +172,12 @@ describe('version footer re-fetches after a backend redeploy (#592)', () => {
             ok: true,
             status: 200,
             // eslint-disable-next-line @typescript-eslint/require-await
-            json: async () => ({ version: '0', commit: 'aaaaaaaa11111111', image_digest: '', uptime_seconds: 0 }),
+            json: async () => ({
+              version: '0',
+              commit: 'aaaaaaaa11111111',
+              image_digest: '',
+              uptime_seconds: 0,
+            }),
           } as Response;
         }
         // The session lapsed while the tab sat idle: the poll now gets a 401.
@@ -253,7 +273,9 @@ describe('form-match warning grammar (#592)', () => {
     const banner = await screen.findByTestId('review-preflight-match-unlikely');
     expect(banner).not.toHaveTextContent('a Other');
     expect(banner).not.toHaveTextContent('an Other');
-    expect(banner).toHaveTextContent(/This reads like an unrecognized type, not Synthetic NDA Sample/);
+    expect(banner).toHaveTextContent(
+      /This reads like an unrecognized type, not Synthetic NDA Sample/,
+    );
   });
 
   it('renders the same natural fallback phrasing on the neutral type/side line (match: unclear)', async () => {

@@ -103,9 +103,7 @@ def _expected_hash(content: bytes) -> str:
 # valid) byte content -- exactly what these tests need to exercise re-upload/
 # hash-divergence/rollback-target behavior without caring what the content
 # actually says.
-_V1_FIXTURE_PATH = (
-    REPO_ROOT / "tests" / "fixtures" / "playbooks" / "synthetic-generic-v1.0.0.json"
-)
+_V1_FIXTURE_PATH = REPO_ROOT / "tests" / "fixtures" / "playbooks" / "synthetic-generic-v1.0.0.json"
 
 
 def _valid_v1_bytes(marker: str) -> bytes:
@@ -180,9 +178,7 @@ class PlaybookVersionRoutesTestBase(unittest.TestCase):
         _put_user(self.users_table, NON_ADMIN_SUB, is_admin=False)
 
         self.client = TestClient(backend_main.app)
-        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = (
-            lambda: self.ddb
-        )
+        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = lambda: self.ddb
         backend_main.app.dependency_overrides[backend_main.get_s3_client] = lambda: self.s3
 
     def tearDown(self):
@@ -190,9 +186,11 @@ class PlaybookVersionRoutesTestBase(unittest.TestCase):
         self._mock_aws.stop()
 
     def _authenticate_as(self, sub: str) -> None:
-        backend_main.app.dependency_overrides[backend_main.get_current_user] = (
-            lambda: {"sub": sub, "email": f"{sub}@example.com", "token_use": "access"}
-        )
+        backend_main.app.dependency_overrides[backend_main.get_current_user] = lambda: {
+            "sub": sub,
+            "email": f"{sub}@example.com",
+            "token_use": "access",
+        }
 
     # -- helpers ------------------------------------------------------------
 
@@ -251,8 +249,7 @@ class PlaybookVersionRoutesTestBase(unittest.TestCase):
 class TestRoutesMounted(unittest.TestCase):
     def _is_registered(self, path: str, method: str) -> bool:
         return any(
-            getattr(route, "path", None) == path
-            and method in getattr(route, "methods", set())
+            getattr(route, "path", None) == path and method in getattr(route, "methods", set())
             for route in backend_main.app.routes
         )
 
@@ -326,18 +323,14 @@ class TestUpload(PlaybookVersionRoutesTestBase):
     def test_client_supplied_hash_mismatch_is_400_and_writes_nothing(self):
         self._authenticate_as(ADMIN_SUB)
         content = b"real-bytes"
-        resp = self._upload_via_route(
-            "1.0.0", content, content_hash="sha256:" + "0" * 64
-        )
+        resp = self._upload_via_route("1.0.0", content, content_hash="sha256:" + "0" * 64)
         self.assertEqual(resp.status_code, 400)
         self.assertIsNone(self._row("1.0.0"))
 
     def test_client_supplied_hash_match_is_accepted(self):
         self._authenticate_as(ADMIN_SUB)
         content = _valid_v1_bytes("matching-bytes")
-        resp = self._upload_via_route(
-            "1.0.0", content, content_hash=_expected_hash(content)
-        )
+        resp = self._upload_via_route("1.0.0", content, content_hash=_expected_hash(content))
         self.assertEqual(resp.status_code, 200, resp.text)
         # The stored hash is the server-computed one regardless.
         self.assertEqual(resp.json()["content_hash"], _expected_hash(content))
@@ -448,12 +441,8 @@ class TestRollback(PlaybookVersionRoutesTestBase):
 
     def test_rollback_to_never_active_version_is_409(self):
         self._authenticate_as(ADMIN_SUB)
-        self.assertEqual(
-            self._upload_via_route("1.0.0", _valid_v1_bytes("a")).status_code, 200
-        )
-        self.assertEqual(
-            self._upload_via_route("2.0.0", _valid_v1_bytes("b")).status_code, 200
-        )
+        self.assertEqual(self._upload_via_route("1.0.0", _valid_v1_bytes("a")).status_code, 200)
+        self.assertEqual(self._upload_via_route("2.0.0", _valid_v1_bytes("b")).status_code, 200)
         # Activate only v1 -- v2 stays `draft` (never active), an invalid
         # rollback target.
         pv.activate_playbook_version(

@@ -133,6 +133,7 @@ _reconciler_module = _load_module(RECONCILER_HANDLER_PATH, "_reconciler_handler_
 # In-memory fakes
 # ---------------------------------------------------------------------------
 
+
 class FakeTable:
     """Purpose-built interpreter for the specific UpdateExpressions/
     FilterExpressions exercised by reviews.py, persist/handler.py, and
@@ -154,8 +155,14 @@ class FakeTable:
             raise ClientError({"Error": {"Code": "ConditionalCheckFailedException"}}, "PutItem")
         self.items[key] = dict(Item)
 
-    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues=None,
-                     ConditionExpression=None, ExpressionAttributeNames=None):
+    def update_item(
+        self,
+        Key,
+        UpdateExpression,
+        ExpressionAttributeValues=None,
+        ConditionExpression=None,
+        ExpressionAttributeNames=None,
+    ):
         key = Key[self.key_name]
         vals = ExpressionAttributeValues or {}
 
@@ -163,7 +170,9 @@ class FakeTable:
             item = self.items.get(key)
             current_status = item.get("status") if item else None
             if current_status not in (vals.get(":pending"), vals.get(":running")):
-                raise ClientError({"Error": {"Code": "ConditionalCheckFailedException"}}, "UpdateItem")
+                raise ClientError(
+                    {"Error": {"Code": "ConditionalCheckFailedException"}}, "UpdateItem"
+                )
 
         item = self.items.setdefault(key, dict(Key))
 
@@ -172,7 +181,9 @@ class FakeTable:
             cap = item.get("daily_cap_usd_cents", vals.get(":cap"))
             amount = vals[":amount"]
             if ConditionExpression and current + amount > cap:
-                raise ClientError({"Error": {"Code": "ConditionalCheckFailedException"}}, "UpdateItem")
+                raise ClientError(
+                    {"Error": {"Code": "ConditionalCheckFailedException"}}, "UpdateItem"
+                )
             item["reserved_usd_cents"] = current + amount
             item.setdefault("daily_cap_usd_cents", vals.get(":cap"))
             return
@@ -210,8 +221,9 @@ class FakeTable:
     def delete_item(self, Key):
         self.items.pop(Key[self.key_name], None)
 
-    def scan(self, FilterExpression=None, ExpressionAttributeNames=None,
-              ExpressionAttributeValues=None):
+    def scan(
+        self, FilterExpression=None, ExpressionAttributeNames=None, ExpressionAttributeValues=None
+    ):
         vals = ExpressionAttributeValues or {}
         names = ExpressionAttributeNames or {}
         status_attr = names.get("#status", "status")
@@ -310,9 +322,7 @@ class MotoSubmissionsMixin:
 
     def submission_row(self, idempotency_key: str) -> dict:
         return (
-            self.submissions_table.get_item(
-                Key={"idempotency_key": idempotency_key}
-            ).get("Item")
+            self.submissions_table.get_item(Key={"idempotency_key": idempotency_key}).get("Item")
             or {}
         )
 
@@ -320,6 +330,7 @@ class MotoSubmissionsMixin:
 # ---------------------------------------------------------------------------
 # (a) Reservation formula: per-model rates, matches ARCHITECTURE.md's $2.46
 # ---------------------------------------------------------------------------
+
 
 class TestReservationFormulaMatchesDocumentedWorstCase(unittest.TestCase):
     def test_reservation_is_1106_cents_not_the_blended_rate_figure(self):
@@ -334,17 +345,23 @@ class TestReservationFormulaMatchesDocumentedWorstCase(unittest.TestCase):
         output over two attempts)."""
         cents = _reviews_module.compute_worst_case_reservation_usd_cents()
         self.assertEqual(cents, 1106, "Must match ARCHITECTURE.md's $11.06 worst-case/review.")
-        blended = int(round(  # noqa: RUF046
-            (1 + _reviews_module.MAX_RETRIES_PER_PASS
-             + _reviews_module.MAX_TRUNCATION_RETRIES_PER_PASS)
-            * 2
-            * (_reviews_module.MAX_INPUT_TOKENS + _reviews_module.MAX_OUTPUT_TOKENS)
-            * _reviews_module.PRIMARY_OUTPUT_RATE_USD_PER_MILLION
-            / 1_000_000
-            * 100
-        ))
+        blended = int(  # noqa: RUF046
+            round(
+                (
+                    1
+                    + _reviews_module.MAX_RETRIES_PER_PASS
+                    + _reviews_module.MAX_TRUNCATION_RETRIES_PER_PASS
+                )
+                * 2
+                * (_reviews_module.MAX_INPUT_TOKENS + _reviews_module.MAX_OUTPUT_TOKENS)
+                * _reviews_module.PRIMARY_OUTPUT_RATE_USD_PER_MILLION
+                / 1_000_000
+                * 100
+            )
+        )
         self.assertNotEqual(
-            cents, blended,
+            cents,
+            blended,
             "Must NOT reproduce the pre-fix single-blended-rate reservation.",
         )
 
@@ -433,11 +450,13 @@ class TestReservationFormulaMatchesDocumentedWorstCase(unittest.TestCase):
             persist_value = getattr(_persist_module, const_name)
             reconciler_value = getattr(_reconciler_module, const_name)
             self.assertEqual(
-                reviews_value, persist_value,
+                reviews_value,
+                persist_value,
                 f"{const_name}: reviews.py={reviews_value!r} != persist/handler.py={persist_value!r}",
             )
             self.assertEqual(
-                reviews_value, reconciler_value,
+                reviews_value,
+                reconciler_value,
                 f"{const_name}: reviews.py={reviews_value!r} != "
                 f"orphan_reconciler/handler.py={reconciler_value!r}",
             )
@@ -489,6 +508,7 @@ class TestReservationFormulaMatchesDocumentedWorstCase(unittest.TestCase):
 # (b) settle_spend() has a real caller and decrements daily_spend
 # ---------------------------------------------------------------------------
 
+
 class TestSettleSpendDecrementsDailySpend(MotoSubmissionsMixin, unittest.TestCase):
     def test_settle_spend_directly_credits_back_unspent_reservation(self):
         """Direct unit test of the canonical settle_spend(): settling a
@@ -537,11 +557,13 @@ class TestSettleSpendDecrementsDailySpend(MotoSubmissionsMixin, unittest.TestCas
             "reserved_usd_cents": reservation_cents,
             "daily_cap_usd_cents": 2000,
         }
-        self.seed_submission({
-            "idempotency_key": "idem-persist-1",
-            "review_id": review_id,
-            "spend_reservation_id": "res-persist-1",
-        })
+        self.seed_submission(
+            {
+                "idempotency_key": "idem-persist-1",
+                "review_id": review_id,
+                "spend_reservation_id": "res-persist-1",
+            }
+        )
 
         event = {
             "review_id": review_id,
@@ -581,11 +603,13 @@ class TestSettleSpendDecrementsDailySpend(MotoSubmissionsMixin, unittest.TestCas
             "reserved_usd_cents": reservation_cents,
             "daily_cap_usd_cents": 2000,
         }
-        self.seed_submission({
-            "idempotency_key": "idem-persist-2",
-            "review_id": review_id,
-            "spend_reservation_id": "res-persist-2",
-        })
+        self.seed_submission(
+            {
+                "idempotency_key": "idem-persist-2",
+                "review_id": review_id,
+                "spend_reservation_id": "res-persist-2",
+            }
+        )
 
         event = {"review_id": review_id}
         _persist_module.handler(dict(event))
@@ -614,12 +638,14 @@ class TestSettleSpendDecrementsDailySpend(MotoSubmissionsMixin, unittest.TestCas
             "reserved_usd_cents": stored,
             "daily_cap_usd_cents": 100000,
         }
-        self.seed_submission({
-            "idempotency_key": "idem-persist-stored",
-            "review_id": "review-persist-stored",
-            "spend_reservation_id": "res-persist-stored",
-            "spend_reservation_usd_cents": stored,
-        })
+        self.seed_submission(
+            {
+                "idempotency_key": "idem-persist-stored",
+                "review_id": "review-persist-stored",
+                "spend_reservation_id": "res-persist-stored",
+                "spend_reservation_usd_cents": stored,
+            }
+        )
         _persist_module.handler({"review_id": "review-persist-stored"})
         self.assertEqual(
             daily_spend_table.items[spend_date]["reserved_usd_cents"],
@@ -630,6 +656,7 @@ class TestSettleSpendDecrementsDailySpend(MotoSubmissionsMixin, unittest.TestCas
 # ---------------------------------------------------------------------------
 # (c) Orphan reconciler's dead-execution path credits daily_spend for real
 # ---------------------------------------------------------------------------
+
 
 class TestOrphanReconcilerCreditsDailySpend(MotoSubmissionsMixin, unittest.TestCase):
     def setUp(self):
@@ -652,8 +679,7 @@ class TestOrphanReconcilerCreditsDailySpend(MotoSubmissionsMixin, unittest.TestC
         happens."""
         review_id = "review-dead-settle-1"
         execution_arn = (
-            "arn:aws:states:us-east-1:123456789012:execution:contract-toaster-test:"
-            f"{review_id}"
+            f"arn:aws:states:us-east-1:123456789012:execution:contract-toaster-test:{review_id}"
         )
         reviews_table = self.ddb.Table(os.environ["REVIEWS_TABLE"])
         reviews_table.items[review_id] = {
@@ -661,12 +687,14 @@ class TestOrphanReconcilerCreditsDailySpend(MotoSubmissionsMixin, unittest.TestC
             "status": "RUNNING",
             "execution_arn": execution_arn,
         }
-        self.seed_submission({
-            "idempotency_key": "idem-dead-1",
-            "review_id": review_id,
-            "execution_arn": execution_arn,
-            "spend_reservation_id": "res-dead-1",
-        })
+        self.seed_submission(
+            {
+                "idempotency_key": "idem-dead-1",
+                "review_id": review_id,
+                "execution_arn": execution_arn,
+                "spend_reservation_id": "res-dead-1",
+            }
+        )
 
         spend_date = _today()
         reservation_cents = _reconciler_module.compute_worst_case_reservation_usd_cents()
@@ -693,8 +721,7 @@ class TestOrphanReconcilerCreditsDailySpend(MotoSubmissionsMixin, unittest.TestC
         """#33: same, on the reconciler's dead-execution path."""
         review_id = "review-dead-stored"
         execution_arn = (
-            "arn:aws:states:us-east-1:123456789012:execution:contract-toaster-test:"
-            f"{review_id}"
+            f"arn:aws:states:us-east-1:123456789012:execution:contract-toaster-test:{review_id}"
         )
         self.ddb.Table(os.environ["REVIEWS_TABLE"]).items[review_id] = {
             "review_id": review_id,
@@ -702,13 +729,15 @@ class TestOrphanReconcilerCreditsDailySpend(MotoSubmissionsMixin, unittest.TestC
             "execution_arn": execution_arn,
         }
         stored = _reconciler_module.compute_worst_case_reservation_usd_cents() + 77
-        self.seed_submission({
-            "idempotency_key": "idem-dead-stored",
-            "review_id": review_id,
-            "execution_arn": execution_arn,
-            "spend_reservation_id": "res-dead-stored",
-            "spend_reservation_usd_cents": stored,
-        })
+        self.seed_submission(
+            {
+                "idempotency_key": "idem-dead-stored",
+                "review_id": review_id,
+                "execution_arn": execution_arn,
+                "spend_reservation_id": "res-dead-stored",
+                "spend_reservation_usd_cents": stored,
+            }
+        )
         spend_date = _today()
         daily_spend_table = self.ddb.Table(os.environ["DAILY_SPEND_TABLE"])
         daily_spend_table.items[spend_date] = {

@@ -24,15 +24,27 @@ TERMS = "# invented terms for this test\nZorblax Holdings\nQuillfeather\n"
 
 
 def _env(**extra: str) -> dict[str, str]:
-    env = {k: v for k, v in os.environ.items() if k not in ("CI", "LAND_TO_MAIN", "CONTRACT_TOASTER_LOOP", "GIT_DIR")}
-    env.update({"GIT_AUTHOR_NAME": "T", "GIT_AUTHOR_EMAIL": "t@example.invalid",
-                "GIT_COMMITTER_NAME": "T", "GIT_COMMITTER_EMAIL": "t@example.invalid"})
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("CI", "LAND_TO_MAIN", "CONTRACT_TOASTER_LOOP", "GIT_DIR")
+    }
+    env.update(
+        {
+            "GIT_AUTHOR_NAME": "T",
+            "GIT_AUTHOR_EMAIL": "t@example.invalid",
+            "GIT_COMMITTER_NAME": "T",
+            "GIT_COMMITTER_EMAIL": "t@example.invalid",
+        }
+    )
     env.update(extra)
     return env
 
 
 def _git(repo: Path, *args: str) -> str:
-    return subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, check=True, env=_env()).stdout.strip()
+    return subprocess.run(
+        ["git", *args], cwd=repo, capture_output=True, text=True, check=True, env=_env()
+    ).stdout.strip()
 
 
 def _repo(tmp: Path) -> Path:
@@ -40,7 +52,9 @@ def _repo(tmp: Path) -> Path:
     repo.mkdir()
     _git(repo, "init", "-b", "main")
     (repo / "scripts").mkdir()
-    (repo / "scripts" / "pre-push-confidentiality.py").write_text(SCANNER.read_text(encoding="utf-8"), encoding="utf-8")
+    (repo / "scripts" / "pre-push-confidentiality.py").write_text(
+        SCANNER.read_text(encoding="utf-8"), encoding="utf-8"
+    )
     (repo / ".githooks").mkdir()
     (repo / ".githooks" / "pre-push").write_text(HOOK.read_text(encoding="utf-8"), encoding="utf-8")
     (repo / "a.txt").write_text("hello\n", encoding="utf-8")
@@ -56,13 +70,19 @@ def _commit(repo: Path, name: str, content: str, message: str) -> str:
     return _git(repo, "rev-parse", "HEAD")
 
 
-def _scan(repo: Path, lsha: str, rsha: str, names_dir: Path | None, **env_extra: str) -> subprocess.CompletedProcess[str]:
+def _scan(
+    repo: Path, lsha: str, rsha: str, names_dir: Path | None, **env_extra: str
+) -> subprocess.CompletedProcess[str]:
     extra = dict(env_extra)
     if names_dir is not None:
         extra["PLAYBOOK_CONFIDENTIAL_NAMES_DIR"] = str(names_dir)
     return subprocess.run(
         [sys.executable, "scripts/pre-push-confidentiality.py", "origin"],
-        cwd=repo, input=f"refs/heads/x {lsha} refs/heads/x {rsha}\n", capture_output=True, text=True, env=_env(**extra),
+        cwd=repo,
+        input=f"refs/heads/x {lsha} refs/heads/x {rsha}\n",
+        capture_output=True,
+        text=True,
+        env=_env(**extra),
     )
 
 
@@ -127,10 +147,16 @@ class Scanner(unittest.TestCase):
 
 
 class HookWiring(unittest.TestCase):
-    def _run_hook(self, repo: Path, lsha: str, rsha: str, **env: str) -> subprocess.CompletedProcess[str]:
+    def _run_hook(
+        self, repo: Path, lsha: str, rsha: str, **env: str
+    ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ["bash", ".githooks/pre-push", "origin", "git@example.invalid:o/r.git"],
-            cwd=repo, input=f"refs/heads/feat {lsha} refs/heads/feat {rsha}\n", capture_output=True, text=True, env=_env(**env),
+            cwd=repo,
+            input=f"refs/heads/feat {lsha} refs/heads/feat {rsha}\n",
+            capture_output=True,
+            text=True,
+            env=_env(**env),
         )
 
     def test_hook_blocks_a_hit_and_allows_a_clean_push(self) -> None:
@@ -145,8 +171,12 @@ class HookWiring(unittest.TestCase):
             good = _commit(repo, "g.txt", "fine\n", "add more")
             clean = self._run_hook(repo, good, bad, PLAYBOOK_CONFIDENTIAL_NAMES_DIR=str(names))
             self.assertEqual(clean.returncode, 0, clean.stderr)
-            whole_range = self._run_hook(repo, good, base, PLAYBOOK_CONFIDENTIAL_NAMES_DIR=str(names))
-            self.assertNotEqual(whole_range.returncode, 0, "the earlier commit of the range still hits")
+            whole_range = self._run_hook(
+                repo, good, base, PLAYBOOK_CONFIDENTIAL_NAMES_DIR=str(names)
+            )
+            self.assertNotEqual(
+                whole_range.returncode, 0, "the earlier commit of the range still hits"
+            )
 
     def test_hook_scans_even_when_the_main_guard_is_lifted(self) -> None:
         with tempfile.TemporaryDirectory() as t:
@@ -155,9 +185,16 @@ class HookWiring(unittest.TestCase):
             base = _git(repo, "rev-parse", "HEAD")
             bad = _commit(repo, "f.txt", "Zorblax Holdings\n", "add")
             result = subprocess.run(
-                ["bash", ".githooks/pre-push", "origin", "u"], cwd=repo, capture_output=True, text=True,
+                ["bash", ".githooks/pre-push", "origin", "u"],
+                cwd=repo,
+                capture_output=True,
+                text=True,
                 input=f"refs/heads/main {bad} refs/heads/main {base}\n",
-                env=_env(LAND_TO_MAIN="1", CONTRACT_TOASTER_LOOP="1", PLAYBOOK_CONFIDENTIAL_NAMES_DIR=str(names)),
+                env=_env(
+                    LAND_TO_MAIN="1",
+                    CONTRACT_TOASTER_LOOP="1",
+                    PLAYBOOK_CONFIDENTIAL_NAMES_DIR=str(names),
+                ),
             )
         self.assertNotEqual(result.returncode, 0)
 
@@ -179,7 +216,9 @@ class HookWiring(unittest.TestCase):
             repo, names = _repo(tmp), _terms(tmp)
             base = _git(repo, "rev-parse", "HEAD")
             tip = _commit(repo, "f.txt", "Zorblax Holdings\n", "add")
-            result = self._run_hook(repo, tip, base, CI="1", PLAYBOOK_CONFIDENTIAL_NAMES_DIR=str(names))
+            result = self._run_hook(
+                repo, tip, base, CI="1", PLAYBOOK_CONFIDENTIAL_NAMES_DIR=str(names)
+            )
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_the_main_guard_still_works(self) -> None:
@@ -187,8 +226,12 @@ class HookWiring(unittest.TestCase):
             repo = _repo(Path(t))
             sha = _git(repo, "rev-parse", "HEAD")
             result = subprocess.run(
-                ["bash", ".githooks/pre-push", "origin", "u"], cwd=repo, capture_output=True, text=True,
-                input=f"refs/heads/x {sha} refs/heads/main {ZERO}\n", env=_env(),
+                ["bash", ".githooks/pre-push", "origin", "u"],
+                cwd=repo,
+                capture_output=True,
+                text=True,
+                input=f"refs/heads/x {sha} refs/heads/main {ZERO}\n",
+                env=_env(),
             )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("LAND_TO_MAIN=1", result.stderr)

@@ -416,36 +416,35 @@ describe('#77 route 2 — every classified submit rejection, with nothing burnt'
       // actually enforces, not a rounder one.
       `Upload exceeds the maximum allowed size of ${25 * 1024 * 1024} bytes.`,
     ],
-    [
-      'the OOXML gauntlet',
-      400,
-      'File could not be opened as a valid ZIP/OOXML container.',
-    ],
+    ['the OOXML gauntlet', 400, 'File could not be opened as a valid ZIP/OOXML container.'],
     ['no active playbook', 503, 'no active playbook'],
     [
       'the daily cap',
       429,
       'Daily spend limit reached. Try again after the cap resets (UTC midnight).',
     ],
-  ])('renders the classified refusal for %s and burns nothing', async (_label, status, detailText) => {
-    const server = stubServer({ 'POST /api/reviews': refuse(status, detailText) });
+  ])(
+    'renders the classified refusal for %s and burns nothing',
+    async (_label, status, detailText) => {
+      const server = stubServer({ 'POST /api/reviews': refuse(status, detailText) });
 
-    await submitADocument();
+      await submitADocument();
 
-    const banner = await screen.findByTestId('review-submit-error');
-    expect(banner).toHaveTextContent(detailText);
-    // Each refusal is its OWN copy: a cap is not a corrupt file.
-    expect(banner.textContent ?? '').not.toContain("We couldn't submit");
+      const banner = await screen.findByTestId('review-submit-error');
+      expect(banner).toHaveTextContent(detailText);
+      // Each refusal is its OWN copy: a cap is not a corrupt file.
+      expect(banner.textContent ?? '').not.toContain("We couldn't submit");
 
-    // Nothing was started, so nothing can have burnt: no review is attached,
-    // the appliance is back to holding a document, and the burnt-toast
-    // treatment is nowhere on screen.
-    await waitFor(() => expect(consoleStatus()).toBe('loaded'));
-    expect(screen.queryByTestId('review-id-row')).toBeNull();
-    expect(screen.queryByTestId('toaster-state-error')).toBeNull();
-    expect(screen.queryByTestId('review-retry-button')).toBeNull();
-    expect(server.countOf(`GET ${DETAIL_PATH}`)).toBe(0);
-  });
+      // Nothing was started, so nothing can have burnt: no review is attached,
+      // the appliance is back to holding a document, and the burnt-toast
+      // treatment is nowhere on screen.
+      await waitFor(() => expect(consoleStatus()).toBe('loaded'));
+      expect(screen.queryByTestId('review-id-row')).toBeNull();
+      expect(screen.queryByTestId('toaster-state-error')).toBeNull();
+      expect(screen.queryByTestId('review-retry-button')).toBeNull();
+      expect(server.countOf(`GET ${DETAIL_PATH}`)).toBe(0);
+    },
+  );
 
   it('shows fixed copy — never the raw response — when the server classified nothing', async () => {
     // An HTML error page from in front of the app: `readErrorDetail`'s parse

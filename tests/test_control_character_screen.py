@@ -139,8 +139,7 @@ def test_every_screened_class_fails_closed(failures: list) -> None:
             )
         if report.get("status") != "ERROR":
             failures.append(
-                f"U+{codepoint:04X} ({name}): expected "
-                f"status=ERROR, got {report.get('status')!r}"
+                f"U+{codepoint:04X} ({name}): expected status=ERROR, got {report.get('status')!r}"
             )
 
         reason = dss.classify_unnormalizable_reason(report)
@@ -163,9 +162,7 @@ def test_non_leading_bom_fails_closed_but_a_leading_one_does_not(failures: list)
     else:
         reason = _classify(embedded)
         if reason != EXPECTED_REASON:
-            failures.append(
-                f"non-leading U+FEFF: expected {EXPECTED_REASON!r}, got {reason!r}"
-            )
+            failures.append(f"non-leading U+FEFF: expected {EXPECTED_REASON!r}, got {reason!r}")
 
     leading = normalize_input.normalize(_document("﻿" + CLEAN_CLAUSE))
     if not leading.get("normalizable"):
@@ -180,8 +177,7 @@ def test_non_leading_bom_fails_closed_but_a_leading_one_does_not(failures: list)
         failures.append("find_suspicious_control_characters() flagged a leading BOM")
     if normalize_input.find_suspicious_control_characters("ab﻿c") != [2]:
         failures.append(
-            "find_suspicious_control_characters() did not report a non-leading "
-            "BOM at its offset"
+            "find_suspicious_control_characters() did not report a non-leading BOM at its offset"
         )
 
 
@@ -193,13 +189,9 @@ def test_non_leading_bom_fails_closed_but_a_leading_one_does_not(failures: list)
 def test_a_clean_document_is_unaffected(failures: list) -> None:
     result = normalize_input.normalize(_document(CLEAN_CLAUSE))
     if not result.get("normalizable"):
-        failures.append(
-            f"a clean document failed closed: {result.get('normalization_notes')!r}"
-        )
+        failures.append(f"a clean document failed closed: {result.get('normalization_notes')!r}")
     elif result.get("clean_body") != f"Governing Law: {CLEAN_CLAUSE}":
-        failures.append(
-            f"a clean document's body was altered: {result.get('clean_body')!r}"
-        )
+        failures.append(f"a clean document's body was altered: {result.get('clean_body')!r}")
 
 
 def test_allowed_characters_are_never_flagged(failures: list) -> None:
@@ -210,8 +202,7 @@ def test_allowed_characters_are_never_flagged(failures: list) -> None:
         result = normalize_input.normalize(_document(text))
         if not result.get("normalizable"):
             failures.append(
-                f"a document containing {name} failed closed: "
-                f"{result.get('normalization_notes')!r}"
+                f"a document containing {name} failed closed: {result.get('normalization_notes')!r}"
             )
         elif char not in (result.get("clean_body") or ""):
             failures.append(
@@ -287,9 +278,7 @@ def test_field_code_disposition_note_never_echoes_screened_text(failures: list) 
     if hostile_field_text in notes:
         failures.append("the disposition note echoed the screened field text back verbatim")
     if _classify(result) != EXPECTED_REASON:
-        failures.append(
-            f"field-code path: expected {EXPECTED_REASON!r}, got {_classify(result)!r}"
-        )
+        failures.append(f"field-code path: expected {EXPECTED_REASON!r}, got {_classify(result)!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -361,9 +350,7 @@ def test_the_smoke_tool_reports_the_new_reason_code(failures: list) -> None:
     )
     clean_result = dss.scan_document(clean_docx)
     if clean_result.get("outcome") != "normalized":
-        failures.append(
-            f"scan_document() refused a clean, NBSP-bearing document: {clean_result!r}"
-        )
+        failures.append(f"scan_document() refused a clean, NBSP-bearing document: {clean_result!r}")
 
 
 # ---------------------------------------------------------------------------

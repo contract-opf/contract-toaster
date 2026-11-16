@@ -132,8 +132,6 @@ describe('AdminUsers — rows that have never signed in (#452)', () => {
 
     const tr = await screen.findByTestId(`user-row-${SIGNED_IN.cognito_sub}`);
     expect(tr.textContent).not.toContain('never');
-    expect(tr.textContent).toContain(
-      new Date(SIGNED_IN.last_auth_at! * 1000).toLocaleString(),
-    );
+    expect(tr.textContent).toContain(new Date(SIGNED_IN.last_auth_at! * 1000).toLocaleString());
   });
 });

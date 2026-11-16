@@ -94,12 +94,11 @@ class _MotoReviewsTestCase(unittest.TestCase):
 # Tests
 # ---------------------------------------------------------------------------
 
+
 class TestRecordDisposition(_MotoReviewsTestCase):
     def test_accepted_outcome_is_recorded_against_the_review(self):
         self._seed_review("review-1", "owner-1", "DONE")
-        result = _disposition_module.record_disposition(
-            "review-1", "ACCEPTED", self.ddb
-        )
+        result = _disposition_module.record_disposition("review-1", "ACCEPTED", self.ddb)
         self.assertEqual(result["attorney_disposition"], "ACCEPTED")
         self.assertEqual(self._stored("review-1")["attorney_disposition"], "ACCEPTED")
 
@@ -114,7 +113,9 @@ class TestRecordDisposition(_MotoReviewsTestCase):
             note="Attorney narrowed the indemnification carve-out further.",
         )
         self.assertEqual(result["attorney_disposition"], "EDITED")
-        self.assertEqual(result["attorney_disposition_reason_codes"], ["missed-nuance", "over-flag"])
+        self.assertEqual(
+            result["attorney_disposition_reason_codes"], ["missed-nuance", "over-flag"]
+        )
         self.assertEqual(result["attorney_disposition_topic_ids"], ["indemnification"])
         self.assertEqual(
             result["attorney_disposition_note"],
@@ -179,8 +180,7 @@ class TestLegalTriageQueue(_MotoReviewsTestCase):
         self.assertGreater(
             len(dispositionable),
             1,
-            "this test only means something while more than one status is "
-            "dispositionable",
+            "this test only means something while more than one status is dispositionable",
         )
         for index, status_ in enumerate(dispositionable):
             review_id = f"review-term-{index}"
@@ -219,7 +219,9 @@ class TestDispositionAwaitingCount(_MotoReviewsTestCase):
         _disposition_module.record_disposition("review-z", "ACCEPTED", self.ddb)
 
         count = _disposition_module.count_reviews_awaiting_disposition("owner-1", self.ddb)
-        self.assertEqual(count, 2, "review-x and review-y await disposition; review-z was captured.")
+        self.assertEqual(
+            count, 2, "review-x and review-y await disposition; review-z was captured."
+        )
 
     def test_nag_is_scoped_to_owner(self):
         self._seed_review("review-m", "owner-1", "DONE")

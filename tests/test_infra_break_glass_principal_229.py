@@ -160,8 +160,10 @@ def check_synth_exits_zero() -> tuple[list[str], subprocess.CompletedProcess | N
 
 
 def check_break_glass_principal_valid() -> list[str]:
-    print("\nCheck 2: BreakGlassRole (if present) does not use a managed-policy ARN "
-          "as its Federated principal …")
+    print(
+        "\nCheck 2: BreakGlassRole (if present) does not use a managed-policy ARN "
+        "as its Federated principal …"
+    )
     failures: list[str] = []
 
     template = _load_auth_template()
@@ -191,8 +193,10 @@ def check_break_glass_principal_valid() -> list[str]:
     assume_role_policy = resource.get("Properties", {}).get("AssumeRolePolicyDocument", {})
     federated_values = _federated_principals(assume_role_policy)
 
-    print(f"  BreakGlassRole found: logical id {logical_id!r}; "
-          f"Federated principal value(s): {federated_values!r}")
+    print(
+        f"  BreakGlassRole found: logical id {logical_id!r}; "
+        f"Federated principal value(s): {federated_values!r}"
+    )
 
     bad_values = [v for v in federated_values if MANAGED_POLICY_ARN_RE.search(v)]
 

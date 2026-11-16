@@ -129,6 +129,7 @@ def _assert(condition: bool, label: str, detail: str = "") -> list[str]:
 # Check A — Cognito UserPool with username = email
 # ---------------------------------------------------------------------------
 
+
 def check_a_user_pool() -> list[str]:
     print("\nCheck A: Cognito UserPool defined with username = email …")
     failures: list[str] = []
@@ -177,6 +178,7 @@ def check_a_user_pool() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check B — Google OAuth credentials from Secrets Manager (dynamic reference)
 # ---------------------------------------------------------------------------
+
 
 def check_b_secrets_manager_dynamic_ref() -> list[str]:
     print("\nCheck B: Google OAuth credentials from Secrets Manager (dynamic reference) …")
@@ -255,6 +257,7 @@ def check_b_secrets_manager_dynamic_ref() -> list[str]:
 # Check C — Google IdP attribute mapping: email, name, sub
 # ---------------------------------------------------------------------------
 
+
 def check_c_google_idp_attribute_mapping() -> list[str]:
     print("\nCheck C: Google IdP attribute mapping (email, name, sub) …")
     failures: list[str] = []
@@ -317,6 +320,7 @@ def check_c_google_idp_attribute_mapping() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check D — User pool client with callback and logout URLs
 # ---------------------------------------------------------------------------
+
 
 def check_d_app_client_urls() -> list[str]:
     print("\nCheck D: User pool client with callback and logout URLs …")
@@ -386,6 +390,7 @@ def check_d_app_client_urls() -> list[str]:
 # Check E — Hosted UI enabled with a domain prefix
 # ---------------------------------------------------------------------------
 
+
 def check_e_hosted_ui_domain() -> list[str]:
     print("\nCheck E: Hosted UI enabled with a domain prefix …")
     failures: list[str] = []
@@ -416,6 +421,7 @@ def check_e_hosted_ui_domain() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check F — App client does NOT allow user-password sign-in
 # ---------------------------------------------------------------------------
+
 
 def check_f_no_user_password_auth() -> list[str]:
     print("\nCheck F: App client does NOT allow user-password sign-in (Google IdP only) …")
@@ -478,6 +484,7 @@ def check_f_no_user_password_auth() -> list[str]:
 # behavior.  The gate must fail if hd=teamexos.com is absent from the
 # ProviderDetails in the synthesized UserPoolIdentityProvider resource.
 # ---------------------------------------------------------------------------
+
 
 def check_g_two_layer_domain_enforcement() -> list[str]:
     print("\nCheck G: Hosted-domain enforcement in TWO layers (hd= + Lambda) …")
@@ -580,6 +587,7 @@ def check_g_two_layer_domain_enforcement() -> list[str]:
 # Check H — Pre-token Lambda: group check, JIT-create row, fail-closed
 # ---------------------------------------------------------------------------
 
+
 def check_h_pre_token_lambda_behavior() -> list[str]:
     print("\nCheck H: Pre-token Lambda behavior (group check + JIT-create + fail-closed) …")
     failures: list[str] = []
@@ -649,6 +657,7 @@ def check_h_pre_token_lambda_behavior() -> list[str]:
 # Check I — Directory API service account credentials in Secrets Manager
 # ---------------------------------------------------------------------------
 
+
 def check_i_directory_api_credentials() -> list[str]:
     print("\nCheck I: Directory API service account credentials in Secrets Manager …")
     failures: list[str] = []
@@ -680,6 +689,7 @@ def check_i_directory_api_credentials() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check J — Break-glass IAM role intentionally absent for v1 (issue #229)
 # ---------------------------------------------------------------------------
+
 
 def check_j_break_glass_role() -> list[str]:
     print(
@@ -793,6 +803,7 @@ def check_j_break_glass_role() -> list[str]:
 # Check K — admin_bootstrap CDK seed row
 # ---------------------------------------------------------------------------
 
+
 def check_k_admin_bootstrap_seed() -> list[str]:
     print("\nCheck K: admin_bootstrap seed row (email-keyed, CDK writes) …")
     failures: list[str] = []
@@ -840,6 +851,7 @@ def check_k_admin_bootstrap_seed() -> list[str]:
 # Check L — RUNBOOK.md documents break-glass procedure
 # ---------------------------------------------------------------------------
 
+
 def check_l_runbook_break_glass() -> list[str]:
     print("\nCheck L: RUNBOOK.md documents the break-glass procedure …")
     failures: list[str] = []
@@ -868,6 +880,7 @@ def check_l_runbook_break_glass() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check M — cdk synth runs cleanly with auth resources present
 # ---------------------------------------------------------------------------
+
 
 def check_m_cdk_synth() -> list[str]:
     """
@@ -909,10 +922,14 @@ def check_m_cdk_synth() -> list[str]:
     with tempfile.TemporaryDirectory(prefix="contract-toaster-gate-cdk-out-") as tmp_out:
         result = subprocess.run(  # noqa: S603
             [  # noqa: S607
-                "npx", "cdk", "synth",
-                "--context", "env=dev",
+                "npx",
+                "cdk",
+                "synth",
+                "--context",
+                "env=dev",
                 *NEUTRAL_CDK_CONTEXT,
-                "--output", tmp_out,
+                "--output",
+                tmp_out,
                 "--quiet",
             ],
             cwd=INFRA,
@@ -949,6 +966,7 @@ def check_m_cdk_synth() -> list[str]:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> int:
     print("AuthStack structural gate (issue #53)")
     print("=" * 60)
@@ -975,10 +993,7 @@ def main() -> int:
 
     print("\n" + "=" * 60)
     if all_failures:
-        print(
-            f"\nFAIL: {len(all_failures)} check(s) failed.\n"
-            "See output above for details."
-        )
+        print(f"\nFAIL: {len(all_failures)} check(s) failed.\nSee output above for details.")
         return 1
 
     print("\nPASS: all AuthStack structural checks passed.")

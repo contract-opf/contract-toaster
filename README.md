@@ -287,7 +287,7 @@ backlog.
   bash scripts/land.sh          # gates, then push + `gh pr create --fill`
   ```
 
-  `scripts/land.sh` refuses to run on `main`, runs `ruff check … && mypy`,
+  `scripts/land.sh` refuses to run on `main`, runs `ruff check … && ruff format --check … && mypy`,
   `npm test`, `scripts/check.sh` and `tests/lint-brand-free.py`, and pushes
   nothing if any of them is red. `.githooks/pre-push` refuses `git push origin main` outright
   — override a deliberate direct push with `LAND_TO_MAIN=1`. The hooks are
@@ -308,8 +308,9 @@ backlog.
   ```bash
   pip install -r requirements-dev.txt          # ruff + mypy are pinned there
   ruff check backend scripts tests infra/lambda
+  ruff format --check backend scripts tests infra/lambda   # fix: ruff format <paths>
   mypy                                         # config: [tool.mypy] in pyproject.toml
-  cd frontend && npm run lint && npm run typecheck
+  cd frontend && npm run lint && npm run format:check && npm run typecheck
   ```
 
   These are **baseline-then-ratchet** gates: green means *no NEW violations*,
@@ -321,9 +322,11 @@ backlog.
   can only shrink. Pay debt down by DELETING an annotation, never by adding
   one to new code.
 
-  The formatters (`ruff format`, `prettier`) are configured but deliberately
-  not enforced yet — a whole-tree reformat collides with the in-flight audit
-  series. Issue #90 turns them on afterwards.
+  The formatters are enforced too (issue #90): `ruff format --check` and
+  `prettier --check .` (`npm run format:check`) run in the same places, after a
+  one-time reformat listed in `.git-blame-ignore-revs`. Fix a red run with
+  `ruff format <paths>` or `npm run format -- <paths>`, then re-run `ruff check`:
+  a reflowed line can strand its trailing `# noqa`.
 
   Optional pre-commit hooks for both live in `.pre-commit-config.yaml`
   (`pre-commit install`).

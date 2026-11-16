@@ -143,11 +143,17 @@ class HoldTestBase(unittest.TestCase):
         ]
         for bucket, key in self.keys:
             self.s3.put_object(Bucket=bucket, Key=key, Body=b"x")
-        self.reviews.put_item(Item={
-            "review_id": "r-1", "status": "DONE", "owner_sub": OWNER,
-            "created_at": str(int(time.time())), "retention_window_at_creation": 90,
-            "upload_s3_key": self.keys[0][1], "output_s3_key": self.keys[1][1],
-        })
+        self.reviews.put_item(
+            Item={
+                "review_id": "r-1",
+                "status": "DONE",
+                "owner_sub": OWNER,
+                "created_at": str(int(time.time())),
+                "retention_window_at_creation": 90,
+                "upload_s3_key": self.keys[0][1],
+                "output_s3_key": self.keys[1][1],
+            }
+        )
 
     def tearDown(self) -> None:
         self._mock.stop()
@@ -238,9 +244,7 @@ class TestReleaseHold(HoldTestBase):
         self.assertNotIn(SECRET_PROVIDER_TEXT, str(ctx.exception.detail))
         self.assertTrue(self.row()["legal_hold"])
         self.assertEqual(self.tags(), [True, True, True], "untagged object 1 is re-tagged")
-        self.assertEqual(
-            [r["action"] for r in self.audit_rows()], ["legal_hold_set"]
-        )
+        self.assertEqual([r["action"] for r in self.audit_rows()], ["legal_hold_set"])
 
     def test_an_audit_failure_on_release_keeps_the_hold(self) -> None:
         with self.assertRaises(HTTPException) as ctx:

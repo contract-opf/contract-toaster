@@ -17,7 +17,9 @@ function docxFile(): File {
 
 let posts: string[] = [];
 
-function mockFetch(options: { preflightMatch?: 'likely' | 'unlikely'; preflightGuess?: string } = {}) {
+function mockFetch(
+  options: { preflightMatch?: 'likely' | 'unlikely'; preflightGuess?: string } = {},
+) {
   posts = [];
   // eslint-disable-next-line @typescript-eslint/require-await
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -151,34 +153,28 @@ describe('Review Tab Keyboard Shortcuts & Preflight Switch', () => {
     fireEvent.keyDown(window, { key: '[' });
   });
 
-  it(
-    'applies the recommendation itself, leaving no switch key to press (#730)',
-    async () => {
-      // An earlier test in this file leaves a remembered playbook behind
-      // (issue #489 persists every selection), and the point here is that the
-      // dial MOVES — so start from the catalog default rather than whatever
-      // the last render stored.
-      window.localStorage.clear();
-      vi.stubGlobal(
-        'fetch',
-        mockFetch({ preflightMatch: 'unlikely', preflightGuess: 'Mutual NDA' }),
-      );
-      render(<ReviewSubmission />);
+  it('applies the recommendation itself, leaving no switch key to press (#730)', async () => {
+    // An earlier test in this file leaves a remembered playbook behind
+    // (issue #489 persists every selection), and the point here is that the
+    // dial MOVES — so start from the catalog default rather than whatever
+    // the last render stored.
+    window.localStorage.clear();
+    vi.stubGlobal('fetch', mockFetch({ preflightMatch: 'unlikely', preflightGuess: 'Mutual NDA' }));
+    render(<ReviewSubmission />);
 
-      // Initial selection is the first active playbook (eiaa).
-      const dialFor = (): HTMLSelectElement =>
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
-        screen.getByTestId('review-playbook-dial') as HTMLSelectElement;
-      await waitFor(() => expect(dialFor().value).toBe('eiaa'));
+    // Initial selection is the first active playbook (eiaa).
+    const dialFor = (): HTMLSelectElement =>
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+      screen.getByTestId('review-playbook-dial') as HTMLSelectElement;
+    await waitFor(() => expect(dialFor().value).toBe('eiaa'));
 
-      fireEvent.change(screen.getByTestId('review-file-input'), {
-        target: { files: [docxFile()] },
-      });
+    fireEvent.change(screen.getByTestId('review-file-input'), {
+      target: { files: [docxFile()] },
+    });
 
-      // The dial simply reflects the choice — no banner, no confirmation, and
-      // no "Switch to …" key, because the switch has already happened.
-      await waitFor(() => expect(dialFor().value).toBe('nda'));
-      expect(screen.queryByTestId('review-preflight-switch-playbook')).toBeNull();
-    },
-  );
+    // The dial simply reflects the choice — no banner, no confirmation, and
+    // no "Switch to …" key, because the switch has already happened.
+    await waitFor(() => expect(dialFor().value).toBe('nda'));
+    expect(screen.queryByTestId('review-preflight-switch-playbook')).toBeNull();
+  });
 });

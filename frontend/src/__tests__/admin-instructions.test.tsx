@@ -115,9 +115,9 @@ describe('AdminInstructions — selection is prop-driven', () => {
 
     await screen.findByTestId('admin-instructions-text');
     expect(screen.getByText('Standing instructions — EIAA')).toBeInTheDocument();
-    expect(requests.some((r) => r.method === 'GET' && r.pathname.endsWith('/eiaa/instructions'))).toBe(
-      true,
-    );
+    expect(
+      requests.some((r) => r.method === 'GET' && r.pathname.endsWith('/eiaa/instructions')),
+    ).toBe(true);
   });
 });
 
@@ -138,7 +138,12 @@ describe('AdminInstructions — status line', () => {
         suffix: '/instructions',
         status: 200,
         body: {
-          current: { version: 3, text: 'Flag auto-renewal.', saved_by: 'local:admin', saved_at: 1_700_000_000 },
+          current: {
+            version: 3,
+            text: 'Flag auto-renewal.',
+            saved_by: 'local:admin',
+            saved_at: 1_700_000_000,
+          },
           history: [],
         },
       },
@@ -176,9 +181,9 @@ describe('AdminInstructions — precedence copy', () => {
     render(<AdminInstructions playbookId="eiaa" playbookDisplayName="EIAA" />);
 
     const textarea = await screen.findByTestId('admin-instructions-text');
-    expect(
-      screen.getByLabelText('Standing instructions for this contract type (optional)'),
-    ).toBe(textarea);
+    expect(screen.getByLabelText('Standing instructions for this contract type (optional)')).toBe(
+      textarea,
+    );
 
     // The hint is wired via aria-describedby, same pattern asserted for the
     // Review screen's own guidance field in review-guidance.test.tsx.
@@ -189,7 +194,9 @@ describe('AdminInstructions — precedence copy', () => {
 
     expect(hint).toContain("govern over the playbook's positions");
     expect(hint).toContain('hard requirements');
-    expect(hint).toContain('The instructions box on the Review screen still wins for a single review');
+    expect(hint).toContain(
+      'The instructions box on the Review screen still wins for a single review',
+    );
     expect(hint).not.toContain('will override');
   });
 
@@ -205,7 +212,9 @@ describe('AdminInstructions — precedence copy', () => {
 
     // The shared constant, verbatim and once -- not a restated copy.
     expect(hint.split(UNCOVERED_CLAUSES_HINT_COPY)).toHaveLength(2);
-    expect(UNCOVERED_CLAUSES_HINT_COPY).toContain('set the direction for clauses this playbook has little or no precedent for');
+    expect(UNCOVERED_CLAUSES_HINT_COPY).toContain(
+      'set the direction for clauses this playbook has little or no precedent for',
+    );
     // It sits with the precedence copy, before the leave-blank sentence.
     expect(hint.indexOf(UNCOVERED_CLAUSES_HINT_COPY)).toBeLessThan(
       hint.indexOf('Leave blank to let the playbook speak for itself.'),
@@ -248,7 +257,12 @@ describe('AdminInstructions — saving', () => {
         suffix: '/instructions',
         status: 200,
         body: {
-          current: { version: 4, text: 'Old text.', saved_by: 'local:admin', saved_at: 1_700_000_000 },
+          current: {
+            version: 4,
+            text: 'Old text.',
+            saved_by: 'local:admin',
+            saved_at: 1_700_000_000,
+          },
           history: [],
         },
       },
@@ -295,7 +309,11 @@ describe('AdminInstructions — 409 conflict', () => {
       const url = typeof input === 'string' ? input : input.toString();
       const pathname = new URL(url, 'http://localhost').pathname;
       const method = (init?.method ?? 'GET').toUpperCase();
-      requests.push({ method, pathname, body: init?.body ? JSON.parse(init.body as string) : undefined });
+      requests.push({
+        method,
+        pathname,
+        body: init?.body ? JSON.parse(init.body as string) : undefined,
+      });
 
       if (method === 'GET' && pathname.endsWith('/instructions')) {
         getCount += 1;
@@ -309,8 +327,20 @@ describe('AdminInstructions — 409 conflict', () => {
           status: 200,
           // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({
-            current: { version: 1, text: "Someone else's edit.", saved_by: 'local:other', saved_at: 1_700_000_050 },
-            history: [{ version: 1, text: "Someone else's edit.", saved_by: 'local:other', saved_at: 1_700_000_050 }],
+            current: {
+              version: 1,
+              text: "Someone else's edit.",
+              saved_by: 'local:other',
+              saved_at: 1_700_000_050,
+            },
+            history: [
+              {
+                version: 1,
+                text: "Someone else's edit.",
+                saved_by: 'local:other',
+                saved_at: 1_700_000_050,
+              },
+            ],
           }),
         } as Response;
       }
@@ -336,8 +366,12 @@ describe('AdminInstructions — 409 conflict', () => {
     expect(conflict).toHaveTextContent(
       /Someone saved v1 while you were editing — review their version below, then re-apply your edit\./,
     );
-    expect(screen.getByTestId('admin-instructions-conflict-mine')).toHaveTextContent('My unsaved edit.');
-    expect(screen.getByTestId('admin-instructions-conflict-theirs')).toHaveTextContent("Someone else's edit.");
+    expect(screen.getByTestId('admin-instructions-conflict-mine')).toHaveTextContent(
+      'My unsaved edit.',
+    );
+    expect(screen.getByTestId('admin-instructions-conflict-theirs')).toHaveTextContent(
+      "Someone else's edit.",
+    );
 
     // The admin's draft is untouched, not silently replaced by theirs.
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
@@ -348,7 +382,12 @@ describe('AdminInstructions — 409 conflict', () => {
 });
 
 describe('AdminInstructions — history', () => {
-  const CURRENT = { version: 3, text: 'Latest text.', saved_by: 'local:admin', saved_at: 1_700_000_300 };
+  const CURRENT = {
+    version: 3,
+    text: 'Latest text.',
+    saved_by: 'local:admin',
+    saved_at: 1_700_000_300,
+  };
   const HISTORY = [
     CURRENT,
     { version: 2, text: 'Middle text.', saved_by: 'local:admin', saved_at: 1_700_000_200 },
@@ -357,7 +396,12 @@ describe('AdminInstructions — history', () => {
 
   it('lists versions newest-first and expands/collapses full text on demand', async () => {
     stubRoutes([
-      { method: 'GET', suffix: '/instructions', status: 200, body: { current: CURRENT, history: HISTORY } },
+      {
+        method: 'GET',
+        suffix: '/instructions',
+        status: 200,
+        body: { current: CURRENT, history: HISTORY },
+      },
     ]);
     render(<AdminInstructions playbookId="eiaa" playbookDisplayName="EIAA" />);
 
@@ -380,7 +424,12 @@ describe('AdminInstructions — history', () => {
 
   it('restoring an old version saves its text as a new version, not an in-place edit', async () => {
     stubRoutes([
-      { method: 'GET', suffix: '/instructions', status: 200, body: { current: CURRENT, history: HISTORY } },
+      {
+        method: 'GET',
+        suffix: '/instructions',
+        status: 200,
+        body: { current: CURRENT, history: HISTORY },
+      },
       {
         method: 'POST',
         suffix: '/instructions',
@@ -437,7 +486,9 @@ describe('AdminInstructions — layout stays one column (#610)', () => {
 describe('AdminInstructions — privilege', () => {
   it('hides itself when the per-playbook instructions read is forbidden', async () => {
     stubRoutes([{ method: 'GET', suffix: '/instructions', status: 403, body: {} }]);
-    const { container } = render(<AdminInstructions playbookId="eiaa" playbookDisplayName="EIAA" />);
+    const { container } = render(
+      <AdminInstructions playbookId="eiaa" playbookDisplayName="EIAA" />,
+    );
 
     await waitFor(() => {
       expect(container).toBeEmptyDOMElement();
@@ -446,7 +497,9 @@ describe('AdminInstructions — privilege', () => {
 
   it('hides itself when a save is forbidden', async () => {
     stubRoutes([{ method: 'POST', suffix: '/instructions', status: 403, body: {} }]);
-    const { container } = render(<AdminInstructions playbookId="eiaa" playbookDisplayName="EIAA" />);
+    const { container } = render(
+      <AdminInstructions playbookId="eiaa" playbookDisplayName="EIAA" />,
+    );
 
     await screen.findByTestId('admin-instructions-text');
     fireEvent.click(screen.getByTestId('admin-instructions-save'));

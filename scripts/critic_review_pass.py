@@ -255,7 +255,7 @@ def critic_delta_rejection(
         problems.append(
             "critic_delta.dispositions KEEPs or REVISEs first-reviewer issue(s) "
             f"{', '.join(sorted(vanished, key=_issue_key_sort))} that your own "
-            "\"issues\" do not carry -- an issue you KEEP or REVISE appears in "
+            '"issues" do not carry -- an issue you KEEP or REVISE appears in '
             "your issues with the same playbook_topic_id; one you do not stand "
             "behind is a DROP"
         )
@@ -459,9 +459,7 @@ def run_critic_pass(
     # see that function's identical comment. Issue #567 (below) is now a
     # real consumer.
     model_capabilities = (
-        model_client.capabilities(model_id)
-        if hasattr(model_client, "capabilities")
-        else None
+        model_client.capabilities(model_id) if hasattr(model_client, "capabilities") else None
     )
 
     # Issue #418: same seam as run_primary_pass -- see that function's
@@ -482,9 +480,7 @@ def run_critic_pass(
     # identical comment. Resolved once from the SAME model_capabilities
     # above, threaded into invoke() below ONLY when set.
     output_schema = (
-        _mos.project_output_schema_for_provider(
-            path=output_schema_path, notes_mode=notes_mode
-        )
+        _mos.project_output_schema_for_provider(path=output_schema_path, notes_mode=notes_mode)
         if (model_capabilities or {}).get("structured_outputs")
         else None
     )
@@ -546,13 +542,15 @@ def run_critic_pass(
     # with none selected this is the one assembly it always was.
     sent_dossiers, dossiers_dropped_over_budget = _critic_dossiers.fit_to_budget(
         list(dossiers or ()),
-        lambda selected: pp.assembled_prompt_tokens(
-            system_blocks,
-            _user_content(selected),
-            tool_spec=tool_spec,
-            output_schema=output_schema,
-        )
-        <= max_input_tokens,
+        lambda selected: (
+            pp.assembled_prompt_tokens(
+                system_blocks,
+                _user_content(selected),
+                tool_spec=tool_spec,
+                output_schema=output_schema,
+            )
+            <= max_input_tokens
+        ),
     )
     dossier_report = {
         "sent": [dossier.get("clause_id") for dossier in sent_dossiers],

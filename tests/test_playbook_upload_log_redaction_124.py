@@ -148,9 +148,7 @@ class PlaybookUploadLogRedactionTest(unittest.TestCase):
         )
 
         self.client = TestClient(backend_main.app)
-        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = (
-            lambda: self.ddb
-        )
+        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = lambda: self.ddb
         backend_main.app.dependency_overrides[backend_main.get_s3_client] = lambda: self.s3
         backend_main.app.dependency_overrides[backend_main.get_current_user] = lambda: {
             "sub": ADMIN_SUB,

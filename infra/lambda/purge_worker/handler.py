@@ -268,6 +268,7 @@ def _sweep_audit_detail(result: dict[str, Any]) -> dict[str, Any]:
 # Settings: get / dual-control retroactive-reduction gate (invariant 5)
 # ---------------------------------------------------------------------------
 
+
 def get_retention_settings() -> dict[str, Any]:
     table = _ddb().Table(RETENTION_SETTINGS_TABLE)
     resp = table.get_item(Key={"setting_id": GLOBAL_SETTING_ID})
@@ -426,6 +427,7 @@ def _apply_ready_pending_reduction(settings: dict[str, Any]) -> dict[str, Any]:
 # Purge sweep (invariants 1-4)
 # ---------------------------------------------------------------------------
 
+
 def _is_legal_held(review: dict[str, Any]) -> bool:
     return bool(review.get("legal_hold"))
 
@@ -528,9 +530,7 @@ def _review_object_targets(review: dict[str, Any]) -> list[tuple[str, str]]:
     targets: list[tuple[str, str]] = []
 
     if UPLOADS_BUCKET:
-        keys = _existing_pointer_keys(
-            review, s3, UPLOADS_BUCKET, UPLOAD_POINTER_FIELDS, "uploads"
-        )
+        keys = _existing_pointer_keys(review, s3, UPLOADS_BUCKET, UPLOAD_POINTER_FIELDS, "uploads")
         prefixes = []
         if owner_sub:
             prefixes.append(f"uploads/{owner_sub}/{review_id}/")
@@ -542,9 +542,7 @@ def _review_object_targets(review: dict[str, Any]) -> list[tuple[str, str]]:
         targets.extend((UPLOADS_BUCKET, key) for key in _dedup(keys))
 
     if OUTPUTS_BUCKET:
-        keys = _existing_pointer_keys(
-            review, s3, OUTPUTS_BUCKET, OUTPUT_POINTER_FIELDS, "outputs"
-        )
+        keys = _existing_pointer_keys(review, s3, OUTPUTS_BUCKET, OUTPUT_POINTER_FIELDS, "outputs")
         keys.extend(_list_keys(s3, OUTPUTS_BUCKET, f"outputs/{review_id}/"))
         targets.extend((OUTPUTS_BUCKET, key) for key in _dedup(keys))
 
@@ -574,9 +572,7 @@ def _log_purge_plan(review_id: str, keys: list[str], dry_run: bool) -> None:
     them (CloudWatch), and `dry_run=True` reports the same list without
     deleting anything."""
     prefix = "DRY RUN -- would purge" if dry_run else "purging"
-    logger.warning(
-        "retention sweep: %s review %s (%d object(s))", prefix, review_id, len(keys)
-    )
+    logger.warning("retention sweep: %s review %s (%d object(s))", prefix, review_id, len(keys))
     for key in keys:
         logger.info("retention sweep: %s %s", prefix, key)
 
@@ -710,13 +706,11 @@ def run_purge_sweep(dry_run: bool = False) -> dict[str, Any]:
             # scan is eventually consistent. A hold placed since must still
             # win, so re-read the row strongly consistently right before
             # acting. Mirrors backend/src/retention.py::run_purge_sweep_now.
-            current = reviews_table.get_item(
-                Key={"review_id": review_id}, ConsistentRead=True
-            ).get("Item")
+            current = reviews_table.get_item(Key={"review_id": review_id}, ConsistentRead=True).get(
+                "Item"
+            )
             if not current:
-                logger.warning(
-                    "retention sweep: review %s vanished mid-sweep; skipped", review_id
-                )
+                logger.warning("retention sweep: review %s vanished mid-sweep; skipped", review_id)
                 continue
             if _is_legal_held(current):
                 skipped_hold.append(review_id)

@@ -283,7 +283,7 @@ def _build_mime_mismatch_file() -> bytes:
 
 SETTINGS_XML_WITH_ATTACHED_TEMPLATE = (
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-    '<w:settings '
+    "<w:settings "
     'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
     'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
     '<w:attachedTemplate r:id="rId1"/>'
@@ -566,7 +566,9 @@ class TestZipBomb(unittest.TestCase):
             ctx.exception.reason_code,
             {"zip_bomb_ratio", "zip_bomb_uncompressed_size"},
         )
-        self.assertEqual(len(av.scanned_payloads), 1, "AV scan runs on raw bytes before structural checks")
+        self.assertEqual(
+            len(av.scanned_payloads), 1, "AV scan runs on raw bytes before structural checks"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -805,7 +807,7 @@ class TestMacroEnabledTemplate(unittest.TestCase):
 
 SETTINGS_XML_WITH_PAIRED_ATTACHED_TEMPLATE = (
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-    '<w:settings '
+    "<w:settings "
     'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
     'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
     # The SAME element, written in paired start/end-tag form instead of
@@ -840,7 +842,7 @@ def _build_docx_with_paired_attached_template() -> bytes:
 
 SETTINGS_XML_WITH_UNRECOGNIZED_ATTACHED_TEMPLATE = (
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-    '<w:settings '
+    "<w:settings "
     'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
     'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
     # An attachedTemplate element the strip regex deliberately does NOT
@@ -893,9 +895,7 @@ class TestAttachedTemplateSanitization(unittest.TestCase):
         # Nothing else in the archive was touched or dropped.
         original_names = set(zipfile.ZipFile(io.BytesIO(payload)).namelist())
         self.assertEqual(set(result_zf.namelist()), original_names)
-        self.assertEqual(
-            result_zf.read("word/document.xml"), DOCUMENT_XML_MINIMAL.encode("utf-8")
-        )
+        self.assertEqual(result_zf.read("word/document.xml"), DOCUMENT_XML_MINIMAL.encode("utf-8"))
 
         # The sanitization is recorded in the audit trail -- substance-free
         # (no document text, no raw template path), but says WHAT was
@@ -1030,7 +1030,6 @@ class TestAttachedTemplateSanitization(unittest.TestCase):
         self.assertIs(result, payload)
         self.assertEqual(audit.rows, [])
 
-
     def test_paired_tag_attached_template_element_leaves_no_dangling_rid(self) -> None:
         """A `<w:attachedTemplate r:id="rId1"></w:attachedTemplate>` is the
         same element as the self-closed spelling, and must be removed the
@@ -1122,7 +1121,6 @@ class TestAttachedTemplateSanitization(unittest.TestCase):
         )
         self.assertIs(twice, once)
         self.assertEqual(audit.rows, [])
-
 
     def test_unremovable_referencing_element_fails_closed(self) -> None:
         """The sanitizer must never trade a rejected upload for a CORRUPT

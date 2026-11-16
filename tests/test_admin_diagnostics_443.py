@@ -273,25 +273,31 @@ class DiagnosticsRouteTestBase(unittest.TestCase):
 class TestAdminGate(DiagnosticsRouteTestBase):
     def test_non_admin_is_forbidden(self) -> None:
         self._as_reviewer()
-        self.seed_reviews([
-            _review_row("r-1", status_value="ERROR", created_at="1000", reason="model_key_rejected")
-        ])
+        self.seed_reviews(
+            [
+                _review_row(
+                    "r-1", status_value="ERROR", created_at="1000", reason="model_key_rejected"
+                )
+            ]
+        )
         resp = self._get()
         self.assertEqual(resp.status_code, 403)
 
     def test_non_admin_response_carries_no_review_data(self) -> None:
         """A 403 that still echoed the rows would be worse than no route."""
         self._as_reviewer()
-        self.seed_reviews([
-            _review_row(
-                "r-secret",
-                status_value="ERROR",
-                created_at="1000",
-                reason="model_key_rejected",
-                failing_stage="run_review",
-                sensitive=True,
-            )
-        ])
+        self.seed_reviews(
+            [
+                _review_row(
+                    "r-secret",
+                    status_value="ERROR",
+                    created_at="1000",
+                    reason="model_key_rejected",
+                    failing_stage="run_review",
+                    sensitive=True,
+                )
+            ]
+        )
         body = self._get().text
         self.assertNotIn("r-secret", body)
         for value in SENSITIVE_FIELDS.values():
@@ -317,19 +323,21 @@ class TestWhichRowsAppear(DiagnosticsRouteTestBase):
 
     def test_succeeded_running_and_superseded_reviews_never_appear(self) -> None:
         self._as_admin()
-        self.seed_reviews([
-            _review_row("r-done", status_value="DONE", created_at="1005"),
-            _review_row("r-pending", status_value="PENDING", created_at="1004"),
-            _review_row("r-running", status_value="RUNNING", created_at="1003"),
-            _review_row("r-superseded", status_value="SUPERSEDED", created_at="1002"),
-            _review_row(
-                "r-error",
-                status_value="ERROR",
-                created_at="1001",
-                reason="model_account_out_of_credits",
-                failing_stage="run_review",
-            ),
-        ])
+        self.seed_reviews(
+            [
+                _review_row("r-done", status_value="DONE", created_at="1005"),
+                _review_row("r-pending", status_value="PENDING", created_at="1004"),
+                _review_row("r-running", status_value="RUNNING", created_at="1003"),
+                _review_row("r-superseded", status_value="SUPERSEDED", created_at="1002"),
+                _review_row(
+                    "r-error",
+                    status_value="ERROR",
+                    created_at="1001",
+                    reason="model_account_out_of_credits",
+                    failing_stage="run_review",
+                ),
+            ]
+        )
         self.assertEqual(self._ids(), ["r-error"])
 
     def test_every_failure_terminal_appears(self) -> None:
@@ -340,17 +348,21 @@ class TestWhichRowsAppear(DiagnosticsRouteTestBase):
             "MANUAL_REVIEW_REQUIRED",
             "QUARANTINED",
         ]
-        self.seed_reviews([
-            _review_row(
-                f"r-{i}",
-                status_value=s,
-                created_at=f"{1000 + i}",
-                reason="unhandled_exception",
-                failing_stage="run_review",
-            )
-            for i, s in enumerate(failure_statuses)
-        ])
-        self.assertEqual(sorted(self._ids()), sorted(f"r-{i}" for i in range(len(failure_statuses))))
+        self.seed_reviews(
+            [
+                _review_row(
+                    f"r-{i}",
+                    status_value=s,
+                    created_at=f"{1000 + i}",
+                    reason="unhandled_exception",
+                    failing_stage="run_review",
+                )
+                for i, s in enumerate(failure_statuses)
+            ]
+        )
+        self.assertEqual(
+            sorted(self._ids()), sorted(f"r-{i}" for i in range(len(failure_statuses)))
+        )
 
     def test_a_quarantined_row_as_production_actually_writes_it_carries_its_cause(self) -> None:
         """The row shape the fixtures could not produce (review of #443).
@@ -428,11 +440,13 @@ class TestWhichRowsAppear(DiagnosticsRouteTestBase):
 
     def test_newest_first(self) -> None:
         self._as_admin()
-        self.seed_reviews([
-            _review_row("r-old", status_value="ERROR", created_at="1000", reason="x"),
-            _review_row("r-new", status_value="ERROR", created_at="3000", reason="x"),
-            _review_row("r-mid", status_value="ERROR", created_at="2000", reason="x"),
-        ])
+        self.seed_reviews(
+            [
+                _review_row("r-old", status_value="ERROR", created_at="1000", reason="x"),
+                _review_row("r-new", status_value="ERROR", created_at="3000", reason="x"),
+                _review_row("r-mid", status_value="ERROR", created_at="2000", reason="x"),
+            ]
+        )
         self.assertEqual(self._ids(), ["r-new", "r-mid", "r-old"])
 
 
@@ -459,17 +473,19 @@ class TestNothingSensitiveIsEchoed(DiagnosticsRouteTestBase):
     def setUp(self) -> None:
         super().setUp()
         self._as_admin()
-        self.seed_reviews([
-            _review_row(
-                "r-leaky",
-                status_value="ERROR",
-                created_at="1700000000",
-                reason="model_account_out_of_credits",
-                failing_stage="run_review",
-                failed_at="1700000042",
-                sensitive=True,
-            )
-        ])
+        self.seed_reviews(
+            [
+                _review_row(
+                    "r-leaky",
+                    status_value="ERROR",
+                    created_at="1700000000",
+                    reason="model_account_out_of_credits",
+                    failing_stage="run_review",
+                    failed_at="1700000042",
+                    sensitive=True,
+                )
+            ]
+        )
 
     def test_row_shape_is_exactly_the_ten_documented_fields(self) -> None:
         row = self._get().json()["failures"][0]
@@ -537,16 +553,18 @@ class TestBounded(DiagnosticsRouteTestBase):
     def setUp(self) -> None:
         super().setUp()
         self._as_admin()
-        self.seed_reviews([
-            _review_row(
-                f"r-{i:05d}",
-                status_value="ERROR",
-                created_at=f"{2000000000 - i}",
-                reason="unhandled_exception",
-                failing_stage="run_review",
-            )
-            for i in range(reviews_module.RECENT_FAILURES_MAX_LIMIT + 250)
-        ])
+        self.seed_reviews(
+            [
+                _review_row(
+                    f"r-{i:05d}",
+                    status_value="ERROR",
+                    created_at=f"{2000000000 - i}",
+                    reason="unhandled_exception",
+                    failing_stage="run_review",
+                )
+                for i in range(reviews_module.RECENT_FAILURES_MAX_LIMIT + 250)
+            ]
+        )
 
     def _count(self, query: str = "") -> int:
         resp = self._get(query)
@@ -557,9 +575,7 @@ class TestBounded(DiagnosticsRouteTestBase):
         self.assertEqual(self._count(), reviews_module.RECENT_FAILURES_DEFAULT_LIMIT)
 
     def test_a_hostile_limit_cannot_dump_the_table(self) -> None:
-        self.assertEqual(
-            self._count("?limit=100000"), reviews_module.RECENT_FAILURES_MAX_LIMIT
-        )
+        self.assertEqual(self._count("?limit=100000"), reviews_module.RECENT_FAILURES_MAX_LIMIT)
 
     def test_zero_and_negative_limits_clamp_up_rather_than_returning_everything(self) -> None:
         self.assertEqual(self._count("?limit=0"), 1)

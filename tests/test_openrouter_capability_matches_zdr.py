@@ -168,9 +168,7 @@ class TestPolicyNoLongerDeclaresStructuredOutputsForZdrRejectedIds(unittest.Test
         # Not just "the raw policy dict lacks the key" (test above) but
         # "the function every caller actually uses to decide whether to add
         # response_format resolves False for the shipped default."
-        self.assertFalse(
-            mc.openrouter_model_capabilities(PRIMARY_MODEL_ID)["structured_outputs"]
-        )
+        self.assertFalse(mc.openrouter_model_capabilities(PRIMARY_MODEL_ID)["structured_outputs"])
 
 
 class FakeResponse:
@@ -326,9 +324,7 @@ class TestOpenRouterInvokeOmitsResponseFormatForThePrimaryPin(unittest.TestCase)
         # (one of the four non-Anthropic ids issue #142's live probe did not
         # cover, so its declaration is untouched by this fix).
         self.assertTrue(
-            mc.openrouter_model_capabilities(CAPABLE_SELECTABLE_MODEL_ID)[
-                "structured_outputs"
-            ],
+            mc.openrouter_model_capabilities(CAPABLE_SELECTABLE_MODEL_ID)["structured_outputs"],
             CAPABLE_SELECTABLE_MODEL_ID,
         )
         schema = {"type": "object", "properties": {"decision": {"type": "string"}}}

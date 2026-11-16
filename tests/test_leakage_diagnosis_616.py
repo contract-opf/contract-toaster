@@ -374,9 +374,7 @@ class TestMatchedConfidentialTextNeverLeaves(unittest.TestCase):
         # Not merely the whole sentence: no distinctive fragment of it either,
         # so a truncated or partially-quoted leak is caught too.
         for fragment in ("removes or alters", "aggregate liability cap"):
-            self.assertNotIn(
-                fragment, haystack, f"{label} carries a fragment of the matched text"
-            )
+            self.assertNotIn(fragment, haystack, f"{label} carries a fragment of the matched text")
 
     def test_the_fixture_really_does_quote_confidential_playbook_text(self) -> None:
         """Guards this whole class. If the model output stopped carrying the

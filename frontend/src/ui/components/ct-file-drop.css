@@ -31,7 +31,9 @@ ct-file-drop {
 .ct-file-drop--over {
   border-color: var(--ct-accent);
   background: var(--ct-accent-soft);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ct-accent) 25%, transparent), var(--ct-shadow-2);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--ct-accent) 25%, transparent),
+    var(--ct-shadow-2);
 }
 
 /* Visually hidden but fully focusable/interactive — never display:none or

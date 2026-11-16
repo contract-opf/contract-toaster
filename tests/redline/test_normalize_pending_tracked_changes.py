@@ -274,9 +274,7 @@ def main():
 
     # The still-fail-closed path maps to the documented SYSTEM status, never
     # a legal decision.
-    for label, fail_result in (
-        ("corrupt", corrupt_result),
-    ):
+    for label, fail_result in (("corrupt", corrupt_result),):
         report = normalize_input.build_unnormalizable_report(fail_result)
         if report.get("report_type") != "analysis_report":
             failures.append(
@@ -320,8 +318,7 @@ def main():
                             "Agreement shall not exceed $150,000."
                         ),
                         "resulting_text": (
-                            "Each party's liability under this Agreement "
-                            "shall be uncapped."
+                            "Each party's liability under this Agreement shall be uncapped."
                         ),
                     },
                     {
@@ -349,20 +346,14 @@ def main():
 
     # --- Report -----------------------------------------------------------
     if failures:
-        print(
-            "FAIL: normalize_input pending-tracked-change accept-all gate "
-            "(issue #199).\n"
-        )
+        print("FAIL: normalize_input pending-tracked-change accept-all gate (issue #199).\n")
         for f in failures:
             print(f)
             print()
         print(f"Total failures: {len(failures)}")
         sys.exit(1)
     else:
-        print(
-            "PASS: normalize_input pending-tracked-change accept-all gate "
-            "(issue #199)."
-        )
+        print("PASS: normalize_input pending-tracked-change accept-all gate (issue #199).")
         sys.exit(0)
 
 

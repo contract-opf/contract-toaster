@@ -148,7 +148,9 @@ def _build_two_header_docx() -> tuple[bytes, str]:
     rels_xml = parts["word/_rels/document.xml.rels"].decode("utf-8")
     rel_target = re.search(rf'<Relationship\s+Id="{header_rid}"[^>]*\bTarget="([^"]+)"', rels_xml)
     if rel_target is None:
-        raise AssertionError(f"no relationship target for header id {header_rid!r} -- fixture is wrong")
+        raise AssertionError(
+            f"no relationship target for header id {header_rid!r} -- fixture is wrong"
+        )
     header_part = f"word/{rel_target.group(1)}"
     if header_part == "word/header1.xml":
         raise AssertionError(
@@ -214,7 +216,9 @@ def test_untouched_two_header_document_verifies_after_editor_roundtrip(failures:
     case = "untouched_two_header_document_verifies_after_editor_roundtrip"
     docx_bytes, header_part = _build_two_header_docx()
     if header_part != "word/header2.xml":
-        failures.append(f"[{case}] fixture wired the first-page header onto {header_part!r}, not header2.xml")
+        failures.append(
+            f"[{case}] fixture wired the first-page header onto {header_part!r}, not header2.xml"
+        )
         return
 
     output_bytes = _editor_roundtrip(docx_bytes)
@@ -233,7 +237,9 @@ def test_untouched_two_header_document_verifies_after_editor_roundtrip(failures:
         docx_bytes, output_bytes, {"block_ops": []}, revision_ids=set(), applied_edits=[]
     )
     if report["status"] != "verified":
-        failures.append(f"[{case}] a bare editor round-trip failed the proofs: {report['failures']!r}")
+        failures.append(
+            f"[{case}] a bare editor round-trip failed the proofs: {report['failures']!r}"
+        )
 
 
 def test_replace_edit_compiles_through_the_real_writer(failures: list) -> None:
@@ -270,7 +276,9 @@ def test_replace_edit_compiles_through_the_real_writer(failures: list) -> None:
         block_map,
     )
     if proven["status"] != "proven":
-        failures.append(f"[{case}] the replacement did not prove: {[f.get('reason') for f in proven['failures']]}")
+        failures.append(
+            f"[{case}] the replacement did not prove: {[f.get('reason') for f in proven['failures']]}"
+        )
         return
 
     result = redline_block_apply.apply_block_transcript(
@@ -295,7 +303,9 @@ def test_a_real_header_edit_still_fails_the_allowlist(failures: list) -> None:
     with zipfile.ZipFile(io.BytesIO(output_bytes)) as zf:
         header_xml = zf.read(header_part).decode("utf-8")
     if "First-page header" not in header_xml:
-        failures.append(f"[{case}] fixture is wrong -- {header_part!r} does not carry its own visible text")
+        failures.append(
+            f"[{case}] fixture is wrong -- {header_part!r} does not carry its own visible text"
+        )
         return
     tampered_xml = header_xml.replace("First-page header", "Rewritten first-page header")
     tampered_bytes = _repack(output_bytes, replace={header_part: tampered_xml.encode("utf-8")})

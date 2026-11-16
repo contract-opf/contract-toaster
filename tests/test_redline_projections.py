@@ -169,10 +169,7 @@ def _build_raw_docx(body_paragraphs_xml: str) -> bytes:
 
 
 def _raw_heading_p(text: str) -> str:
-    return (
-        '<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr>'
-        f"<w:r><w:t>{text}</w:t></w:r></w:p>"
-    )
+    return f'<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>'
 
 
 def _prove(docx_bytes: bytes, *, patches=None, ops=None):
@@ -259,9 +256,7 @@ def _proofs(report) -> list:
 def _verify(input_bytes, result, proven, *, scoped: bool = True):
     """`verify_projections` the way the compiler itself calls it."""
     revision_ids = (
-        {rid for ids in result["revision_ids_by_issue"].values() for rid in ids}
-        if scoped
-        else None
+        {rid for ids in result["revision_ids_by_issue"].values() for rid in ids} if scoped else None
     )
     return redline_projections.verify_projections(
         input_bytes,
@@ -275,9 +270,7 @@ def _verify(input_bytes, result, proven, *, scoped: bool = True):
 # Fixture text (synthetic)
 # ---------------------------------------------------------------------------
 
-_TERM_BODY = (
-    "The Term shall be sixty (60) days and the Notice Period shall be ten (10) days."
-)
+_TERM_BODY = "The Term shall be sixty (60) days and the Notice Period shall be ten (10) days."
 _FEES_BODY = "Fees are due in forty-five (45) days."
 _RENEWAL_BODY = "The Agreement renews automatically."
 _NEW_CLAUSE = "Each party shall retain audit rights for two (2) years."
@@ -343,8 +336,7 @@ def test_correct_document_passes_all_three_proofs(failures: list) -> None:
     report = redline_projections.verify_projections(other_source, result["docx_bytes"], proven)
     if report["status"] == "verified":
         failures.append(
-            f"[{case}] the proofs 'verified' an output against a source it was never "
-            "compiled from"
+            f"[{case}] the proofs 'verified' an output against a source it was never compiled from"
         )
 
 
@@ -370,8 +362,10 @@ def test_sabotaged_plain_character_fails_reject_all(failures: list) -> None:
     try:
         redline_block_apply.redline_generate.verify_docx_round_trip(sabotaged)
     except ValueError as exc:
-        failures.append(f"[{case}] the sabotaged package no longer opens ({exc}) -- the "
-                        "test would be proving the wrong thing")
+        failures.append(
+            f"[{case}] the sabotaged package no longer opens ({exc}) -- the "
+            "test would be proving the wrong thing"
+        )
         return
 
     report = redline_projections.verify_projections(
@@ -413,15 +407,15 @@ def test_sabotaged_heading_character_fails_reject_all(failures: list) -> None:
     # bug that renumbers or re-titles a section would sail through the gate.
     # Section 2's heading is untouched by this transcript (both edits are in
     # Section 1), so one altered character of it is a pure out-of-band change.
-    sabotaged = _mutate_document_text(
-        result["docx_bytes"], "Section 2. Fees", "Section 2. Feas"
-    )
+    sabotaged = _mutate_document_text(result["docx_bytes"], "Section 2. Fees", "Section 2. Feas")
 
     try:
         redline_block_apply.redline_generate.verify_docx_round_trip(sabotaged)
     except ValueError as exc:
-        failures.append(f"[{case}] the sabotaged package no longer opens ({exc}) -- the "
-                        "test would be proving the wrong thing")
+        failures.append(
+            f"[{case}] the sabotaged package no longer opens ({exc}) -- the "
+            "test would be proving the wrong thing"
+        )
         return
 
     report = redline_projections.verify_projections(
@@ -558,17 +552,14 @@ def test_settings_xml_may_only_gain_an_rsid(failures: list) -> None:
     # (and, for a real redline, document-destroying) rule.
     report = _verify(docx_bytes, result, proven)
     if report["status"] != "verified":
-        failures.append(
-            f"[{case}] the untouched output failed the proofs: {report['failures']!r}"
-        )
+        failures.append(f"[{case}] the untouched output failed the proofs: {report['failures']!r}")
     extra_rsid = _mutate_settings(
         result["docx_bytes"], "</w:rsids>", '<w:rsid w:val="0BADC0DE"/></w:rsids>'
     )
     parts, report = allowlist_parts(extra_rsid)
     if parts:
         failures.append(
-            f"[{case}] an appended <w:rsid> failed the allowlist proof: "
-            f"{report['failures']!r}"
+            f"[{case}] an appended <w:rsid> failed the allowlist proof: {report['failures']!r}"
         )
 
     # The RED side, and the hole a whole-part exemption leaves open:
@@ -585,14 +576,11 @@ def test_settings_xml_may_only_gain_an_rsid(failures: list) -> None:
     parts, _ = allowlist_parts(locked)
     if SETTINGS_PART not in parts:
         failures.append(
-            f"[{case}] an edit-locked word/settings.xml passed the allowlist proof: "
-            f"{parts!r}"
+            f"[{case}] an edit-locked word/settings.xml passed the allowlist proof: {parts!r}"
         )
 
     # Removing an element that was there is the mirror violation.
-    stripped = _mutate_settings(
-        result["docx_bytes"], '<w:defaultTabStop w:val="720"/>', ""
-    )
+    stripped = _mutate_settings(result["docx_bytes"], '<w:defaultTabStop w:val="720"/>', "")
     parts, _ = allowlist_parts(stripped)
     if SETTINGS_PART not in parts:
         failures.append(
@@ -602,9 +590,7 @@ def test_settings_xml_may_only_gain_an_rsid(failures: list) -> None:
 
     # ... including one of the revision-save ids the source already carried:
     # the exemption is APPEND-only, never a licence to rewrite the list.
-    dropped_rsid = _mutate_settings(
-        result["docx_bytes"], '<w:rsid w:val="00034616"/>', ""
-    )
+    dropped_rsid = _mutate_settings(result["docx_bytes"], '<w:rsid w:val="00034616"/>', "")
     parts, _ = allowlist_parts(dropped_rsid)
     if SETTINGS_PART not in parts:
         failures.append(
@@ -807,9 +793,7 @@ def test_partially_applied_batch_still_verifies(failures: list) -> None:
     result = _compile(docx_bytes, proven, {"OK-1": "Reworded."})
     reasons = sorted({f["reason"] for f in result["failures"]})
     if reasons != [redline_block_apply.REASON_SPANS_PHYSICAL_PARAGRAPH]:
-        failures.append(
-            f"[{case}] expected exactly the cross-paragraph failure, got {reasons!r}"
-        )
+        failures.append(f"[{case}] expected exactly the cross-paragraph failure, got {reasons!r}")
         return
     if not result["docx_bytes"]:
         failures.append(

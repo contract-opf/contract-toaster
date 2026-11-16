@@ -73,9 +73,13 @@ SENTINEL_DOC_A = "SENTINEL-DOCA-1a2b9f"
 SENTINEL_DOC_B = "SENTINEL-DOCB-3c4d7e"
 SENTINEL_FINDING = "SENTINEL-FINDING-5e6f21"
 
-_DOC_A_TEXT = f"{SENTINEL_DOC_A} Standard confidentiality clause remains unchanged for this Agreement."
+_DOC_A_TEXT = (
+    f"{SENTINEL_DOC_A} Standard confidentiality clause remains unchanged for this Agreement."
+)
 _DOC_B_HEADER_TEXT = f"{SENTINEL_DOC_B} Confidentiality obligations set forth below."
-_DOC_B_FINDING_TEXT = f"{SENTINEL_FINDING} Each party's liability under this Agreement shall be unlimited."
+_DOC_B_FINDING_TEXT = (
+    f"{SENTINEL_FINDING} Each party's liability under this Agreement shall be unlimited."
+)
 
 # Deterministic scripted per-attempt usage -- same on every call, so mean
 # and p95 are hand-computable without weighting.
@@ -131,13 +135,9 @@ def _doc_b_transcript() -> dict:
         if _DOC_B_FINDING_TEXT in text:
             at = text.index(_DOC_B_FINDING_TEXT)
             segments = [{"op": "keep", "text": text[:at]}] if at else []
-            segments.append(
-                {"op": "delete", "text": _DOC_B_FINDING_TEXT, "issue_key": "I1"}
-            )
-            segments.append(
-                {"op": "insert", "text": _DOC_B_REPLACEMENT_TEXT, "issue_key": "I1"}
-            )
-            tail = text[at + len(_DOC_B_FINDING_TEXT):]
+            segments.append({"op": "delete", "text": _DOC_B_FINDING_TEXT, "issue_key": "I1"})
+            segments.append({"op": "insert", "text": _DOC_B_REPLACEMENT_TEXT, "issue_key": "I1"})
+            tail = text[at + len(_DOC_B_FINDING_TEXT) :]
             if tail:
                 segments.append({"op": "keep", "text": tail})
             return {"block_id": block_id, "segments": segments}
@@ -225,8 +225,7 @@ def _critic_accept_response() -> str:
 # below in the sentinel constants used to assert neither ever reaches the
 # default report.
 _PROSE_PRIMARY_RESPONSE = (
-    "I have reviewed the attached agreement and it appears standard; no "
-    "redline is necessary."
+    "I have reviewed the attached agreement and it appears standard; no redline is necessary."
 )
 _INVALID_JSON_RAW_FRAGMENT = "Expecting value"
 
@@ -400,8 +399,14 @@ def _part_1_matrix_report(lse, tmp_path: Path, failures: list[str]) -> None:
     scripts = [
         (_accept_response(accept_summary), _critic_accept_response()),  # docA run0
         (_accept_response(accept_summary), _critic_accept_response()),  # docA run1
-        (_request_change_response(request_change_summary), _critic_no_delta_response()),  # docB run0
-        (_request_change_response(request_change_summary), _critic_no_delta_response()),  # docB run1
+        (
+            _request_change_response(request_change_summary),
+            _critic_no_delta_response(),
+        ),  # docB run0
+        (
+            _request_change_response(request_change_summary),
+            _critic_no_delta_response(),
+        ),  # docB run1
     ]
     created_clients: list[Any] = []
     build_client = _scripted_build_client_factory(bundle, scripts, clients=created_clients)
@@ -506,9 +511,13 @@ def _part_1_matrix_report(lse, tmp_path: Path, failures: list[str]) -> None:
     if off_agg["retry_rate"] != 0.0:
         failures.append(f"[1m] Expected retry_rate 0.0, got {off_agg['retry_rate']}")
     if off_agg["decision_counts"] != {"ACCEPT": 2, "REQUEST_CHANGE": 2}:
-        failures.append(f"[1n] Expected decision_counts ACCEPT=2/REQUEST_CHANGE=2, got {off_agg['decision_counts']}")
+        failures.append(
+            f"[1n] Expected decision_counts ACCEPT=2/REQUEST_CHANGE=2, got {off_agg['decision_counts']}"
+        )
     if off_agg["validation_outcome_counts"] != {"OK": 4}:
-        failures.append(f"[1o] Expected validation_outcome_counts OK=4, got {off_agg['validation_outcome_counts']}")
+        failures.append(
+            f"[1o] Expected validation_outcome_counts OK=4, got {off_agg['validation_outcome_counts']}"
+        )
     if off_agg["total_tokens"]["mean"] != float(expected_total_tokens):
         failures.append(
             f"[1p] Expected total_tokens mean {expected_total_tokens}, got {off_agg['total_tokens']}"
@@ -518,7 +527,9 @@ def _part_1_matrix_report(lse, tmp_path: Path, failures: list[str]) -> None:
             f"[1q] Expected total_tokens p95 {expected_total_tokens}, got {off_agg['total_tokens']}"
         )
     if abs(off_agg["cost_usd"]["mean"] - expected_cost_usd) > 1e-9:
-        failures.append(f"[1r] Expected cost_usd mean {expected_cost_usd}, got {off_agg['cost_usd']}")
+        failures.append(
+            f"[1r] Expected cost_usd mean {expected_cost_usd}, got {off_agg['cost_usd']}"
+        )
     if off_agg["latency_ms"]["mean"] < 0:
         failures.append(f"[1s] Expected non-negative latency mean, got {off_agg['latency_ms']}")
 
@@ -629,11 +640,15 @@ def _part_2_structured_output_both(lse, tmp_path: Path, failures: list[str]) -> 
 
     aggregate = report.get("aggregate", {})
     if set(aggregate) != {"off", "on"}:
-        failures.append(f"[2d] Expected aggregate to report 'off' and 'on' separately, got {list(aggregate)}")
+        failures.append(
+            f"[2d] Expected aggregate to report 'off' and 'on' separately, got {list(aggregate)}"
+        )
     for mode in ("off", "on"):
         mode_agg = aggregate.get(mode) or {}
         if mode_agg.get("runs") != 1:
-            failures.append(f"[2e] Expected aggregate[{mode!r}]['runs'] == 1, got {mode_agg.get('runs')}")
+            failures.append(
+                f"[2e] Expected aggregate[{mode!r}]['runs'] == 1, got {mode_agg.get('runs')}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -855,8 +870,10 @@ def _run_single_failure_scenario(
         resolve_api_key=lambda: "sk-or-v1-fake-test-key",
     )
     if rc != 0:
-        failures.append(f"[7-{label}-a] Expected main() to return 0 on a failed-closed run "
-                         f"(a fail-closed pipeline result is not a script exception), got {rc!r}")
+        failures.append(
+            f"[7-{label}-a] Expected main() to return 0 on a failed-closed run "
+            f"(a fail-closed pipeline result is not a script exception), got {rc!r}"
+        )
         return
 
     report = json.loads(out_path.read_text())
@@ -872,9 +889,7 @@ def _run_single_failure_scenario(
             f"{row['validation_outcome']!r} in row {row}"
         )
     if row["status"] != "ERROR":
-        failures.append(
-            f"[7-{label}-d] Expected status ERROR, got {row}"
-        )
+        failures.append(f"[7-{label}-d] Expected status ERROR, got {row}")
     if row["primary_attempts"] <= 1:
         failures.append(
             f"[7-{label}-e] Expected primary_attempts > 1 (bounded retry exhausted), got {row}"
@@ -1017,14 +1032,12 @@ def _part_8_review_round_3_findings(lse, tmp_path: Path, failures: list[str]) ->
             )
         if rc == 0:
             failures.append(
-                f"[8b-{bad_value}] Expected a non-zero exit for "
-                f"--runs-per-doc {bad_value}, got 0"
+                f"[8b-{bad_value}] Expected a non-zero exit for --runs-per-doc {bad_value}, got 0"
             )
         printed = buf.getvalue()
         if "runs-per-doc" not in printed.lower():
             failures.append(
-                f"[8b-{bad_value}] Expected a clear error naming "
-                f"--runs-per-doc, got: {printed!r}"
+                f"[8b-{bad_value}] Expected a clear error naming --runs-per-doc, got: {printed!r}"
             )
 
 
@@ -1113,8 +1126,7 @@ def _part_9_dump_dir_per_attempt_diagnostics(lse, tmp_path: Path, failures: list
     attempts = dump_json.get("attempts")
     if not isinstance(attempts, list):
         failures.append(
-            f"[9c] Expected the dump JSON to carry an 'attempts' list, got "
-            f"keys {list(dump_json)}"
+            f"[9c] Expected the dump JSON to carry an 'attempts' list, got keys {list(dump_json)}"
         )
         return
 
@@ -1147,8 +1159,13 @@ def _part_9_dump_dir_per_attempt_diagnostics(lse, tmp_path: Path, failures: list
 
     if len(critic_attempts) != 1:
         failures.append(f"[9i] Expected 1 ledgered critic attempt, got {critic_attempts}")
-    elif critic_attempts[0].get("outcome") != "success" or critic_attempts[0].get("error_token") != "":
-        failures.append(f"[9j] Expected the single critic attempt to be a clean success, got {critic_attempts[0]}")
+    elif (
+        critic_attempts[0].get("outcome") != "success"
+        or critic_attempts[0].get("error_token") != ""
+    ):
+        failures.append(
+            f"[9j] Expected the single critic attempt to be a clean success, got {critic_attempts[0]}"
+        )
 
     # Regression: the DEFAULT report must stay exactly as shareable as it was
     # before this feature existed (issue #573 AC: "the DEFAULT report still
@@ -1229,9 +1246,13 @@ def _part_9_dump_dir_per_attempt_diagnostics(lse, tmp_path: Path, failures: list
             "schema_invalid",
             "required:confidence_state",
         ):
-            failures.append(f"[9o] Expected dump attempt 1 to carry retry_reason/schema_error_location, got {first}")
+            failures.append(
+                f"[9o] Expected dump attempt 1 to carry retry_reason/schema_error_location, got {first}"
+            )
         if (second.get("retry_reason"), second.get("schema_error_location")) != ("", ""):
-            failures.append(f"[9p] Expected dump attempt 2 retry_reason/schema_error_location to be empty, got {second}")
+            failures.append(
+                f"[9p] Expected dump attempt 2 retry_reason/schema_error_location to be empty, got {second}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -1353,7 +1374,9 @@ def _part_10_dump_dir_carries_full_error(lse, tmp_path: Path, failures: list[str
 
     attempts = dump_json.get("attempts")
     if not isinstance(attempts, list):
-        failures.append(f"[10b] Expected an 'attempts' list in the dump, got keys {list(dump_json)}")
+        failures.append(
+            f"[10b] Expected an 'attempts' list in the dump, got keys {list(dump_json)}"
+        )
         return
     primary_attempts = sorted(
         (a for a in attempts if a.get("pass_name") == "primary"),
@@ -1421,8 +1444,7 @@ def _part_10_dump_dir_carries_full_error(lse, tmp_path: Path, failures: list[str
     critic_attempts = [a for a in attempts if a.get("pass_name") == "critic"]
     if len(critic_attempts) != 1 or "error_message" in critic_attempts[0]:
         failures.append(
-            f"[10l] Expected 1 clean critic attempt with no error_message, "
-            f"got {critic_attempts!r}"
+            f"[10l] Expected 1 clean critic attempt with no error_message, got {critic_attempts!r}"
         )
 
     # The default report must stay substance-free. Every one of these is a
@@ -1442,6 +1464,7 @@ def _part_10_dump_dir_carries_full_error(lse, tmp_path: Path, failures: list[str
                 f"report -- per-attempt error detail is model substance and "
                 f"belongs only in --dump-dir."
             )
+
     # The #643 diagnostic's `schema_error` object (instance path + offending
     # value) must not appear as a KEY anywhere in the default report. Checked
     # structurally rather than by substring, because issue #157's
@@ -1512,7 +1535,9 @@ def _part_10_dump_dir_carries_full_error(lse, tmp_path: Path, failures: list[str
         None,
     )
     if not isinstance(big_first, dict) or not isinstance(big_first.get("schema_error"), dict):
-        failures.append(f"[10o] Expected a primary attempt 1 with a schema_error, got {big_first!r}")
+        failures.append(
+            f"[10o] Expected a primary attempt 1 with a schema_error, got {big_first!r}"
+        )
         return
     offending = big_first["schema_error"]["offending_value"]
     # The bound's owner, imported here rather than at module scope so this
@@ -1526,7 +1551,10 @@ def _part_10_dump_dir_carries_full_error(lse, tmp_path: Path, failures: list[str
             f"and to declare the true length ({expected_suffix!r}), got "
             f"...{offending[-80:]!r}"
         )
-    if offending[: _pp._DEBUG_VALUE_MAX_CHARS] != _OVERSIZED_ISSUE_KEY[: _pp._DEBUG_VALUE_MAX_CHARS]:
+    if (
+        offending[: _pp._DEBUG_VALUE_MAX_CHARS]
+        != _OVERSIZED_ISSUE_KEY[: _pp._DEBUG_VALUE_MAX_CHARS]
+    ):
         failures.append(
             "[10q] Expected the retained prefix of an oversized "
             "offending_value to be the model's own characters verbatim."
@@ -1546,10 +1574,8 @@ def _part_10_dump_dir_carries_full_error(lse, tmp_path: Path, failures: list[str
         )
     if _OVERSIZED_ISSUE_KEY[:200] in big_report:
         failures.append(
-            "[10t] Expected the oversized rejected value to be absent from "
-            "the default report."
+            "[10t] Expected the oversized rejected value to be absent from the default report."
         )
-
 
 
 def main() -> int:

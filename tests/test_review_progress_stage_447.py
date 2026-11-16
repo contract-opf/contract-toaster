@@ -108,8 +108,14 @@ class RecordingReviewsTable(dts.FakeReviewsTable):
         self.status_when_progress_written: list[str] = []
         self.fail_progress_writes = fail_progress_writes
 
-    def update_item(self, Key, UpdateExpression, ConditionExpression=None,
-                     ExpressionAttributeNames=None, ExpressionAttributeValues=None):
+    def update_item(
+        self,
+        Key,
+        UpdateExpression,
+        ConditionExpression=None,
+        ExpressionAttributeNames=None,
+        ExpressionAttributeValues=None,
+    ):
         values = ExpressionAttributeValues or {}
         is_progress = "progress_stage" in UpdateExpression
         if is_progress:
@@ -209,19 +215,18 @@ class TestRunReviewProgressSeam(unittest.TestCase):
         docx_bytes, client_a = _request_change_inputs()
         _, client_b = _request_change_inputs()
 
-        without = review_spine.run_review(
-            docx_bytes, _bundle(), client_a, review_id=REVIEW_ID
-        )
+        without = review_spine.run_review(docx_bytes, _bundle(), client_a, review_id=REVIEW_ID)
         with_seam = review_spine.run_review(
-            docx_bytes, _bundle(), client_b, review_id=REVIEW_ID,
+            docx_bytes,
+            _bundle(),
+            client_b,
+            review_id=REVIEW_ID,
             on_progress=lambda token: None,
         )
 
         for key in ("status", "decision", "summary", "reason", "findings"):
             self.assertEqual(without[key], with_seam[key], key)
-        self.assertEqual(
-            without["redline_bytes"] is None, with_seam["redline_bytes"] is None
-        )
+        self.assertEqual(without["redline_bytes"] is None, with_seam["redline_bytes"] is None)
 
 
 # ---------------------------------------------------------------------------
@@ -237,8 +242,10 @@ class TestRunRealPipelineWritesProgress(unittest.TestCase):
 
         with patch.object(pr, "_settle_reservation"):
             pr.run_real_pipeline(
-                REVIEW_ID, dts._payload(),
-                dynamodb_resource=dts.FakeDDB(table), s3_client=s3,
+                REVIEW_ID,
+                dts._payload(),
+                dynamodb_resource=dts.FakeDDB(table),
+                s3_client=s3,
                 model_client=client,
             )
 
@@ -260,8 +267,10 @@ class TestRunRealPipelineWritesProgress(unittest.TestCase):
 
         with patch.object(pr, "_settle_reservation"):
             pr.run_real_pipeline(
-                REVIEW_ID, dts._payload(),
-                dynamodb_resource=dts.FakeDDB(table), s3_client=s3,
+                REVIEW_ID,
+                dts._payload(),
+                dynamodb_resource=dts.FakeDDB(table),
+                s3_client=s3,
                 model_client=client,
             )
 

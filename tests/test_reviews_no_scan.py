@@ -96,12 +96,11 @@ SPY_PAGE_SIZE = 2
 # control can invoke the EXACT assertion the real tests rely on.
 # ---------------------------------------------------------------------------
 
+
 def assert_no_scans(calls: list[tuple[str, str, Any]]) -> None:
     scanned = sorted({name for kind, name, _ in calls if kind == "scan"})
     if scanned:
-        raise AssertionError(
-            "a reviews read performed a full-table Scan on: " + ", ".join(scanned)
-        )
+        raise AssertionError("a reviews read performed a full-table Scan on: " + ", ".join(scanned))
 
 
 class _CallLoggingTable:
@@ -146,6 +145,7 @@ class _CallLoggingResource:
 # ---------------------------------------------------------------------------
 # Fixture
 # ---------------------------------------------------------------------------
+
 
 def _reviews_table_spec(name: str, *, with_status_index: bool) -> dict[str, Any]:
     """The reviews table as infra/lib/nested/data-stack.ts declares the parts
@@ -273,9 +273,7 @@ class NoScanTestBase(unittest.TestCase):
             if review_status == "DONE":
                 output_key = f"outputs/{review_id}/out.docx"
                 row["output_s3_key"] = output_key
-                self.s3.put_object(
-                    Bucket=os.environ["OUTPUTS_BUCKET"], Key=output_key, Body=b"out"
-                )
+                self.s3.put_object(Bucket=os.environ["OUTPUTS_BUCKET"], Key=output_key, Body=b"out")
             self.table.put_item(Item=row)
 
         # The two flags the reads filter on, through the REAL writers.
@@ -409,9 +407,7 @@ class RetentionTests(NoScanTestBase):
     def test_hold_list_names_a_hold_in_any_status(self) -> None:
         holds = retention.list_legal_holds(ADMIN, self.spy)
         self._assert_read_the_index_and_followed_pages()
-        self.assertEqual(
-            {h["review_id"] for h in holds}, {"r-done-old-held", "r-running-stuck"}
-        )
+        self.assertEqual({h["review_id"] for h in holds}, {"r-done-old-held", "r-running-stuck"})
         self.assertEqual({h["status"] for h in holds}, {"DONE", "RUNNING"})
 
 
@@ -419,9 +415,7 @@ class TriageAndQueueTests(NoScanTestBase):
     def test_legal_triage_queue_is_index_backed_and_complete(self) -> None:
         queue = disposition.list_legal_triage_queue(self.spy)
         self._assert_read_the_index_and_followed_pages()
-        self.assertEqual(
-            {r["review_id"] for r in queue}, {"r-done-a", "r-done-b", "r-done-c"}
-        )
+        self.assertEqual({r["review_id"] for r in queue}, {"r-done-a", "r-done-b", "r-done-c"})
 
     def test_recent_failures_are_index_backed_newest_first(self) -> None:
         failures = reviews.list_recent_failures(ADMIN, self.spy, limit=3)

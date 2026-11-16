@@ -96,6 +96,7 @@ FRONTEND_REVIEW_SUBMISSION = REPO_ROOT / "frontend" / "src" / "ReviewSubmission.
 # Offline fakes
 # ---------------------------------------------------------------------------
 
+
 class FakeResponse:
     def __init__(self, status_code: int, payload: dict | None = None):
         self.status_code = status_code
@@ -128,8 +129,14 @@ class FakeReviewsTable:
     def __init__(self, status: str = "PENDING"):
         self.item: dict[str, Any] = {"review_id": REVIEW_ID, "status": status}
 
-    def update_item(self, Key, UpdateExpression, ConditionExpression=None,
-                    ExpressionAttributeNames=None, ExpressionAttributeValues=None):
+    def update_item(
+        self,
+        Key,
+        UpdateExpression,
+        ConditionExpression=None,
+        ExpressionAttributeNames=None,
+        ExpressionAttributeValues=None,
+    ):
         names = ExpressionAttributeNames or {}
         values = ExpressionAttributeValues or {}
         set_clause = UpdateExpression.split("SET", 1)[1]
@@ -188,6 +195,7 @@ def _payload() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # 1. The status reaches the exception STRUCTURALLY, from the real code path
 # ---------------------------------------------------------------------------
+
 
 class TestModelInvocationErrorCarriesStatusCode(unittest.TestCase):
     def _invoke_expecting_error(self, status_code: int) -> mc.ModelInvocationError:
@@ -265,6 +273,7 @@ class TestModelInvocationErrorCarriesStatusCode(unittest.TestCase):
 # 2 + 3. Classification, and the untouched fallback
 # ---------------------------------------------------------------------------
 
+
 class TestClassifyFailureReason(unittest.TestCase):
     def test_maps_each_provider_status_to_its_token(self) -> None:
         cases = {
@@ -282,9 +291,7 @@ class TestClassifyFailureReason(unittest.TestCase):
 
     def test_context_length_rejection_gets_its_own_token(self) -> None:
         exc = mc.ModelContextLengthExceededError("opaque", status_code=413)
-        self.assertEqual(
-            pr.classify_failure_reason(exc), "model_context_length_exceeded"
-        )
+        self.assertEqual(pr.classify_failure_reason(exc), "model_context_length_exceeded")
 
     def test_unmapped_status_falls_back(self) -> None:
         exc = mc.ModelInvocationError("opaque", status_code=500)
@@ -306,27 +313,32 @@ class TestClassifyFailureReason(unittest.TestCase):
 # 4. End to end through run_real_pipeline's catch-all
 # ---------------------------------------------------------------------------
 
+
 class TestRunRealPipelineRecordsTheClassifiedReason(unittest.TestCase):
     def _run_with_spine_raising(self, exc: BaseException) -> FakeReviewsTable:
         reviews_table = FakeReviewsTable()
         s3 = FakeS3({f"uploads/user-1/{REVIEW_ID}/in.docx": b"PK-not-a-real-docx"})
-        with patch.object(pr, "_settle_reservation"), \
-             patch.object(pr, "_load_playbook_bundle", return_value={}), \
-             patch.object(
-                 pr,
-                 # Signature must track the real helper's: it takes the
-                 # dynamodb_resource too since issue #445 (it resolves the
-                 # admin model selection per review), and a one-arg double
-                 # would raise a TypeError that these tests would then
-                 # mis-attribute to the stage under test.
-                 "_bundle_with_openrouter_model_ids",
-                 side_effect=lambda bundle, dynamodb_resource=None: bundle,
-             ), \
-             patch.object(pr, "_fetch_upload_bytes", return_value=b"docx"), \
-             patch.object(pr.review_spine, "run_review", side_effect=exc):
+        with (
+            patch.object(pr, "_settle_reservation"),
+            patch.object(pr, "_load_playbook_bundle", return_value={}),
+            patch.object(
+                pr,
+                # Signature must track the real helper's: it takes the
+                # dynamodb_resource too since issue #445 (it resolves the
+                # admin model selection per review), and a one-arg double
+                # would raise a TypeError that these tests would then
+                # mis-attribute to the stage under test.
+                "_bundle_with_openrouter_model_ids",
+                side_effect=lambda bundle, dynamodb_resource=None: bundle,
+            ),
+            patch.object(pr, "_fetch_upload_bytes", return_value=b"docx"),
+            patch.object(pr.review_spine, "run_review", side_effect=exc),
+        ):
             pr.run_real_pipeline(
-                REVIEW_ID, _payload(),
-                dynamodb_resource=FakeDDB(reviews_table), s3_client=s3,
+                REVIEW_ID,
+                _payload(),
+                dynamodb_resource=FakeDDB(reviews_table),
+                s3_client=s3,
                 model_client=object(),
             )
         return reviews_table
@@ -359,6 +371,7 @@ class TestRunRealPipelineRecordsTheClassifiedReason(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # 5 + 6. The taxonomy is deliberate, the copy exists, and nothing leaks
 # ---------------------------------------------------------------------------
+
 
 def _classifier_tokens() -> set[str]:
     tokens = set(pr._MODEL_STATUS_FAILURE_REASONS.values())

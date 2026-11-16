@@ -54,6 +54,7 @@ if str(BACKEND_SRC) not in sys.path:
 # We stub the third-party modules so the tests can run in CI without deps.
 # ---------------------------------------------------------------------------
 
+
 def _stub_third_party() -> None:
     """Inject minimal stubs for boto3, botocore, and fastapi if absent."""
     # ---- fastapi ----
@@ -159,9 +160,7 @@ MOCK_REVIEW_HANDLER_PATH = REPO_ROOT / "infra" / "lambda" / "mock_review" / "han
 
 def _load_mock_review_handler():
     os.environ["MOCK_REVIEW_DELAY_SECONDS"] = "0"
-    spec = importlib.util.spec_from_file_location(
-        "mock_review_handler", MOCK_REVIEW_HANDLER_PATH
-    )
+    spec = importlib.util.spec_from_file_location("mock_review_handler", MOCK_REVIEW_HANDLER_PATH)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -180,6 +179,7 @@ _mock_review_handler = _load_mock_review_handler()
 # raises the same ClientError a real DynamoDB table would (ValidationException)
 # when given the wrong key name, so a regression here fails loudly again.
 # ---------------------------------------------------------------------------
+
 
 class _RealKeyShapeFakeDynamoDBClient:
     """Minimal DynamoDB client fake that validates the users table's real
@@ -202,10 +202,7 @@ class _RealKeyShapeFakeDynamoDBClient:
                 error_response={
                     "Error": {
                         "Code": "ValidationException",
-                        "Message": (
-                            "The provided key element does not match the "
-                            "schema"
-                        ),
+                        "Message": ("The provided key element does not match the schema"),
                     }
                 },
                 operation_name="UpdateItem",
@@ -243,9 +240,7 @@ class _RealKeyShapeFakeDynamoDBClient:
                 f"(dailyReviewCount_<day>); got {day_attr!r}"
             )
         if "dailyReviewCount_#day" in update_expr or "#day" not in update_expr:
-            raise AssertionError(
-                f"Unexpected UpdateExpression for this fake: {update_expr!r}"
-            )
+            raise AssertionError(f"Unexpected UpdateExpression for this fake: {update_expr!r}")
 
         current = int(item.get(day_attr, 0))
 
@@ -270,6 +265,7 @@ class _RealKeyShapeFakeDynamoDBClient:
 # ---------------------------------------------------------------------------
 # Attack test 1 — Non-owner cannot download another user's review (HTTP 403)
 # ---------------------------------------------------------------------------
+
 
 class TestNonOwnerDenied(unittest.TestCase):
     """AC5: a non-owner must be denied access to another user's review."""
@@ -361,14 +357,13 @@ class TestNonOwnerDenied(unittest.TestCase):
         self.assertTrue(_is_admin({"cognito_sub": "x", "is_admin": True}))
         self.assertFalse(_is_admin({"cognito_sub": "x", "is_admin": False}))
         self.assertFalse(_is_admin({"cognito_sub": "x"}))
-        self.assertFalse(
-            _is_admin({"cognito_sub": "x", "custom:role": "admin"})
-        )
+        self.assertFalse(_is_admin({"cognito_sub": "x", "custom:role": "admin"}))
 
 
 # ---------------------------------------------------------------------------
 # Attack test 2 — Expired presigned URL fails (TTL check)
 # ---------------------------------------------------------------------------
+
 
 class TestPresignedUrlExpiry(unittest.TestCase):
     """AC5: presigned URLs must have a short TTL; this test verifies the
@@ -496,6 +491,7 @@ class TestPresignedUrlExpiry(unittest.TestCase):
 #                  outputs/<review_id>/ must be rejected with HTTP 403.
 # ---------------------------------------------------------------------------
 
+
 class TestKeyBoundToReviewId(unittest.TestCase):
     """AC2: the s3_key must be scoped to ``outputs/<review_id>/``.
 
@@ -539,9 +535,7 @@ class TestKeyBoundToReviewId(unittest.TestCase):
     def test_absolute_and_backslash_keys_are_rejected(self) -> None:
         """Leading-slash and backslash keys must be rejected."""
         self._assert_rejected(f"/outputs/{self.AUTH_REVIEW_ID}/result.json")
-        self._assert_rejected(
-            f"outputs/{self.AUTH_REVIEW_ID}/..\\{self.OTHER_REVIEW_ID}\\x"
-        )
+        self._assert_rejected(f"outputs/{self.AUTH_REVIEW_ID}/..\\{self.OTHER_REVIEW_ID}\\x")
 
     def test_prefix_lookalike_is_rejected(self) -> None:
         """A review_id used as a substring (not the real prefix) is rejected.
@@ -603,6 +597,7 @@ class TestKeyBoundToReviewId(unittest.TestCase):
 # Attack test 3 — Per-user daily limit rejects excess requests (issue #193
 # also folds in: real key shape, and no concurrency counter).
 # ---------------------------------------------------------------------------
+
 
 class TestPerUserLimits(unittest.TestCase):
     """AC5: the per-user daily limit must reject excess requests with HTTP
@@ -756,13 +751,14 @@ class TestPerUserLimits(unittest.TestCase):
         self.assertEqual(
             expr_values[":one"],
             {"N": "1"},
-            f"':one' must be {{\"N\": \"1\"}}, got {expr_values.get(':one')!r}",
+            f'\':one\' must be {{"N": "1"}}, got {expr_values.get(":one")!r}',
         )
         # The increment operand must be ':one', not ':zero'.
         # ':zero' is allowed only as the seed for if_not_exists(..., :zero);
         # what must NOT happen is a tail of "+ :zero" which would leave the
         # counter stuck at 0 after every call.
         import re as _re
+
         bad_increment = _re.search(r"\+\s*:zero", update_expr)
         self.assertIsNone(
             bad_increment,
@@ -850,6 +846,7 @@ class TestPerUserLimits(unittest.TestCase):
 # This binds the producer and the validator together so they cannot drift.
 # ---------------------------------------------------------------------------
 
+
 class TestMockPipelineKeyMatchesDownloadContract(unittest.TestCase):
     """The output_s3_key the mock review handler produces must pass
     _validate_s3_key_bound_to_review for the same review_id."""
@@ -892,6 +889,7 @@ class TestMockPipelineKeyMatchesDownloadContract(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def _run_tests() -> int:
     loader = unittest.TestLoader()

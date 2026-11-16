@@ -114,7 +114,10 @@ def _run_synth(context_args: list[str]) -> subprocess.CompletedProcess:
     if not node_modules.is_dir():
         print("  (node_modules absent — running npm install first …)")
         install = subprocess.run(
-            ["npm", "install"], cwd=INFRA, capture_output=True, text=True  # noqa: S607
+            ["npm", "install"],  # noqa: S607
+            cwd=INFRA,
+            capture_output=True,
+            text=True,
         )
         if install.returncode != 0:
             raise RuntimeError(
@@ -158,9 +161,7 @@ def _flows(client: dict) -> list[str]:
 
 
 def _idps(client: dict) -> list[str]:
-    return list(
-        client.get("Properties", {}).get("SupportedIdentityProviders", []) or []
-    )
+    return list(client.get("Properties", {}).get("SupportedIdentityProviders", []) or [])
 
 
 def _clients_with_password_flow(template: dict) -> dict[str, dict]:
@@ -212,6 +213,7 @@ def _auth_mode_output(template: dict) -> str | None:
 # Check A — source wiring
 # ---------------------------------------------------------------------------
 
+
 def check_a_source_wiring() -> list[str]:
     print("\nCheck A: authMode config is declared and gates the password client …")
     failures: list[str] = []
@@ -246,6 +248,7 @@ def check_a_source_wiring() -> list[str]:
 # ---------------------------------------------------------------------------
 # Checks B–G — authMode=both  # noqa: RUF003
 # ---------------------------------------------------------------------------
+
 
 def check_mode_both() -> list[str]:
     print("\n--- authMode=both ---")
@@ -337,12 +340,12 @@ def check_mode_both() -> list[str]:
     print("\nCheck G: no credential plaintext, and no de-branded strings, emitted …")
     raw = _auth_template_path().read_text(encoding="utf-8")
     failures += _assert(
-        "ClientSecret" not in json.dumps(
+        "ClientSecret"
+        not in json.dumps(
             {lid: c for lid, c in clients.items()}  # noqa: C416
         ),
         "No app client carries a ClientSecret property",
-        "Per issue #245: passwords/secrets are never written into synthesized "
-        "templates.",
+        "Per issue #245: passwords/secrets are never written into synthesized templates.",
     )
     failures += _assert(
         '"GenerateSecret": true' not in raw and '"GenerateSecret":true' not in raw,
@@ -360,13 +363,10 @@ def check_mode_both() -> list[str]:
         "Google IdP resource still present in the template",
     )
     for idp in idp_resources:
-        secret = idp.get("Properties", {}).get("ProviderDetails", {}).get(
-            "client_secret"
-        )
+        secret = idp.get("Properties", {}).get("ProviderDetails", {}).get("client_secret")
         rendered = _render_cfn_string(secret)
         failures += _assert(
-            rendered.startswith("{{resolve:secretsmanager:")
-            and rendered.endswith("}}"),
+            rendered.startswith("{{resolve:secretsmanager:") and rendered.endswith("}}"),
             "Google IdP client secret is a CloudFormation dynamic reference",
             f"client_secret renders to {rendered!r}. The plaintext must never be "
             "read at synth time (pre-existing auth-stack.ts invariant, unchanged "
@@ -386,6 +386,7 @@ def check_mode_both() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check H — authMode=password
 # ---------------------------------------------------------------------------
+
 
 def check_mode_password() -> list[str]:
     print("\n--- authMode=password ---")
@@ -421,13 +422,12 @@ def check_mode_password() -> list[str]:
 # Check I — invalid mode fails closed
 # ---------------------------------------------------------------------------
 
+
 def check_invalid_mode_fails_closed() -> list[str]:
     print("\n--- authMode=<invalid> ---")
     failures: list[str] = []
 
-    result = _run_synth(
-        ["--context", "env=dev", "--context", "authMode=not-a-real-mode"]
-    )
+    result = _run_synth(["--context", "env=dev", "--context", "authMode=not-a-real-mode"])
     failures += _assert(
         result.returncode != 0,
         "cdk synth rejects an unrecognized authMode value",
@@ -451,6 +451,7 @@ def check_invalid_mode_fails_closed() -> list[str]:
 # scripts/collect_test_failures.sh loop expect when they inspect it without
 # re-synthesizing first.
 # ---------------------------------------------------------------------------
+
 
 def check_default_mode_unchanged() -> list[str]:
     print("\n--- default context (no authMode) ---")
@@ -493,6 +494,7 @@ def check_default_mode_unchanged() -> list[str]:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> int:
     print("Cognito username/password demo-auth structural gate (issue #245)")
     print("=" * 60)
@@ -517,10 +519,7 @@ def main() -> int:
 
     print("\n" + "=" * 60)
     if all_failures:
-        print(
-            f"\nFAIL: {len(all_failures)} check(s) failed.\n"
-            "See output above for details."
-        )
+        print(f"\nFAIL: {len(all_failures)} check(s) failed.\nSee output above for details.")
         return 1
 
     print("\nPASS: all Cognito demo-auth structural checks passed.")

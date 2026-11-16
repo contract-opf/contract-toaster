@@ -76,6 +76,7 @@ RETROACTIVE_REDUCTION_DELAY_SECONDS = 72 * 3600
 # In-memory fakes
 # ---------------------------------------------------------------------------
 
+
 class FakeTable:
     """Tiny in-memory DynamoDB Table stand-in, same shape/contract as
     tests/test_user_management_92.py's FakeTable and
@@ -96,15 +97,16 @@ class FakeTable:
     def put_item(self, Item, ConditionExpression=None):  # noqa: ARG002 - audit writes are conditional (W6.1); moto covers the condition
         self.items[Item[self.key_name]] = dict(Item)
 
-    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues=None,
-                    ConditionExpression=None):  # noqa: ARG002 - moto suites cover conditions
+    def update_item(
+        self, Key, UpdateExpression, ExpressionAttributeValues=None, ConditionExpression=None
+    ):  # noqa: ARG002 - moto suites cover conditions
         key = Key[self.key_name]
         item = self.items.setdefault(key, dict(Key))
         vals = ExpressionAttributeValues or {}
         expr = UpdateExpression
         for prefix in ("SET ", "REMOVE "):
             if expr.startswith(prefix):
-                expr = expr[len(prefix):]
+                expr = expr[len(prefix) :]
                 break
         for clause in expr.split(","):
             clause = clause.strip()
@@ -213,30 +215,39 @@ def _output_key(review_id: str) -> str:
     return f"outputs/{review_id}/out.docx"
 
 
-def _seed_review(reviews, review_id: str, status_: str = "DONE",
-                  created_at: float = 0.0, window_days: int = 90,
-                  legal_hold: bool = False, owner_sub: str = "owner-1") -> None:
-    reviews.put_item(Item={
-        "review_id": review_id,
-        "owner_sub": owner_sub,
-        "status": status_,
-        # `reviews.create_review` writes `created_at` as an epoch-seconds
-        # STRING (it is the `status-index` sort key, declared S); retention
-        # reads it back through `float(...)`. Seeding a float here would be
-        # a shape production cannot write and DynamoDB cannot store.
-        "created_at": str(int(created_at)),
-        "retention_window_at_creation": window_days,
-        "legal_hold": legal_hold,
-        "verdict_summary": "some summary",
-        "issue_rationale_text": "some rationale",
-        "upload_s3_key": _upload_key(review_id, owner_sub),
-        "output_s3_key": _output_key(review_id),
-    })
+def _seed_review(
+    reviews,
+    review_id: str,
+    status_: str = "DONE",
+    created_at: float = 0.0,
+    window_days: int = 90,
+    legal_hold: bool = False,
+    owner_sub: str = "owner-1",
+) -> None:
+    reviews.put_item(
+        Item={
+            "review_id": review_id,
+            "owner_sub": owner_sub,
+            "status": status_,
+            # `reviews.create_review` writes `created_at` as an epoch-seconds
+            # STRING (it is the `status-index` sort key, declared S); retention
+            # reads it back through `float(...)`. Seeding a float here would be
+            # a shape production cannot write and DynamoDB cannot store.
+            "created_at": str(int(created_at)),
+            "retention_window_at_creation": window_days,
+            "legal_hold": legal_hold,
+            "verdict_summary": "some summary",
+            "issue_rationale_text": "some rationale",
+            "upload_s3_key": _upload_key(review_id, owner_sub),
+            "output_s3_key": _output_key(review_id),
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
 # get_retention_settings — GET (admin)
 # ---------------------------------------------------------------------------
+
 
 class TestGetRetentionSettings(RetentionTestCase):
     def test_non_admin_403(self):
@@ -258,6 +269,7 @@ class TestGetRetentionSettings(RetentionTestCase):
 # request_retention_change — POST (admin), dual control (issue #13/#61)
 # ---------------------------------------------------------------------------
 
+
 class TestRequestRetentionChange(RetentionTestCase):
     def setUp(self):
         super().setUp()
@@ -275,9 +287,7 @@ class TestRequestRetentionChange(RetentionTestCase):
         result = _retention_module.request_retention_change(180, self.admin, self.ddb)
         self.assertEqual(result["status"], "APPLIED")
         self.assertTrue(result["applied_immediately"])
-        self.assertEqual(
-            self.settings.items["global"]["retention_window_days"], 180
-        )
+        self.assertEqual(self.settings.items["global"]["retention_window_days"], 180)
 
     def test_retroactive_reduction_single_admin_is_pending_not_applied(self):
         result = _retention_module.request_retention_change(
@@ -286,9 +296,7 @@ class TestRequestRetentionChange(RetentionTestCase):
         self.assertEqual(result["status"], "PENDING_SECOND_APPROVAL")
         self.assertFalse(result["applied_immediately"])
         # The window itself must NOT have been lowered yet.
-        self.assertEqual(
-            self.settings.items.get("global", {}).get("retention_window_days", 90), 90
-        )
+        self.assertEqual(self.settings.items.get("global", {}).get("retention_window_days", 90), 90)
 
     # W6.7: the confirmation used to be a free-text `second_admin_confirmation`
     # actor in the requester's own call -- which these tests exercised, and
@@ -299,9 +307,7 @@ class TestRequestRetentionChange(RetentionTestCase):
         pending_id = _retention_module.request_retention_change(
             30, self.admin, self.ddb, reason="cleanup"
         )["pending_id"]
-        result = _retention_module.confirm_pending_reduction(
-            pending_id, self.other_admin, self.ddb
-        )
+        result = _retention_module.confirm_pending_reduction(pending_id, self.other_admin, self.ddb)
         self.assertEqual(result["status"], "APPLIED")
         self.assertEqual(self.settings.items["global"]["retention_window_days"], 30)
 
@@ -314,9 +320,7 @@ class TestRequestRetentionChange(RetentionTestCase):
         with self.assertRaises(HTTPException) as ctx:
             _retention_module.confirm_pending_reduction(pending_id, self.admin, self.ddb)
         self.assertEqual(ctx.exception.status_code, 403)
-        self.assertEqual(
-            self.settings.items.get("global", {}).get("retention_window_days", 90), 90
-        )
+        self.assertEqual(self.settings.items.get("global", {}).get("retention_window_days", 90), 90)
 
     def test_every_retention_change_is_audited(self):
         self.assertEqual(len(self.audit.items), 0)
@@ -339,6 +343,7 @@ class TestRequestRetentionChange(RetentionTestCase):
 # preview_purge_sweep — pre-sweep preview ("this change will purge N objects")
 # ---------------------------------------------------------------------------
 
+
 class TestPreviewPurgeSweep(RetentionTestCase):
     def setUp(self):
         super().setUp()
@@ -354,20 +359,33 @@ class TestPreviewPurgeSweep(RetentionTestCase):
     def test_preview_counts_only_eligible_terminal_unheld_reviews(self):
         now = _retention_module.now_epoch()
         # Eligible: terminal, past its OWN snapshotted window, not held.
-        _seed_review(self.reviews, "r-old", status_="DONE",
-                     created_at=now - 200 * 86400, window_days=90)
+        _seed_review(
+            self.reviews, "r-old", status_="DONE", created_at=now - 200 * 86400, window_days=90
+        )
         # Not eligible: active review, even though old.
-        _seed_review(self.reviews, "r-active", status_="RUNNING",
-                     created_at=now - 200 * 86400, window_days=90)
+        _seed_review(
+            self.reviews,
+            "r-active",
+            status_="RUNNING",
+            created_at=now - 200 * 86400,
+            window_days=90,
+        )
         # Not eligible: legal hold.
-        _seed_review(self.reviews, "r-held", status_="DONE",
-                     created_at=now - 200 * 86400, window_days=90, legal_hold=True)
+        _seed_review(
+            self.reviews,
+            "r-held",
+            status_="DONE",
+            created_at=now - 200 * 86400,
+            window_days=90,
+            legal_hold=True,
+        )
         # Not eligible: too recent for its OWN snapshotted 90-day window --
         # the preview must NOT apply `proposed_window_days` (0, here) in
         # place of the review's own snapshot, since the actual sweep never
         # does either.
-        _seed_review(self.reviews, "r-recent", status_="DONE",
-                     created_at=now - 1 * 86400, window_days=90)
+        _seed_review(
+            self.reviews, "r-recent", status_="DONE", created_at=now - 1 * 86400, window_days=90
+        )
 
         preview = _retention_module.preview_purge_sweep(0, self.admin, self.ddb)
         self.assertEqual(preview["purge_count"], 1)
@@ -378,10 +396,17 @@ class TestPreviewPurgeSweep(RetentionTestCase):
 
     def test_preview_matches_actual_sweep_outcome(self):
         now = _retention_module.now_epoch()
-        _seed_review(self.reviews, "r-1", status_="DONE",
-                     created_at=now - 200 * 86400, window_days=90)
-        _seed_review(self.reviews, "r-2", status_="MANUAL_REVIEW_REQUIRED",
-                     created_at=now - 5 * 86400, window_days=90, legal_hold=True)
+        _seed_review(
+            self.reviews, "r-1", status_="DONE", created_at=now - 200 * 86400, window_days=90
+        )
+        _seed_review(
+            self.reviews,
+            "r-2",
+            status_="MANUAL_REVIEW_REQUIRED",
+            created_at=now - 5 * 86400,
+            window_days=90,
+            legal_hold=True,
+        )
 
         preview = _retention_module.preview_purge_sweep(0, self.admin, self.ddb)
         self.assertEqual(preview["purge_count"], 1)
@@ -406,10 +431,20 @@ class TestPreviewPurgeSweep(RetentionTestCase):
         # Two DONE reviews, created 40 days ago, snapshotted at a 30-day
         # window -- already past their OWN window and thus eligible for an
         # immediate sweep regardless of any proposed window.
-        _seed_review(reviews, "r-past-own-window-1", status_="DONE",
-                     created_at=now - 40 * 86400, window_days=30)
-        _seed_review(reviews, "r-past-own-window-2", status_="DONE",
-                     created_at=now - 40 * 86400, window_days=30)
+        _seed_review(
+            reviews,
+            "r-past-own-window-1",
+            status_="DONE",
+            created_at=now - 40 * 86400,
+            window_days=30,
+        )
+        _seed_review(
+            reviews,
+            "r-past-own-window-2",
+            status_="DONE",
+            created_at=now - 40 * 86400,
+            window_days=30,
+        )
 
         # proposed_window_days=60 is LARGER than either review's own
         # snapshot (30) -- if the preview wrongly substituted this
@@ -431,6 +466,7 @@ class TestPreviewPurgeSweep(RetentionTestCase):
 # ---------------------------------------------------------------------------
 # set_legal_hold / release_legal_hold — mirrors to storage layer (#61)
 # ---------------------------------------------------------------------------
+
 
 class TestLegalHold(RetentionTestCase):
     def setUp(self):
@@ -456,27 +492,28 @@ class TestLegalHold(RetentionTestCase):
         )
         self.assertTrue(result["legal_hold"])
         self.assertEqual(self._review_row(self.reviews, "r-1")["legal_hold"], True)
-        self.assertEqual(self._review_row(self.reviews, "r-1")["legal_hold_reason"], "matter ref 123")
+        self.assertEqual(
+            self._review_row(self.reviews, "r-1")["legal_hold_reason"], "matter ref 123"
+        )
         self.assertEqual(self._review_row(self.reviews, "r-1")["legal_hold_set_by"], "admin-1")
 
-        uploads_tags = self.fake_s3.tags.get(
-            (os.environ["UPLOADS_BUCKET"], _upload_key("r-1")), {}
-        )
-        outputs_tags = self.fake_s3.tags.get(
-            (os.environ["OUTPUTS_BUCKET"], _output_key("r-1")), {}
-        )
+        uploads_tags = self.fake_s3.tags.get((os.environ["UPLOADS_BUCKET"], _upload_key("r-1")), {})
+        outputs_tags = self.fake_s3.tags.get((os.environ["OUTPUTS_BUCKET"], _output_key("r-1")), {})
         self.assertEqual(uploads_tags.get("contract-toaster:legal-hold"), "true")
         self.assertEqual(outputs_tags.get("contract-toaster:legal-hold"), "true")
 
     def test_release_hold_clears_review_row_and_s3_tags(self):
-        _retention_module.set_legal_hold("r-1", "matter ref 123", self.admin, self.ddb, self.fake_s3)
+        _retention_module.set_legal_hold(
+            "r-1", "matter ref 123", self.admin, self.ddb, self.fake_s3
+        )
         # Asserted before the release so this test cannot pass vacuously on a
         # tree where the input object was never tagged in the first place
         # (issue #454 -- it did exactly that until the tagger's prefix was
         # fixed).
         self.assertEqual(
-            self.fake_s3.tags.get((os.environ["UPLOADS_BUCKET"], _upload_key("r-1")), {})
-            .get("contract-toaster:legal-hold"),
+            self.fake_s3.tags.get((os.environ["UPLOADS_BUCKET"], _upload_key("r-1")), {}).get(
+                "contract-toaster:legal-hold"
+            ),
             "true",
         )
         result = _retention_module.release_legal_hold(
@@ -485,9 +522,7 @@ class TestLegalHold(RetentionTestCase):
         self.assertFalse(result["legal_hold"])
         self.assertEqual(self._review_row(self.reviews, "r-1")["legal_hold"], False)
 
-        uploads_tags = self.fake_s3.tags.get(
-            (os.environ["UPLOADS_BUCKET"], _upload_key("r-1")), {}
-        )
+        uploads_tags = self.fake_s3.tags.get((os.environ["UPLOADS_BUCKET"], _upload_key("r-1")), {})
         self.assertNotEqual(uploads_tags.get("contract-toaster:legal-hold"), "true")
 
     def test_hold_reason_required(self):
@@ -504,15 +539,20 @@ class TestLegalHold(RetentionTestCase):
 
     def test_held_review_survives_a_sweep_it_would_otherwise_be_eligible_for(self):
         now = _retention_module.now_epoch()
-        _seed_review(self.reviews, "r-old", status_="DONE",
-                     created_at=now - 200 * 86400, window_days=90)
-        _retention_module.set_legal_hold("r-old", "litigation hold", self.admin, self.ddb, self.fake_s3)
+        _seed_review(
+            self.reviews, "r-old", status_="DONE", created_at=now - 200 * 86400, window_days=90
+        )
+        _retention_module.set_legal_hold(
+            "r-old", "litigation hold", self.admin, self.ddb, self.fake_s3
+        )
 
         preview = _retention_module.preview_purge_sweep(90, self.admin, self.ddb)
         self.assertNotIn("r-old", preview["review_ids"])
 
     def test_set_and_release_are_audited(self):
-        _retention_module.set_legal_hold("r-1", "matter ref 123", self.admin, self.ddb, self.fake_s3)
+        _retention_module.set_legal_hold(
+            "r-1", "matter ref 123", self.admin, self.ddb, self.fake_s3
+        )
         _retention_module.release_legal_hold(
             "r-1", "Matter closed", self.admin, self.ddb, self.fake_s3
         )
@@ -524,6 +564,7 @@ class TestLegalHold(RetentionTestCase):
 # ---------------------------------------------------------------------------
 # list_legal_holds — hold list view
 # ---------------------------------------------------------------------------
+
 
 class TestListLegalHolds(RetentionTestCase):
     def setUp(self):

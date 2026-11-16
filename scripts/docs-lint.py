@@ -243,8 +243,10 @@ DENYLIST = [
     # ID beginning with "global.").
     # Added: 2026-06-12 (issue #43 stale-term sweep)
     (
-        re.compile(r"(?:use|pin|set|invoke|model[_\s]id[\"'\s]*[=:][\"'\s]*)\s*global\.[a-z]",
-                   re.IGNORECASE),
+        re.compile(
+            r"(?:use|pin|set|invoke|model[_\s]id[\"'\s]*[=:][\"'\s]*)\s*global\.[a-z]",
+            re.IGNORECASE,
+        ),
         '"global." inference-profile prefix used as a recommended model ID',
         "living",
     ),
@@ -262,8 +264,7 @@ def check_a() -> list[str]:
             for lineno, line in enumerate(text.splitlines(), 1):
                 if pattern.search(line):
                     failures.append(
-                        f"  {path.relative_to(REPO_ROOT)}:{lineno}: {label}\n"
-                        f"    > {line.strip()}"
+                        f"  {path.relative_to(REPO_ROOT)}:{lineno}: {label}\n    > {line.strip()}"
                     )
     return failures
 
@@ -300,9 +301,7 @@ def check_b() -> list[str]:
         text = read(path)
         for lineno, line in enumerate(text.splitlines(), 1):
             if LATENCY_SECONDS_PATTERN.search(line):
-                stale_hits.append(
-                    f"    {path.relative_to(REPO_ROOT)}:{lineno}: {line.strip()}"
-                )
+                stale_hits.append(f"    {path.relative_to(REPO_ROOT)}:{lineno}: {line.strip()}")
 
     if stale_hits:
         failures.append(
@@ -332,6 +331,7 @@ def check_b() -> list[str]:
 
 # ── Check C — rule-count assertion ────────────────────────────────────────────
 
+
 def check_c() -> list[str]:
     failures = []
 
@@ -353,8 +353,7 @@ def check_c() -> list[str]:
     )
     if not m:
         failures.append(
-            "  Could not find '| Single planted hard rejection | N' row in "
-            "docs/evaluation.md"
+            "  Could not find '| Single planted hard rejection | N' row in docs/evaluation.md"
         )
         return failures
 
@@ -423,9 +422,7 @@ def check_d() -> list[str]:
     # Sub-check D1: reviews row contains a pointer to the canonical dictionary
     reviews_row = _extract_reviews_row(arch_text)
     if reviews_row is None:
-        failures.append(
-            "  Could not find the `reviews` table row in ARCHITECTURE.md"
-        )
+        failures.append("  Could not find the `reviews` table row in ARCHITECTURE.md")
         return failures
 
     if CANONICAL_POINTER not in reviews_row:
@@ -445,9 +442,7 @@ def check_d() -> list[str]:
     # Sub-check D3: "Purge only terminal reviews" bullet lists all six terminal states
     purge_bullet = _extract_purge_terminal_bullet(arch_text)
     if purge_bullet is None:
-        failures.append(
-            "  Could not find 'Purge only terminal reviews' bullet in ARCHITECTURE.md"
-        )
+        failures.append("  Could not find 'Purge only terminal reviews' bullet in ARCHITECTURE.md")
     else:
         for state in sorted(CANONICAL_TERMINAL_STATES):
             if state not in purge_bullet:
@@ -527,8 +522,7 @@ def check_f() -> list[str]:
             for pattern, label in _PLACEHOLDER_PHRASES:
                 if pattern.search(line):
                     failures.append(
-                        f"  {path.relative_to(REPO_ROOT)}:{lineno}: {label}\n"
-                        f"    > {line.strip()}"
+                        f"  {path.relative_to(REPO_ROOT)}:{lineno}: {label}\n    > {line.strip()}"
                     )
     return failures
 
@@ -543,7 +537,10 @@ _LEDGER_STATUS_TOKENS = ("SHIPPED", "STUBBED", "PLANNED")
 # stale on the next edit above it, an anchor only when the heading changes,
 # and check_g() verifies the heading still exists.
 _LEDGER_REQUIRED_CAPABILITIES = [
-    ("playbook upload / version-history / rollback", "RUNBOOK.md#rolling-back-a-bad-playbook-or-prompt"),
+    (
+        "playbook upload / version-history / rollback",
+        "RUNBOOK.md#rolling-back-a-bad-playbook-or-prompt",
+    ),
     ("release-bundle deactivation", "RUNBOOK.md#suspending-intake-deactivate-without-a-successor"),
     ("admin UI corpus upload", "RUNBOOK.md#adding-a-document-to-the-corpus"),
     ("audit-log viewer / CSV export", "RUNBOOK.md#viewing-the-audit-log"),
@@ -608,8 +605,7 @@ def check_g() -> list[str]:
         row = _ledger_row(text, line_ref)
         if row is None:
             failures.append(
-                f"  Ledger does not cover '{label}' (expected a row citing "
-                f"{line_ref})."
+                f"  Ledger does not cover '{label}' (expected a row citing {line_ref})."
             )
             continue
         if not any(token in row for token in _LEDGER_STATUS_TOKENS):
@@ -625,12 +621,8 @@ def check_g() -> list[str]:
             continue  # already reported above
         if "PLANNED" in row or "STUBBED" in row:
             continue
-        script_paths = [
-            REPO_ROOT / m for m in _LEDGER_SCRIPT_PATH_PATTERN.findall(row)
-        ]
-        backed = script_paths and all(
-            _ledger_script_has_cli_entrypoint(p) for p in script_paths
-        )
+        script_paths = [REPO_ROOT / m for m in _LEDGER_SCRIPT_PATH_PATTERN.findall(row)]
+        backed = script_paths and all(_ledger_script_has_cli_entrypoint(p) for p in script_paths)
         if not backed and "SHIPPED" in row:
             documented = read(ARCHITECTURE).split("#### Routes", 1)[-1]
             routes = _LEDGER_ROUTE_PATTERN.findall(row)
@@ -719,11 +711,7 @@ def heading_anchors(text: str) -> set[str]:
             add(re.sub(r"[ \t]+#+$", "", atx.group(2)))
             prev = ""
             continue
-        if (
-            _SETEXT_RE.match(line)
-            and prev.strip()
-            and not re.match(r"^\s*([-*+>|]|\d+[.)])", prev)
-        ):
+        if _SETEXT_RE.match(line) and prev.strip() and not re.match(r"^\s*([-*+>|]|\d+[.)])", prev):
             add(prev.strip())
             prev = ""
             continue
@@ -754,7 +742,10 @@ def iter_links(text: str):
 
 def _tracked_files(repo_root: Path) -> list[str]:
     out = subprocess.run(
-        ["git", "ls-files", "-z"], cwd=repo_root, capture_output=True, check=True  # noqa: S607
+        ["git", "ls-files", "-z"],  # noqa: S607
+        cwd=repo_root,
+        capture_output=True,
+        check=True,
     ).stdout.decode("utf-8")
     return [p for p in out.split("\0") if p]
 
@@ -762,8 +753,7 @@ def _tracked_files(repo_root: Path) -> list[str]:
 def link_scope(tracked: list[str]) -> list[str]:
     """The Markdown files whose links Check H holds to account."""
     return sorted(
-        p for p in tracked
-        if p.endswith(".md") and not p.startswith(LINK_SCOPE_EXCLUDE_PREFIXES)
+        p for p in tracked if p.endswith(".md") and not p.startswith(LINK_SCOPE_EXCLUDE_PREFIXES)
     )
 
 
@@ -815,7 +805,9 @@ def check_links(repo_root: Path = REPO_ROOT, tracked: list[str] | None = None) -
                 joined = path_part if path_part.startswith("/") else f"{src_dir}/{path_part}"
                 resolved = _normalise(joined)
                 if resolved is None:
-                    failures.append(f"  {src}:{lineno}: link climbs out of the repository: {target}")
+                    failures.append(
+                        f"  {src}:{lineno}: link climbs out of the repository: {target}"
+                    )
                     continue
                 if resolved not in tracked_set and resolved not in tracked_dirs:
                     failures.append(f"  {src}:{lineno}: no such tracked file: {target}")
@@ -828,9 +820,7 @@ def check_links(repo_root: Path = REPO_ROOT, tracked: list[str] | None = None) -
                 and resolved in tracked_set
                 and urllib.parse.unquote(fragment).lower() not in anchors_for(resolved)
             ):
-                failures.append(
-                    f"  {src}:{lineno}: no heading anchor '#{fragment}' in {resolved}"
-                )
+                failures.append(f"  {src}:{lineno}: no heading anchor '#{fragment}' in {resolved}")
     return failures
 
 
@@ -849,7 +839,8 @@ def check_h() -> list[str]:
     for line in failures:
         hit = next(
             (
-                (src, target) for src, target in LINK_KNOWN_BROKEN
+                (src, target)
+                for src, target in LINK_KNOWN_BROKEN
                 if line.startswith(f"  {src}:")
                 and (f"'{target}'" in line or line.endswith(f": {target}"))
             ),
@@ -869,11 +860,16 @@ def check_h() -> list[str]:
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
+
 def main() -> int:
     checks = [
         ("A", "Stale-term denylist", check_a),
         ("B", "Latency-figure consistency", check_b),
-        ("C", "Rule-count assertion (playbook hard_rejections == evaluation planted cases)", check_c),
+        (
+            "C",
+            "Rule-count assertion (playbook hard_rejections == evaluation planted cases)",
+            check_c,
+        ),
         ("D", "Field-dictionary subset check (reviews table + terminal states)", check_d),
         ("E", "No literal AWS account ID in RUNBOOK command bodies", check_e),
         ("F", "No placeholder phrases in authoritative docs", check_f),

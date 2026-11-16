@@ -101,9 +101,7 @@ for _dir in (SCRIPTS_DIR, BACKEND_SRC_DIR, BACKEND_DIR, REPO_ROOT / "tests"):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
 
-os.environ.setdefault(
-    "PLAYBOOK_VERSIONS_TABLE", "contract-toaster-playbook-versions-479-test"
-)
+os.environ.setdefault("PLAYBOOK_VERSIONS_TABLE", "contract-toaster-playbook-versions-479-test")
 os.environ.setdefault("UPLOADS_BUCKET", "contract-toaster-uploads-479-test")
 os.environ.setdefault("REVIEWS_TABLE", "contract-toaster-reviews-479-test")
 os.environ.setdefault("PLAYBOOKS_TABLE", "contract-toaster-playbooks-479-test")
@@ -356,7 +354,10 @@ class TestOpfDigestModeRunReview(unittest.TestCase):
         )
 
         result = review_spine.run_review(
-            docx_bytes, bundle, fake_client, review_id="opf-479-1",
+            docx_bytes,
+            bundle,
+            fake_client,
+            review_id="opf-479-1",
             toaster_guidance="Prefer mutual indemnification caps.",
         )
 
@@ -427,7 +428,11 @@ class TestOpfDigestModeRunReview(unittest.TestCase):
         )
 
         result = review_spine.run_review(
-            docx_bytes, bundle, fake_client, review_id="opf-479-15", policy=policy,
+            docx_bytes,
+            bundle,
+            fake_client,
+            review_id="opf-479-15",
+            policy=policy,
         )
 
         self.assertEqual(result["status"], "OK", result)
@@ -486,7 +491,11 @@ class TestOpfDigestModeRunReview(unittest.TestCase):
 
         instructions = "Prefer a 12-month term unless the counterparty is a state university."
         result = review_spine.run_review(
-            docx_bytes, bundle, fake_client, review_id="opf-479-18", policy=policy,
+            docx_bytes,
+            bundle,
+            fake_client,
+            review_id="opf-479-18",
+            policy=policy,
             instructions_text=instructions,
             toaster_guidance="Prefer mutual indemnification caps.",
         )
@@ -506,7 +515,9 @@ class TestOpfDigestModeRunReview(unittest.TestCase):
             digest_idx = system_prompt_text.find("clause.indemnification")
             guidance_idx = system_prompt_text.find("WEIGHTED GUIDANCE")
             self.assertGreater(digest_idx, -1)
-            self.assertLess(digest_idx, guidance_idx, "DIGEST must precede the policy GUIDANCE block")
+            self.assertLess(
+                digest_idx, guidance_idx, "DIGEST must precede the policy GUIDANCE block"
+            )
             # After the document, before the reviewer's own words.
             doc_end = sent.index("</COUNTERPARTY_DOCUMENT>")
             standing_idx = sent.index("STANDING_INSTRUCTIONS")
@@ -693,7 +704,10 @@ class TestFloorCoverage(unittest.TestCase):
         ledger_records: list[Any] = []
 
         result = review_spine.run_review(
-            docx_bytes, bundle, fake_client, review_id="opf-479-12",
+            docx_bytes,
+            bundle,
+            fake_client,
+            review_id="opf-479-12",
             ledger_write=ledger_records.append,
         )
 
@@ -1097,9 +1111,7 @@ class TestLoadPlaybookBundleResolution(RealActivationTestCase):
         doc = _load_opf_doc(FULL_FIXTURE_PATH)
         self._activate_opf("acme-university", doc)
 
-        bundle = pipeline_runner._load_playbook_bundle(
-            "acme-university", self.ddb, self.s3
-        )
+        bundle = pipeline_runner._load_playbook_bundle("acme-university", self.ddb, self.s3)
 
         self.assertIn("opf_bundle_v2", bundle)
         self.assertEqual(
@@ -1127,9 +1139,7 @@ class TestLoadPlaybookBundleResolution(RealActivationTestCase):
             }
         )
 
-        bundle = pipeline_runner._load_playbook_bundle(
-            "educational-affiliation", self.ddb, self.s3
-        )
+        bundle = pipeline_runner._load_playbook_bundle("educational-affiliation", self.ddb, self.s3)
         self.assertEqual(bundle["opf_bundle_v2"]["overrides"], None)
         # This fixture's activation row carries no model-id metadata (issue
         # #478 does not collect one); pin it here to the fake client's
@@ -1142,7 +1152,10 @@ class TestLoadPlaybookBundleResolution(RealActivationTestCase):
         }
 
         result = review_spine.run_review(
-            docx_bytes, bundle, fake_client, review_id="opf-479-17",
+            docx_bytes,
+            bundle,
+            fake_client,
+            review_id="opf-479-17",
             policy=policy,
             instructions_text="Educational-affiliation agreements default toward ACCEPT.",
         )
@@ -1154,9 +1167,7 @@ class TestLoadPlaybookBundleResolution(RealActivationTestCase):
         # suffix after the document, not in the system prompt.
         sent_prompt_text = fake_client.calls[0]["user_prompt"]
         self.assertIn("STANDING_INSTRUCTIONS", sent_prompt_text)
-        self.assertIn(
-            "Educational-affiliation agreements default toward ACCEPT.", sent_prompt_text
-        )
+        self.assertIn("Educational-affiliation agreements default toward ACCEPT.", sent_prompt_text)
         self.assertNotIn("STANDING_INSTRUCTIONS", fake_client.calls[0]["system_prompt"])
 
         # Lineage: the review row's OPF identity comes off the SAME
@@ -1168,9 +1179,7 @@ class TestLoadPlaybookBundleResolution(RealActivationTestCase):
         # No playbook_versions row at all for this playbook_id -- must
         # resolve via the registry disk path exactly as before issue #479,
         # not raise.
-        bundle = pipeline_runner._load_playbook_bundle(
-            "synthetic-nda-sample", self.ddb, self.s3
-        )
+        bundle = pipeline_runner._load_playbook_bundle("synthetic-nda-sample", self.ddb, self.s3)
         self.assertNotIn("opf_bundle_v2", bundle)
         self.assertIn("playbook", bundle)
 
@@ -1189,9 +1198,7 @@ class TestLoadPlaybookBundleResolution(RealActivationTestCase):
             }
         )
 
-        bundle = pipeline_runner._load_playbook_bundle(
-            "synthetic-nda-sample", self.ddb, self.s3
-        )
+        bundle = pipeline_runner._load_playbook_bundle("synthetic-nda-sample", self.ddb, self.s3)
         self.assertNotIn("opf_bundle_v2", bundle)
 
     def test_no_dynamodb_or_s3_handle_keeps_pre_479_registry_behavior(self):
@@ -1233,9 +1240,7 @@ class TestActivatedStubBasisAcceptanceThreadsIntoReview(RealActivationTestCase):
             }
         )
 
-        bundle = pipeline_runner._load_playbook_bundle(
-            "educational-affiliation", self.ddb, self.s3
-        )
+        bundle = pipeline_runner._load_playbook_bundle("educational-affiliation", self.ddb, self.s3)
         self.assertTrue(bundle["opf_bundle_v2"]["accepted_stub_basis"])
         bundle["playbook"]["metadata"] = {
             "primary_model_id": PRIMARY_MODEL_ID,
@@ -1243,7 +1248,10 @@ class TestActivatedStubBasisAcceptanceThreadsIntoReview(RealActivationTestCase):
         }
 
         result = review_spine.run_review(
-            docx_bytes, bundle, fake_client, review_id="opf-479-stub-accepted",
+            docx_bytes,
+            bundle,
+            fake_client,
+            review_id="opf-479-stub-accepted",
         )
 
         self.assertEqual(result["status"], "OK", result)
@@ -1274,7 +1282,10 @@ class TestActivatedStubBasisAcceptanceThreadsIntoReview(RealActivationTestCase):
         )
 
         result = review_spine.run_review(
-            docx_bytes, bundle, fake_client, review_id="opf-479-stub-unaccepted",
+            docx_bytes,
+            bundle,
+            fake_client,
+            review_id="opf-479-stub-unaccepted",
         )
 
         self.assertEqual(result["status"], "ERROR", result)
@@ -1342,7 +1353,10 @@ class TestWriteRealTerminalOpfLineage(unittest.TestCase):
         self.table.put_item(Item={"review_id": "opf-479-review-opf", "status": "RUNNING"})
 
         pipeline_runner._write_real_terminal(
-            "opf-479-review-opf", self._terminal_result(), None, self.ddb,
+            "opf-479-review-opf",
+            self._terminal_result(),
+            None,
+            self.ddb,
             opf_lineage=opf_lineage,
         )
 
@@ -1355,7 +1369,10 @@ class TestWriteRealTerminalOpfLineage(unittest.TestCase):
         # RUNNING; seed the row the way `run_real_pipeline` leaves it.
         self.table.put_item(Item={"review_id": "opf-479-review-v1", "status": "RUNNING"})
         pipeline_runner._write_real_terminal(
-            "opf-479-review-v1", self._terminal_result(), None, self.ddb,
+            "opf-479-review-v1",
+            self._terminal_result(),
+            None,
+            self.ddb,
             opf_lineage=pipeline_runner._opf_lineage_for_bundle({"playbook": {"metadata": {}}}),
         )
 
@@ -1475,7 +1492,11 @@ class TestWriteRealTerminalFloorCoverage(unittest.TestCase):
         self.table.put_item(Item={"review_id": "opf-479-review-floor-ok", "status": "RUNNING"})
 
         pipeline_runner._write_real_terminal(
-            "opf-479-review-floor-ok", result, None, self.ddb, floor_coverage=floor_coverage,
+            "opf-479-review-floor-ok",
+            result,
+            None,
+            self.ddb,
+            floor_coverage=floor_coverage,
         )
 
         item = self.table.get_item(Key={"review_id": "opf-479-review-floor-ok"})["Item"]
@@ -1499,10 +1520,15 @@ class TestWriteRealTerminalFloorCoverage(unittest.TestCase):
 
         # RUNNING; seed the row the way `run_real_pipeline` leaves it.
 
-        self.table.put_item(Item={"review_id": "opf-479-review-floor-unjudged", "status": "RUNNING"})
+        self.table.put_item(
+            Item={"review_id": "opf-479-review-floor-unjudged", "status": "RUNNING"}
+        )
 
         pipeline_runner._write_real_terminal(
-            "opf-479-review-floor-unjudged", result, None, self.ddb,
+            "opf-479-review-floor-unjudged",
+            result,
+            None,
+            self.ddb,
             floor_coverage=floor_coverage,
         )
 
@@ -1519,7 +1545,10 @@ class TestWriteRealTerminalFloorCoverage(unittest.TestCase):
         # RUNNING; seed the row the way `run_real_pipeline` leaves it.
         self.table.put_item(Item={"review_id": "opf-479-review-floor-v1", "status": "RUNNING"})
         pipeline_runner._write_real_terminal(
-            "opf-479-review-floor-v1", result, None, self.ddb,
+            "opf-479-review-floor-v1",
+            result,
+            None,
+            self.ddb,
             floor_coverage=pipeline_runner._floor_coverage_for_result(result),
         )
 

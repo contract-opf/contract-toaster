@@ -263,9 +263,7 @@ describe('notes mode — automatically persists across sessions', () => {
 
     fireEvent.click(screen.getByTestId('review-notes-mode-option-none'));
 
-    await waitFor(() =>
-      expect(callsTo(fetchMock, '/api/me/preferences', 'PUT')).toHaveLength(1),
-    );
+    await waitFor(() => expect(callsTo(fetchMock, '/api/me/preferences', 'PUT')).toHaveLength(1));
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const [, init] = callsTo(fetchMock, '/api/me/preferences', 'PUT')[0]!;
     // eslint-disable-next-line @typescript-eslint/no-base-to-string
@@ -286,7 +284,10 @@ describe('notes mode — automatically persists across sessions', () => {
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         // eslint-disable-next-line @typescript-eslint/no-base-to-string
         const url = String(input);
-        if (url.includes('/api/me/preferences') && (init?.method ?? 'GET').toUpperCase() === 'PUT') {
+        if (
+          url.includes('/api/me/preferences') &&
+          (init?.method ?? 'GET').toUpperCase() === 'PUT'
+        ) {
           if (failPut) {
             failPut = false;
             return {
@@ -337,9 +338,7 @@ describe('notes mode — the #572 kill switch is honoured client-side', () => {
     // posture the dial's coming-soon stops take, rather than hiding two of
     // the four modes.
     expect(
-      NOTES_MODE_SETTINGS.filter((setting) => unavailable(setting.id)).map(
-        (setting) => setting.id,
-      ),
+      NOTES_MODE_SETTINGS.filter((setting) => unavailable(setting.id)).map((setting) => setting.id),
     ).toEqual(['internal', 'both']);
 
     await submit();

@@ -102,9 +102,7 @@ _REAL_GUIDANCE = "Flag any one-way indemnity."
 
 
 def _paragraph_with_breaks(lines: list[str]) -> str:
-    runs = "<w:br/>".join(
-        f'<w:t xml:space="preserve">{_xml_escape(line)}</w:t>' for line in lines
-    )
+    runs = "<w:br/>".join(f'<w:t xml:space="preserve">{_xml_escape(line)}</w:t>' for line in lines)
     return f"<w:p><w:r>{runs}</w:r></w:p>"
 
 
@@ -319,9 +317,7 @@ def test_preflight_escapes_its_excerpt(failures: list[str]) -> None:
 
 def test_the_cover_note_escapes_its_digest(failures: list[str]) -> None:
     tag = cover_note_pass.COVER_NOTE_DIGEST_TAG
-    prompt = cover_note_pass.render_cover_note_user_prompt(
-        [], verdict_summary=_forged_with(tag)
-    )
+    prompt = cover_note_pass.render_cover_note_user_prompt([], verdict_summary=_forged_with(tag))
     _check_builder("3d/cover-note", prompt, tag, failures)
 
 

@@ -108,10 +108,7 @@ FOOTNOTES_PART = "word/footnotes.xml"
 # The four modes, named once. `backend/src/reviews.py::NOTES_MODES`.
 ALL_MODES = ("none", "external", "internal", "both")
 
-_SEC8_TEXT = (
-    "Each party's aggregate liability under this Agreement shall not "
-    "exceed $150,000."
-)
+_SEC8_TEXT = "Each party's aggregate liability under this Agreement shall not exceed $150,000."
 _SEC9_TEXT = "This Agreement shall be governed by the laws of Delaware."
 _SEC8_QUOTE = "shall not exceed $150,000"
 _SEC8_REPLACEMENT = "is uncapped"
@@ -243,19 +240,14 @@ def _footnote_texts(docx_bytes: bytes) -> list[str]:
     for fn in root.findall(_qn("footnote")):
         if int(fn.get(_qn("id"), "0")) <= 0:
             continue
-        texts.append(
-            "".join((t.text or "") for t in fn.iter(_qn("t"))).strip()
-        )
+        texts.append("".join((t.text or "") for t in fn.iter(_qn("t"))).strip())
     return texts
 
 
 def _footnote_reference_ids(docx_bytes: bytes) -> list[str]:
     with zipfile.ZipFile(io.BytesIO(bytes(docx_bytes))) as zf:
         root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
-    return [
-        ref.get(_qn("id"))
-        for ref in root.iter(_qn("footnoteReference"))
-    ]
+    return [ref.get(_qn("id")) for ref in root.iter(_qn("footnoteReference"))]
 
 
 def _reference_ids_inside_ins(docx_bytes: bytes) -> list[str]:
@@ -520,8 +512,7 @@ def _part_3_both_distinguishable_and_survives_accept_all(failures: list) -> None
         )
     if len(_footnote_reference_ids(accepted)) != 1:
         failures.append(
-            f"[3h] Accept-all dropped a footnote reference: "
-            f"{_footnote_reference_ids(accepted)}"
+            f"[3h] Accept-all dropped a footnote reference: {_footnote_reference_ids(accepted)}"
         )
     if _reference_ids_inside_ins(accepted):
         failures.append(
@@ -709,9 +700,9 @@ def _part_6_field_is_declared_optional_and_scanned(failures: list) -> None:
             ),
         )
         for label, schema_variant in variants:
-            issue_properties = (
-                (schema_variant.get("definitions") or {}).get("Issue") or {}
-            ).get("properties") or {}
+            issue_properties = ((schema_variant.get("definitions") or {}).get("Issue") or {}).get(
+                "properties"
+            ) or {}
             present = redline_generate.INTERNAL_RATIONALE_FIELD in issue_properties
             if present != wanted:
                 failures.append(
@@ -770,9 +761,7 @@ def _part_6_field_is_declared_optional_and_scanned(failures: list) -> None:
             f"supposed to permit exactly this."
         )
     outcome = leakage_scan.scan_model_output(
-        _minimal_response(
-            {"external_rationale_for_footnote": f"Context. {_PLAYBOOK_SENTENCE}"}
-        ),
+        _minimal_response({"external_rationale_for_footnote": f"Context. {_PLAYBOOK_SENTENCE}"}),
         corpus,
     )
     if not outcome.blocked:
@@ -863,7 +852,7 @@ def _part_8_the_prompt_asks_for_the_field_it_renders(failures: list) -> None:
         if (
             wanted
             and field in overlay
-            and field not in overlay.split("- \"issue_key\" is a short handle")[0]
+            and field not in overlay.split('- "issue_key" is a short handle')[0]
         ):
             failures.append(
                 f"[8e/{mode}] {field!r} is mentioned in the overlay but not inside the "
@@ -902,9 +891,9 @@ def _part_8_the_prompt_asks_for_the_field_it_renders(failures: list) -> None:
     # the projected field needs an honest "no internal note" value -- and
     # that value must normalize back to a shape the FULL schema accepts.
     projected = model_output_schema.project_output_schema_for_provider(notes_mode="both")
-    prop = ((projected.get("definitions") or {}).get("Issue") or {}).get(
-        "properties", {}
-    ).get(field)
+    prop = (
+        ((projected.get("definitions") or {}).get("Issue") or {}).get("properties", {}).get(field)
+    )
     types = (prop or {}).get("type")
     nullable = isinstance(types, list) and "null" in types
     if not nullable:

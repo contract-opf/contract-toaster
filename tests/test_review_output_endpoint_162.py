@@ -175,12 +175,12 @@ class ReviewOutputEndpointTestBase(unittest.TestCase):
 
         self.app = FastAPI()
         self.app.include_router(review_routes.router)
-        self.app.dependency_overrides[review_routes.get_dynamodb_resource] = (
-            lambda: self.ddb_resource
+        self.app.dependency_overrides[review_routes.get_dynamodb_resource] = lambda: (
+            self.ddb_resource
         )
         self.app.dependency_overrides[review_routes.get_s3_client] = lambda: self.spy_s3
-        self.app.dependency_overrides[review_routes.get_dynamodb_client] = (
-            lambda: self.users_ddb_client
+        self.app.dependency_overrides[review_routes.get_dynamodb_client] = lambda: (
+            self.users_ddb_client
         )
         self.app.dependency_overrides[review_routes.get_env_name] = lambda: "dev"
         self.client = TestClient(self.app)

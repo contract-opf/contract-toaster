@@ -334,6 +334,7 @@ def widen_output_budget(current: int, ceiling: int) -> int:
     """
     return _model_client.widen_output_budget(current, ceiling)
 
+
 # ARCHITECTURE.md -> "Per-pass prompt manifest" -> document size policy.
 #
 # Issue #625 (owner decision 2026-08-25) DELETED the full-doc token
@@ -483,6 +484,7 @@ def request_input_tokens_est(
 # System prompt: (a) guidance, (b) binary-decision overlay, (c) playbook.
 # ---------------------------------------------------------------------------
 
+
 def render_review_guidance_block(party: str = "", counterparty_type: str = "") -> str:
     """The review's single stated objective (issues #675/#677).
 
@@ -598,7 +600,7 @@ REVIEW_GUIDANCE_BLOCK = render_review_guidance_block()
 # into the assembled prompt; only a live paid review shows the behavior.
 # ---------------------------------------------------------------------------
 OWN_WORDS_SUMMARY_RULE = (
-    "- WRITE \"verdict_summary\" IN YOUR OWN WORDS. It is your account, for "
+    '- WRITE "verdict_summary" IN YOUR OWN WORDS. It is your account, for '
     "the attorney who asked for this review, of what you found -- not a "
     "quotation of the material you were given. Do NOT copy sentences or "
     "distinctive phrases word-for-word out of the playbook, the playbook "
@@ -606,19 +608,19 @@ OWN_WORDS_SUMMARY_RULE = (
     "instructions; restate every position you relied on in your own "
     "phrasing.\n"
     "- Your own words does NOT mean vague. The attorney must still be able "
-    "to tell from \"verdict_summary\" exactly which position was applied, "
+    'to tell from "verdict_summary" exactly which position was applied, '
     "what that position requires, and how this document falls short of it "
     "-- name the clause, name the requirement, name the gap. Rewording is a "
     "change of wording, never a loss of substance or specificity.\n"
     "- The same own-words rule governs the other prose you write to explain "
-    "yourself: \"counterparty_change_summary\", "
-    "\"external_rationale_for_footnote\", and any objection you raise "
+    'yourself: "counterparty_change_summary", '
+    '"external_rationale_for_footnote", and any objection you raise '
     "against another reviewer's issue.\n"
     "- The block-transcript fields are exempt and must stay verbatim: the "
-    "\"text\" of every \"keep\" and \"delete\" segment is a "
+    '"text" of every "keep" and "delete" segment is a '
     "character-for-character copy of the counterparty document, as required "
-    "above, and the \"text\" of an \"insert\" segment (and an "
-    "\"insert_block_after\" op's \"new_text\") may and should reproduce a "
+    'above, and the "text" of an "insert" segment (and an '
+    '"insert_block_after" op\'s "new_text") may and should reproduce a '
     "standard or preferred clause word-for-word so it lands in the document "
     "as drafted. Never paraphrase any of those."
 )
@@ -674,24 +676,24 @@ OWN_WORDS_SUMMARY_RULE = (
 INTERNAL_RATIONALE_FIELD = "internal_rationale_for_footnote"
 
 _INTERNAL_RATIONALE_KEY_CLAUSE = (
-    ", plus \"internal_rationale_for_footnote\" whenever this issue needs a "
+    ', plus "internal_rationale_for_footnote" whenever this issue needs a '
     "note written for your own team (see the bullet below for what belongs "
     "there and when to omit it)"
 )
 
 _INTERNAL_RATIONALE_BULLET = (
     "- THIS REVIEW IS RUN WITH INTERNAL NOTES ON, so an issue MAY carry an "
-    "\"internal_rationale_for_footnote\": one or two sentences addressed to "
+    '"internal_rationale_for_footnote": one or two sentences addressed to '
     "YOUR OWN TEAM and to nobody else -- the internal reasoning behind the "
     "issue, the position you applied, or a departure from that position "
     "that the reviewing team directed for this review. It is rendered into "
     "the delivered document as a SEPARATE footnote behind an unmissable "
-    "\"[INTERNAL]\" marking, and it is the ONLY field in this contract "
+    '"[INTERNAL]" marking, and it is the ONLY field in this contract '
     "written for an internal reader. Keep "
-    "\"external_rationale_for_footnote\" purely counterparty-facing in "
+    '"external_rationale_for_footnote" purely counterparty-facing in '
     "every case -- the contract position only, never internal strategy, "
     "never the reviewing team's own instructions to you. OMIT the "
-    "\"internal_rationale_for_footnote\" key entirely -- never an empty "
+    '"internal_rationale_for_footnote" key entirely -- never an empty '
     "string, never a placeholder, never a restatement of the external "
     "rationale -- when you have no internal note to make for that issue.\n"
 )
@@ -930,9 +932,7 @@ LENGTH_BUDGETS_DELIBERATELY_UNSTATED: dict[str, str] = {
         "a playbook rule id copied verbatim from the ledger block, not authored "
         "text -- the model cannot shorten it and must not try"
     ),
-    f"{_LEDGER_DISPOSITION_POINTER}/block_id": (
-        "same copied block id as BlockPatch.block_id"
-    ),
+    f"{_LEDGER_DISPOSITION_POINTER}/block_id": ("same copied block id as BlockPatch.block_id"),
     f"{_LEDGER_DISPOSITION_POINTER}/span": (
         "transcription, not prose: a stated ceiling invites cutting the cited "
         "words short, and a span that no longer establishes the protection "
@@ -974,7 +974,8 @@ def schema_max_length(schema: dict[str, Any], pointer: str) -> int | None:
 
 
 def _render_budget_lines(
-    budgets: "tuple[tuple[str, str], ...]", schema: dict[str, Any]  # noqa: UP037
+    budgets: "tuple[tuple[str, str], ...]",  # noqa: UP037
+    schema: dict[str, Any],
 ) -> str:
     """`"field" -- N characters` lines for `budgets`, deduplicated on
     (label, cap) so two pointers at the same field name and the same cap
@@ -986,7 +987,7 @@ def _render_budget_lines(
         if cap is None or (label, cap) in seen:
             continue
         seen.add((label, cap))
-        lines.append(f"    \"{label}\": at most {cap} characters.\n")
+        lines.append(f'    "{label}": at most {cap} characters.\n')
     return "".join(lines)
 
 
@@ -1011,9 +1012,7 @@ def render_length_budget_block(
     against.
     """
     active = load_output_schema() if schema is None else schema
-    budgets = _PRIMARY_LENGTH_BUDGETS + (
-        _INTERNAL_NOTES_LENGTH_BUDGETS if internal_notes else ()
-    )
+    budgets = _PRIMARY_LENGTH_BUDGETS + (_INTERNAL_NOTES_LENGTH_BUDGETS if internal_notes else ())
     return (
         "LENGTH BUDGETS -- every one of these is enforced:\n"
         + _render_budget_lines(budgets, active)
@@ -1029,10 +1028,9 @@ def render_critic_length_budget_block(schema: dict[str, Any] | None = None) -> s
         "LENGTH BUDGETS FOR YOUR OWN FIELDS -- every one of these is "
         "enforced:\n"
         + _render_budget_lines(_CRITIC_LENGTH_BUDGETS, active)
-        + "Any issue you add in \"critic_delta\".\"added_issues\", and every "
-        "issue in your own \"issues\", carries the SAME per-field budgets "
-        "the OUTPUT CONTRACT block states for an issue.\n"
-        + _LENGTH_BUDGET_CEILING_RULE
+        + 'Any issue you add in "critic_delta"."added_issues", and every '
+        'issue in your own "issues", carries the SAME per-field budgets '
+        "the OUTPUT CONTRACT block states for an issue.\n" + _LENGTH_BUDGET_CEILING_RULE
     )
 
 
@@ -1074,59 +1072,57 @@ def _render_binary_decision_overlay(*, internal_notes: bool) -> str:
         "contract:\n"
         "- The counterparty document text you were shown renders each "
         "paragraph with a code-assigned BLOCK ID at the start of its first "
-        "line, in square brackets: \"[p0001] \", \"[p0002] \", and so on. "
+        'line, in square brackets: "[p0001] ", "[p0002] ", and so on. '
         "One id per paragraph, in document order.\n"
         "- Those ids are how you point at the document. You do NOT quote the "
         "document to identify what you are changing, and you do NOT restate a "
         "whole clause to change it: you name the block id and transcribe that "
         "block as an ordered list of segments.\n"
-        "- A paragraph whose first line also carries a \"## \" marker is a "
-        "clause TITLE line. Both the \"[pNNNN] \" id and the \"## \" marker "
+        '- A paragraph whose first line also carries a "## " marker is a '
+        'clause TITLE line. Both the "[pNNNN] " id and the "## " marker '
         "are orientation supplied by this pipeline -- they are NOT part of the "
         "contract and they appear nowhere in the document itself.\n"
-        "- NEVER copy the \"[pNNNN]\" markers into any output field or "
-        "segment text. A block id belongs in a \"block_id\" or "
-        "\"anchor_block_id\" field and nowhere else. A segment whose text "
+        '- NEVER copy the "[pNNNN]" markers into any output field or '
+        'segment text. A block id belongs in a "block_id" or '
+        '"anchor_block_id" field and nowhere else. A segment whose text '
         "carries a marker does not match the document's real characters and "
         "its edit is rejected.\n\n"
         "OUTPUT CONTRACT -- follow it EXACTLY:\n"
         "- Respond with a SINGLE raw JSON object and NOTHING else: no prose "
         "before or after it, no explanation, no markdown code fences. The first "
         "character of your response must be '{' and the last must be '}'.\n"
-        "- Include these top-level keys and ONLY these: \"schema_version\" "
-        f"(string, exactly \"{OUTPUT_SCHEMA_VERSION}\"), \"decision\" "
-        "(\"ACCEPT\" or \"REQUEST_CHANGE\"), \"confidence_state\", "
-        "\"issues\" (array), \"block_patches\" (array) and \"block_ops\" "
-        "(array). You MAY also include \"verdict_summary\" (a brief narrative "
+        '- Include these top-level keys and ONLY these: "schema_version" '
+        f'(string, exactly "{OUTPUT_SCHEMA_VERSION}"), "decision" '
+        '("ACCEPT" or "REQUEST_CHANGE"), "confidence_state", '
+        '"issues" (array), "block_patches" (array) and "block_ops" '
+        '(array). You MAY also include "verdict_summary" (a brief narrative '
         "string). Do NOT add any other top-level key.\n"
-        "- \"confidence_state\" is EXACTLY ONE of these three literal values, "
-        "and never any other word: \"OK\" (normal confidence in this review), "
-        "\"LOW_CONFIDENCE\" (you are uncertain, but you still identified the "
-        "issues you list), or \"MANUAL_REVIEW_REQUIRED\" (you could not review "
+        '- "confidence_state" is EXACTLY ONE of these three literal values, '
+        'and never any other word: "OK" (normal confidence in this review), '
+        '"LOW_CONFIDENCE" (you are uncertain, but you still identified the '
+        'issues you list), or "MANUAL_REVIEW_REQUIRED" (you could not review '
         "this document well enough for the result to be relied on). It is a "
-        "system status, NOT a confidence score -- do not emit \"high\", "
-        "\"medium\", \"low\", a number, or any other value.\n"
-        "- For ACCEPT, \"issues\", \"block_patches\" and \"block_ops\" are "
+        'system status, NOT a confidence score -- do not emit "high", '
+        '"medium", "low", a number, or any other value.\n'
+        '- For ACCEPT, "issues", "block_patches" and "block_ops" are '
         "all empty arrays. For REQUEST_CHANGE, review the document clause by "
         "clause against the playbook.\n"
-        "- \"issues\" is the list of what is wrong. Each issue object has "
-        "EXACTLY these keys and no others: \"issue_key\", \"section_ref\", "
-        "\"section_title\", \"counterparty_change_summary\", \"decision\", "
-        "\"external_rationale_for_footnote\", \"playbook_topic_id\", "
-        "\"internal_precedent_citation\", \"provenance\" (string, exactly "
-        "\"model\"), plus \"replacement_scope_note\" whenever it applies "
-        "(see the wholesale-replacement bullet below)"
-        + internal_key_clause
-        + ".\n"
-        "- \"issue_key\" is a short handle you assign to the issue: "
-        "\"I1\", \"I2\", \"I3\", ... -- the letter I followed by digits, "
+        '- "issues" is the list of what is wrong. Each issue object has '
+        'EXACTLY these keys and no others: "issue_key", "section_ref", '
+        '"section_title", "counterparty_change_summary", "decision", '
+        '"external_rationale_for_footnote", "playbook_topic_id", '
+        '"internal_precedent_citation", "provenance" (string, exactly '
+        '"model"), plus "replacement_scope_note" whenever it applies '
+        "(see the wholesale-replacement bullet below)" + internal_key_clause + ".\n"
+        '- "issue_key" is a short handle you assign to the issue: '
+        '"I1", "I2", "I3", ... -- the letter I followed by digits, '
         "and nothing else. Every issue in this response must have a DIFFERENT "
         "issue_key. It is what joins an issue to the edits that express it, so "
         "an issue_key you reuse or mistype silently attaches your edit to the "
         "wrong issue.\n"
         "- Do NOT include a "
         + " key and do NOT include a ".join(
-            f"\"{name}\"" for name in (*_RETIRED_ISSUE_KEYS, "proposed_replacement_text")
+            f'"{name}"' for name in (*_RETIRED_ISSUE_KEYS, "proposed_replacement_text")
         )
         + " key. Under this contract your edits ARE "
         "your proposal: this pipeline derives the resulting clause text from "
@@ -1134,42 +1130,42 @@ def _render_binary_decision_overlay(*, internal_notes: bool) -> str:
         "unverified copy that could disagree with the edit you actually "
         "authored.\n\n"
         "HOW TO WRITE AN EDIT:\n"
-        "- \"block_patches\" holds every SUB-PARAGRAPH edit: changing words, "
+        '- "block_patches" holds every SUB-PARAGRAPH edit: changing words, '
         "phrases or sentences inside a paragraph. EXACTLY ONE entry per "
         "block_id -- if two different issues both edit the same paragraph, "
         "they are two segments carrying different issue_keys inside that ONE "
         "entry, never two entries for the same block_id.\n"
-        "- Each entry is {\"block_id\": \"pNNNN\", \"segments\": [...]}, "
+        '- Each entry is {"block_id": "pNNNN", "segments": [...]}, '
         "where the segments TRANSCRIBE THE WHOLE PARAGRAPH in order, start to "
         "finish. Three segment shapes, and no others:\n"
-        "    {\"op\": \"keep\", \"text\": \"...\"} -- a span of the "
+        '    {"op": "keep", "text": "..."} -- a span of the '
         "paragraph's own text you are NOT changing. A keep carries no "
         "issue_key: nothing authored it.\n"
-        "    {\"op\": \"delete\", \"text\": \"...\", \"issue_key\": "
-        "\"I1\"} -- a span of the paragraph's own text to remove.\n"
-        "    {\"op\": \"insert\", \"text\": \"...\", \"issue_key\": "
-        "\"I1\"} -- new language to add at this point.\n"
-        "- The \"keep\" and \"delete\" segments together must reproduce that "
+        '    {"op": "delete", "text": "...", "issue_key": '
+        '"I1"} -- a span of the paragraph\'s own text to remove.\n'
+        '    {"op": "insert", "text": "...", "issue_key": '
+        '"I1"} -- new language to add at this point.\n'
+        '- The "keep" and "delete" segments together must reproduce that '
         "paragraph's text EXACTLY, end to end, in order, with nothing skipped "
         "and nothing invented -- this pipeline checks them against the "
         "document's real characters. Copy them; do not retype them from "
         "memory, do not fix typos, do not tidy spacing or punctuation. A "
-        "\"delete\" immediately followed by an \"insert\" is how you write a "
+        '"delete" immediately followed by an "insert" is how you write a '
         "replacement.\n"
-        "- \"block_ops\" holds WHOLE-PARAGRAPH work, which needs no "
+        '- "block_ops" holds WHOLE-PARAGRAPH work, which needs no '
         "transcript. Two shapes, and no others:\n"
-        "    {\"op\": \"delete_block\", \"block_id\": \"pNNNN\", "
-        "\"issue_key\": \"I1\"} -- strike an entire paragraph.\n"
-        "    {\"op\": \"insert_block_after\", \"anchor_block_id\": "
-        "\"pNNNN\", \"new_text\": \"...\", \"issue_key\": \"I1\"} -- add "
+        '    {"op": "delete_block", "block_id": "pNNNN", '
+        '"issue_key": "I1"} -- strike an entire paragraph.\n'
+        '    {"op": "insert_block_after", "anchor_block_id": '
+        '"pNNNN", "new_text": "...", "issue_key": "I1"} -- add '
         "a new paragraph immediately after an existing one; this is how a "
-        "MISSING clause is supplied. Use \"start\" as the anchor_block_id to "
+        'MISSING clause is supplied. Use "start" as the anchor_block_id to '
         "add one before the document's first paragraph.\n"
         "- A paragraph you delete wholesale must NOT also appear in "
         "block_patches, and must not be deleted twice.\n"
-        "- Every issue you raise in \"issues\" should be expressed by at least "
+        '- Every issue you raise in "issues" should be expressed by at least '
         "one edit naming its issue_key, and every edit must name an issue_key "
-        "that exists in \"issues\". An issue you genuinely cannot express as "
+        'that exists in "issues". An issue you genuinely cannot express as '
         "an edit -- an observation for the attorney rather than a change to "
         "the paper -- may carry no edits at all, but never invent an edit to "
         "satisfy this.\n\n"
@@ -1182,13 +1178,13 @@ def _render_binary_decision_overlay(*, internal_notes: bool) -> str:
         "replaced reads as a rewrite even when only one sentence was "
         "objectionable.\n"
         "- If you DO replace a clause wholesale, that issue MUST carry a "
-        "\"replacement_scope_note\": one short sentence saying why a local "
+        '"replacement_scope_note": one short sentence saying why a local '
         "repair would be misleading or ineffective here. Omit the key entirely "
         "whenever your segments repair the clause in place, which is the "
         "expected default. It is an internal note for the reviewing attorney "
         "and is never shown to the counterparty.\n"
         + internal_bullet
-        + "- Put any high-level narrative in \"verdict_summary\", never in a "
+        + '- Put any high-level narrative in "verdict_summary", never in a '
         "new top-level key. This response must conform exactly to the "
         f"{OUTPUT_SCHEMA_VERSION} response schema.\n"
         + OWN_WORDS_SUMMARY_RULE
@@ -1220,9 +1216,7 @@ def render_binary_decision_overlay_block(notes_mode: str = "external") -> str:
     The default matches `assemble_system_blocks`' own, so an un-migrated
     caller reproduces today's prompt exactly.
     """
-    return _render_binary_decision_overlay(
-        internal_notes=_notes_mode_includes_internal(notes_mode)
-    )
+    return _render_binary_decision_overlay(internal_notes=_notes_mode_includes_internal(notes_mode))
 
 
 # ---------------------------------------------------------------------------
@@ -1354,7 +1348,7 @@ _CRITIC_TASKING_DUTIES_1_TO_3 = (
     "Look for exactly these four things:\n"
     "1. ISSUES THE FIRST REVIEWER MISSED -- a clause that is WORSE FOR US "
     "than the playbook's accepted position and was not flagged at all. "
-    "Report each one in \"critic_delta\".\"added_issues\".\n"
+    'Report each one in "critic_delta"."added_issues".\n'
     "2. OVER-FLAGGING AND GIVING TERMS AWAY -- an issue the first reviewer "
     "raised that the document does not actually support, or that the "
     "playbook does not actually require; AND any edit or finding the "
@@ -1363,22 +1357,22 @@ _CRITIC_TASKING_DUTIES_1_TO_3 = (
     "term that runs in our favour: the counterparty has already agreed to it, "
     "whatever the drafting argument) -- that edit gives away a term we "
     "already had and must be contested. Report it in "
-    "\"critic_delta\".\"rationale_objections\".\n"
+    '"critic_delta"."rationale_objections".\n'
     "3. WEAK EXTERNAL RATIONALE -- an "
-    "\"external_rationale_for_footnote\" that does not hold up: it "
+    '"external_rationale_for_footnote" that does not hold up: it '
     "misstates the clause, misstates the playbook position, or gives the "
     "counterparty a reason that would not survive being read back to them. "
-    "Report it in \"critic_delta\".\"rationale_objections\".\n"
+    'Report it in "critic_delta"."rationale_objections".\n'
 )
 
 # Duty 4 under v1/v2, where the first reviewer's proposal IS a field it filled
 # in. Kept for callers that select the superseded artifact.
 _CRITIC_TASKING_DUTY_4_V2 = (
     "4. REPLACEMENT TEXT THAT DRIFTS FROM THE PLAYBOOK POSITION -- a "
-    "\"proposed_replacement_text\" that concedes more than the playbook "
+    '"proposed_replacement_text" that concedes more than the playbook '
     "position allows, asks for more than it allows, or answers a different "
     "question than the clause raises. Report it in "
-    "\"critic_delta\".\"contested_replacements\". Never silently rewrite "
+    '"critic_delta"."contested_replacements". Never silently rewrite '
     "the first reviewer's replacement text; contest it and let the "
     "reconciler decide."
 )
@@ -1398,17 +1392,17 @@ _CRITIC_TASKING_DUTY_4_V2 = (
 # fill a required field.
 _CRITIC_TASKING_DUTY_4_V3 = (
     "4. AN AUTHORED EDIT THAT DRIFTS FROM THE PLAYBOOK POSITION -- the first "
-    "reviewer's proposal IS the edit it authored: the \"block_patches\" "
-    "segments and \"block_ops\" entries carrying that issue's \"issue_key\". "
+    'reviewer\'s proposal IS the edit it authored: the "block_patches" '
+    'segments and "block_ops" entries carrying that issue\'s "issue_key". '
     "Contest an edit whose resulting wording concedes more than the playbook "
     "position allows, asks for more than it allows, or answers a different "
     "question than the clause raises. Report it in "
-    "\"critic_delta\".\"contested_replacements\", naming that issue's "
-    "\"section_ref\" and putting the wording you are contesting -- read off "
-    "the \"insert\" segments and inserted blocks carrying its \"issue_key\" "
-    "-- in \"primary_replacement_text\". Then write the wording you would "
-    "put in its place as your own edit in YOUR \"block_patches\" / "
-    "\"block_ops\", and record the change in \"critic_delta\".\"overrides\" "
+    '"critic_delta"."contested_replacements", naming that issue\'s '
+    '"section_ref" and putting the wording you are contesting -- read off '
+    'the "insert" segments and inserted blocks carrying its "issue_key" '
+    '-- in "primary_replacement_text". Then write the wording you would '
+    'put in its place as your own edit in YOUR "block_patches" / '
+    '"block_ops", and record the change in "critic_delta"."overrides" '
     "-- never swap the first reviewer's edit out without leaving that "
     "record."
 )
@@ -1421,8 +1415,8 @@ _CRITIC_TASKING_DUTY_4_V3 = (
 # sentence. Same assert-and-replace discipline as the final-result variant.
 _CRITIC_DUTY_4_EDIT_SENTENCE = (
     "Then write the wording you would "
-    "put in its place as your own edit in YOUR \"block_patches\" / "
-    "\"block_ops\", and record the change in \"critic_delta\".\"overrides\" "
+    'put in its place as your own edit in YOUR "block_patches" / '
+    '"block_ops", and record the change in "critic_delta"."overrides" '
     "-- never swap the first reviewer's edit out without leaving that "
     "record."
 )
@@ -1433,8 +1427,7 @@ if _CRITIC_DUTY_4_EDIT_SENTENCE not in _CRITIC_TASKING_DUTY_4_V3:
     )
 _CRITIC_TASKING_DUTY_4_V3_NO_DOCUMENT = _CRITIC_TASKING_DUTY_4_V3.replace(
     _CRITIC_DUTY_4_EDIT_SENTENCE,
-    "Then put the wording you would use in its place in "
-    "\"critic_delta\".\"overrides\".",
+    'Then put the wording you would use in its place in "critic_delta"."overrides".',
 )
 
 
@@ -1454,13 +1447,12 @@ def _critic_tasking_duties(*, with_document: bool = True) -> str:
     """
     if _mos.authors_block_transcripts(load_output_schema()):
         duty_4 = (
-            _CRITIC_TASKING_DUTY_4_V3
-            if with_document
-            else _CRITIC_TASKING_DUTY_4_V3_NO_DOCUMENT
+            _CRITIC_TASKING_DUTY_4_V3 if with_document else _CRITIC_TASKING_DUTY_4_V3_NO_DOCUMENT
         )
     else:
         duty_4 = _CRITIC_TASKING_DUTY_4_V2
     return _CRITIC_TASKING_DUTIES_1_TO_3 + duty_4
+
 
 # What the four duties are FOR, under the v3 contract (issue #137). They used
 # to be the critic's whole output; they are now the checklist for the
@@ -1475,11 +1467,11 @@ def _critic_tasking_duties(*, with_document: bool = True) -> str:
 _CRITIC_TASKING_DUTIES_INTRO_V3 = (
     "WHAT THE RE-REVIEW MUST CATCH. The four things below are the ways a "
     "first review goes wrong. Fix each one in YOUR OWN final result, and ALSO "
-    "record it in the deprecated \"critic_delta\" array each names (the "
+    'record it in the deprecated "critic_delta" array each names (the '
     "reconciler still reads those arrays for this release). Every issue_key "
     "is unique across your WHOLE response: an issue you list in "
-    "\"critic_delta\".\"added_issues\" takes a key that none of your own "
-    "\"issues\" uses, even when it is the same finding, and a repeated key "
+    '"critic_delta"."added_issues" takes a key that none of your own '
+    '"issues" uses, even when it is the same finding, and a repeated key '
     "is rejected:"
 )
 
@@ -1506,33 +1498,33 @@ _CRITIC_TASKING_DUTIES_INTRO_V3_NO_DOCUMENT = _CRITIC_TASKING_DUTIES_INTRO_V3.re
 _CRITIC_TASKING_FINAL_RESULT_V3 = (
     "YOUR RESPONSE IS THE FINAL RESULT. It carries everything the first "
     "reviewer's did, written the same way the OUTPUT CONTRACT above "
-    "describes: your own \"decision\", \"confidence_state\", \"issues\" "
-    "(your final list, numbered from \"I1\" in YOUR response), "
-    "\"block_patches\", \"block_ops\" and \"verdict_summary\". Your edits "
+    'describes: your own "decision", "confidence_state", "issues" '
+    '(your final list, numbered from "I1" in YOUR response), '
+    '"block_patches", "block_ops" and "verdict_summary". Your edits '
     "are anchored to the SAME block ids the document shows and are checked "
     "against the document's real characters exactly as the first reviewer's "
     "were. Every edit names the issue_key of one of YOUR issues. Write out "
     "each edit you stand behind yourself, including one you agree with: "
     "never leave an edit to be inferred from the first reviewer's output.\n\n"
     "Your response carries ONE top-level key beyond the ones the OUTPUT "
-    "CONTRACT lists: \"critic_delta\", an object that is yours alone. It "
+    'CONTRACT lists: "critic_delta", an object that is yours alone. It '
     "records how your result differs from the first reviewer's. In it, "
-    "\"issue_id\" ALWAYS names the FIRST REVIEWER's issue_key as it appears "
+    '"issue_id" ALWAYS names the FIRST REVIEWER\'s issue_key as it appears '
     "in the first reviewer's output, never a key from your own issues.\n"
-    "- \"dispositions\": one entry for EVERY issue the first reviewer "
-    "raised, with no exceptions: {\"issue_id\", \"disposition\", "
-    "\"reason\"}. \"disposition\" is \"KEEP\" (you reach the same issue "
-    "and the same edit), \"REVISE\" (the same issue, but you changed its "
-    "replacement text, rationale or decision) or \"DROP\" (you do not stand "
-    "behind it). \"reason\" is one line. A response that leaves any first-"
+    '- "dispositions": one entry for EVERY issue the first reviewer '
+    'raised, with no exceptions: {"issue_id", "disposition", '
+    '"reason"}. "disposition" is "KEEP" (you reach the same issue '
+    'and the same edit), "REVISE" (the same issue, but you changed its '
+    'replacement text, rationale or decision) or "DROP" (you do not stand '
+    'behind it). "reason" is one line. A response that leaves any first-'
     "reviewer issue without a disposition is rejected.\n"
-    "- \"overrides\": one entry for each respect in which you changed a "
-    "first-reviewer issue: {\"issue_id\", \"field\", \"primary_value\", "
-    "\"critic_value\", \"reason\"}. \"field\" is exactly one of "
-    "\"replacement_text\" (the wording its edit produces), \"rationale\" "
-    "or \"decision\" (record a DROP as a change of decision). "
-    "\"primary_value\" is what the first reviewer had, read off its output; "
-    "\"critic_value\" is yours. Every REVISE and every DROP needs one. "
+    '- "overrides": one entry for each respect in which you changed a '
+    'first-reviewer issue: {"issue_id", "field", "primary_value", '
+    '"critic_value", "reason"}. "field" is exactly one of '
+    '"replacement_text" (the wording its edit produces), "rationale" '
+    'or "decision" (record a DROP as a change of decision). '
+    '"primary_value" is what the first reviewer had, read off its output; '
+    '"critic_value" is yours. Every REVISE and every DROP needs one. '
     "An empty array means you changed nothing."
 )
 
@@ -1560,8 +1552,8 @@ if _CRITIC_FINAL_RESULT_EDIT_PASSAGE not in _CRITIC_TASKING_FINAL_RESULT_V3:
 _CRITIC_TASKING_FINAL_RESULT_V3_NO_DOCUMENT = _CRITIC_TASKING_FINAL_RESULT_V3.replace(
     _CRITIC_FINAL_RESULT_EDIT_PASSAGE,
     "You were not shown the document, so you cannot see its block ids: leave "
-    "\"block_patches\" and \"block_ops\" empty, and put the wording you "
-    "would change in \"critic_delta\".\"overrides\" instead.",
+    '"block_patches" and "block_ops" empty, and put the wording you '
+    'would change in "critic_delta"."overrides" instead.',
 )
 
 _CRITIC_TASKING_EVIDENCE_WITH_DOCUMENT = (
@@ -1618,8 +1610,8 @@ _CRITIC_TASKING_EVIDENCE_MATERIAL_V2 = (
 # its evidence and its target out of one place.
 _CRITIC_TASKING_EVIDENCE_MATERIAL_V3 = (
     "the document's own clause text as the first reviewer transcribed it "
-    "into the \"keep\" and \"delete\" segments of its \"block_patches\", the "
-    "wording it proposed in the \"insert\" segments and \"block_ops\", its "
+    'into the "keep" and "delete" segments of its "block_patches", the '
+    'wording it proposed in the "insert" segments and "block_ops", its '
     "rationales, and the playbook positions."
 )
 
@@ -1646,6 +1638,7 @@ def _critic_tasking_evidence_without_document() -> str:
         + _CRITIC_TASKING_EVIDENCE_WITHOUT_DOCUMENT_TAIL
     )
 
+
 _CRITIC_TASKING_NO_MINIMUM = (
     "THERE IS NO MINIMUM NUMBER OF FINDINGS. Zero is a legitimate result. "
     "If the first reviewer's work is sound, say so and return an empty "
@@ -1655,6 +1648,7 @@ _CRITIC_TASKING_NO_MINIMUM = (
     "several, or downgrade a sound issue in order to have something to "
     "report."
 )
+
 
 def render_critic_tasking_block(*, with_document: bool) -> str:
     """The critic tasking, composed for the ACTIVE output contract.
@@ -1690,9 +1684,7 @@ def render_critic_tasking_block(*, with_document: bool) -> str:
         _CRITIC_TASKING_ROLE_WITH_DOCUMENT
         if with_document
         else _CRITIC_TASKING_ROLE_WITHOUT_DOCUMENT,
-        CRITIC_SCEPTICAL_INSTRUCTION
-        if with_document
-        else CRITIC_SCEPTICAL_INSTRUCTION_NO_DOCUMENT,
+        CRITIC_SCEPTICAL_INSTRUCTION if with_document else CRITIC_SCEPTICAL_INSTRUCTION_NO_DOCUMENT,
     ]
     if block_transcripts:
         parts.append(
@@ -1919,10 +1911,10 @@ def render_retry_correction_block(error: Any) -> str:
         remedy = (
             "Go back to the block(s) named above in the counterparty document "
             "and transcribe them again, character for character -- the "
-            "\"keep\" and \"delete\" segments together must reproduce the "
+            '"keep" and "delete" segments together must reproduce the '
             "paragraph exactly, in order, with nothing skipped, nothing "
             "retyped from memory, no typos fixed, no spacing or punctuation "
-            "tidied, and no \"[pNNNN]\" marker copied in. Keep every other "
+            'tidied, and no "[pNNNN]" marker copied in. Keep every other '
             "part of your response exactly as it was -- same issues, same "
             "issue_keys, same decision, same intended edits."
         )
@@ -1936,10 +1928,7 @@ def render_retry_correction_block(error: Any) -> str:
         # give safely -- shorten the prose, never the review. A model told
         # only "too long" can comply by dropping an issue, which is a
         # smaller response and a worse review.
-        fault = (
-            "Your response was rejected on length: one field exceeded its "
-            "character budget."
-        )
+        fault = "Your response was rejected on length: one field exceeded its character budget."
         remedy = (
             "Rewrite ONLY the field named above so it fits within the "
             "maximum stated there, counting characters. Condense the prose "
@@ -1950,10 +1939,7 @@ def render_retry_correction_block(error: Any) -> str:
             "same issue_keys, same decision, same edits."
         )
     elif text.startswith("replacement_text_violation"):
-        fault = (
-            "One or more of your proposed_replacement_text values broke a "
-            "drafting rule:"
-        )
+        fault = "One or more of your proposed_replacement_text values broke a drafting rule:"
         remedy = (
             "Rewrite only the replacement text for the issue(s) named above so "
             "it complies. Keep every other part of your response exactly as it "
@@ -2023,7 +2009,9 @@ def projected_playbook_hash(projected_playbook: dict[str, Any]) -> str:
     content_hash so the spend ledger can prove exactly which knowledge
     projection governed a given model invocation.
     """
-    canonical = json.dumps(projected_playbook, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    canonical = json.dumps(projected_playbook, sort_keys=True, separators=(",", ":")).encode(
+        "utf-8"
+    )
     return "sha256:" + hashlib.sha256(canonical).hexdigest()
 
 
@@ -2275,9 +2263,7 @@ _TOASTER_GUIDANCE_NARRATION_CLAUSE = (
 
 def _render_toaster_guidance_intro(notes_mode: str) -> str:
     narration_clause = (
-        _TOASTER_GUIDANCE_NARRATION_CLAUSE
-        if _notes_mode_includes_internal(notes_mode)
-        else ""
+        _TOASTER_GUIDANCE_NARRATION_CLAUSE if _notes_mode_includes_internal(notes_mode) else ""
     )
     return _TOASTER_GUIDANCE_INTRO_COMMON.format(narration_clause=narration_clause)
 
@@ -2341,15 +2327,15 @@ FLOOR_BLOCK_INTRO = (
     "and never argued around on the facts -- for each one, decide only "
     "whether the document violates it. If ANY obligation below is "
     "violated, you MUST include a REQUEST_CHANGE issue for that violation, "
-    "carrying its own \"issue_key\", and express the fix the way every "
-    "other issue expresses one: as \"block_patches\" segments (or a "
-    "\"block_ops\" entry) tagged with that issue_key, per the output "
+    'carrying its own "issue_key", and express the fix the way every '
+    'other issue expresses one: as "block_patches" segments (or a '
+    '"block_ops" entry) tagged with that issue_key, per the output '
     "contract above. The segments you transcribe ARE the citation for a "
     "Floor violation -- they are checked against the document's real "
     "characters, so nothing else needs to name the offending text. When a "
     "violation is a MISSING clause "
     "there is no existing text to edit: raise the issue and add the "
-    "language with an \"insert_block_after\" block_op, or raise the issue "
+    'language with an "insert_block_after" block_op, or raise the issue '
     "with no edit at all if nothing can be inserted safely."
 )
 
@@ -2426,16 +2412,16 @@ def resolve_pen_rules_bundle(playbook: dict[str, Any]) -> dict[str, Any] | None:
 
 REPLACEMENT_TEXT_MODES_INTRO = (
     "TOPIC REPLACEMENT-TEXT MODES -- read this before writing any "
-    "\"proposed_replacement_text\". Each topic id below names the SAME "
+    '"proposed_replacement_text". Each topic id below names the SAME '
     "resolved replacement_text.mode this response is checked against after "
     "you submit it:\n"
-    "- mode \"none\": FLAG ONLY. A redline is never permitted for this "
+    '- mode "none": FLAG ONLY. A redline is never permitted for this '
     "topic, no matter how clear the fix seems. For every issue on this "
-    "topic, set \"proposed_replacement_text\" to an empty string \"\" and "
-    "put your explanation in \"external_rationale_for_footnote\" instead. "
-    "Any non-empty replacement text on a mode=\"none\" topic is rejected "
+    'topic, set "proposed_replacement_text" to an empty string "" and '
+    'put your explanation in "external_rationale_for_footnote" instead. '
+    'Any non-empty replacement text on a mode="none" topic is rejected '
     "before it can reach a document.\n"
-    "- any other mode (\"fixed\", \"from_template\", \"bounded_edit\"): a "
+    '- any other mode ("fixed", "from_template", "bounded_edit"): a '
     "redline may be proposed, bounded by that topic's max_chars and "
     "must_not_introduce constraints in the playbook JSON below."
 )
@@ -2456,13 +2442,13 @@ REPLACEMENT_TEXT_MODES_INTRO_V3 = (
     "TOPIC REPLACEMENT-TEXT MODES -- read this before authoring any edit. "
     "Each topic id below names the SAME resolved replacement_text.mode this "
     "response is checked against after you submit it:\n"
-    "- mode \"none\": FLAG ONLY. A redline is never permitted for this "
+    '- mode "none": FLAG ONLY. A redline is never permitted for this '
     "topic, no matter how clear the fix seems. Raise the issue as normal "
-    "(with its own \"issue_key\") and author NO EDIT for it: no "
-    "\"block_patches\" segment and no \"block_ops\" entry may carry that "
-    "issue_key. Put your explanation in \"external_rationale_for_footnote\" "
+    '(with its own "issue_key") and author NO EDIT for it: no '
+    '"block_patches" segment and no "block_ops" entry may carry that '
+    'issue_key. Put your explanation in "external_rationale_for_footnote" '
     "instead.\n"
-    "- any other mode (\"fixed\", \"from_template\", \"bounded_edit\"): an "
+    '- any other mode ("fixed", "from_template", "bounded_edit"): an '
     "edit may be authored for that issue, bounded by that topic's max_chars "
     "and must_not_introduce constraints in the playbook JSON below."
 )
@@ -2579,9 +2565,7 @@ def assemble_system_blocks(
     """
     blocks: list[dict[str, Any]] = [{"type": "text", "text": REVIEW_GUIDANCE_BLOCK}]
 
-    blocks.append(
-        {"type": "text", "text": render_binary_decision_overlay_block(notes_mode)}
-    )
+    blocks.append({"type": "text", "text": render_binary_decision_overlay_block(notes_mode)})
 
     replacement_modes_text = render_replacement_text_modes_block(playbook)
     if replacement_modes_text is not None:
@@ -2871,7 +2855,9 @@ def render_precedent_block(retrieved_precedent: list[dict[str, Any]]) -> str:
     lines = []
     for clause in retrieved_precedent:
         polarity = clause.get("polarity", "positive")
-        lines.append(f"[{polarity}] clause_id={clause.get('clause_id', '?')}: {clause.get('text', '')}")
+        lines.append(
+            f"[{polarity}] clause_id={clause.get('clause_id', '?')}: {clause.get('text', '')}"
+        )
     return "\n".join(lines)
 
 
@@ -3344,7 +3330,8 @@ def assemble_user_content_critic(
 
 
 def append_user_content_suffix(
-    user_content: "str | list[dict[str, Any]]", suffix: str  # noqa: UP037
+    user_content: "str | list[dict[str, Any]]",  # noqa: UP037
+    suffix: str,
 ) -> "str | list[dict[str, Any]]":  # noqa: UP037
     """Append `suffix` (the retry-correction block, issue #417) to
     `user_content`, whichever shape `assemble_user_content_primary`
@@ -3618,9 +3605,7 @@ def _issue_shaped_objects(parsed: Any) -> list[dict[str, Any]]:
     critic_delta = parsed.get("critic_delta")
     if isinstance(critic_delta, dict):
         issues += [
-            issue
-            for issue in (critic_delta.get("added_issues") or [])
-            if isinstance(issue, dict)
+            issue for issue in (critic_delta.get("added_issues") or []) if isinstance(issue, dict)
         ]
     return issues
 
@@ -4398,9 +4383,7 @@ def run_primary_pass(
     # as the `BedrockModelClient` Protocol, and a hand-rolled test double in
     # an existing test may not implement `capabilities` yet.
     model_capabilities = (
-        model_client.capabilities(model_id)
-        if hasattr(model_client, "capabilities")
-        else None
+        model_client.capabilities(model_id) if hasattr(model_client, "capabilities") else None
     )
 
     # Issue #418: the model-facing structured-output schema, resolved once
@@ -4443,9 +4426,7 @@ def run_primary_pass(
     # `schema_enforcement_requested` ledger/result field below, not the
     # sole enforcement point.
     output_schema = (
-        _mos.project_output_schema_for_provider(
-            path=output_schema_path, notes_mode=notes_mode
-        )
+        _mos.project_output_schema_for_provider(path=output_schema_path, notes_mode=notes_mode)
         if (model_capabilities or {}).get("structured_outputs")
         else None
     )
@@ -4645,9 +4626,7 @@ def run_primary_pass(
                 # Shape-driven, exactly like `review_spine.uses_block_mode`:
                 # the carriers are the honest signal on the object in hand,
                 # not an envelope version string.
-                transcript_rejection = _reject_block_transcript(
-                    parsed_or_error, block_map
-                )
+                transcript_rejection = _reject_block_transcript(parsed_or_error, block_map)
                 if transcript_rejection is not None and attempt < attempts_allowed:
                     last_error = transcript_rejection
                     correction = last_error

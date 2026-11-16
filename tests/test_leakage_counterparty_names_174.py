@@ -166,7 +166,9 @@ def test_a_past_counterpartys_name_from_a_recital_is_held() -> None:
         # Not vacuous: the recital is in the prompt both passes read, and a
         # rendered precedent text carries the name.
         assert f"and {written} (" in composed.replace('\\"', '"'), written
-        assert any(written in text for text in leakage_scan._opf_digest_precedent_texts(doc)), written
+        assert any(written in text for text in leakage_scan._opf_digest_precedent_texts(doc)), (
+            written
+        )
     corpus = _corpus(doc)
     assert corpus.counterparty_names == list(_RECITALS), corpus.counterparty_names
 
@@ -187,7 +189,12 @@ def test_a_past_counterpartys_name_from_a_recital_is_held() -> None:
 
 def test_the_current_counterpartys_own_name_is_never_blocked() -> None:
     corpus = _corpus(_load(NDA_EXAMPLE))
-    for current in ("Epsilon Systems, Inc.", "Epsilon Systems", "epsilon-systems", "EPSILON SYSTEMS INC"):
+    for current in (
+        "Epsilon Systems, Inc.",
+        "Epsilon Systems",
+        "epsilon-systems",
+        "EPSILON SYSTEMS INC",
+    ):
         said = "We ask Epsilon Systems, Inc. to restore our confidentiality position."
         assert not _scan(said, corpus, current=current).blocked, current
         # The other past counterparty is still blocked on that review.
@@ -219,7 +226,9 @@ def test_a_hyphenated_name_is_blocked_as_the_recital_renders_it() -> None:
     doc = _edited(slug, edits)
     assert "Hollis-Varga LP" in _compose(doc).replace('\\"', '"')
     corpus = _corpus(doc)
-    assert corpus.counterparty_names == ["epsilon systems", "hollis varga"], corpus.counterparty_names
+    assert corpus.counterparty_names == ["epsilon systems", "hollis varga"], (
+        corpus.counterparty_names
+    )
     for said in (
         "As Hollis-Varga signed before, we keep it.",
         "We ask Hollis-Varga LP to restore it.",
@@ -236,7 +245,9 @@ def test_a_hyphenated_name_is_blocked_as_the_recital_renders_it() -> None:
         assert not _scan(said, corpus).blocked, said
     # The document under review rendering it hyphenated drops it, as check 3
     # would match it there.
-    narrowed = leakage_scan.without_names_the_document_carries(corpus, ["Between AlphaCorp and Hollis-Varga LP."])
+    narrowed = leakage_scan.without_names_the_document_carries(
+        corpus, ["Between AlphaCorp and Hollis-Varga LP."]
+    )
     assert narrowed.counterparty_names == ["epsilon systems"], narrowed.counterparty_names
 
     # On the unmodified example, the de-slugged name blocks every separator form.
@@ -264,7 +275,9 @@ def test_a_counterparty_ref_alias_a_rendered_text_carries_is_held() -> None:
     assert "Counterparty-2" in rendered and "Counterparty-3" in rendered
     assert "Counterparty-5" not in rendered
     corpus = leakage_scan.ConfidentialCorpus.from_opf_document(doc)
-    assert corpus.counterparty_names == ["Counterparty-2", "Counterparty-3"], corpus.counterparty_names
+    assert corpus.counterparty_names == ["Counterparty-2", "Counterparty-3"], (
+        corpus.counterparty_names
+    )
     assert doc["perspective"]["party"] in rendered  # our own name: never held
 
     for alias in ("Counterparty-2", "Counterparty-3", "counterparty\u20113"):
@@ -295,10 +308,20 @@ _GOVERNING_LAW_EDIT = (
 _NOT_HELD: tuple[tuple[str, str, str, tuple[tuple[str, str], ...]], ...] = (
     ("gamma", "a single word", "Gamma-ray inspection is outside this clause.", ()),
     ("alphacorp-holdings", "our own name", "AlphaCorp Holdings keeps its standard position.", ()),
-    ("receiving-party", "our own standard's vocabulary", "The Receiving Party must return all copies.", ()),
+    (
+        "receiving-party",
+        "our own standard's vocabulary",
+        "The Receiving Party must return all copies.",
+        (),
+    ),
     # Only the clause-name filter drops this one: a rendered governing law
     # variant names its clause, and our standard does not ("is governed by").
-    ("governing-law", "a public clause name", "Governing law stays a point we keep open.", _GOVERNING_LAW_EDIT),
+    (
+        "governing-law",
+        "a public clause name",
+        "Governing law stays a point we keep open.",
+        _GOVERNING_LAW_EDIT,
+    ),
 )
 
 

@@ -287,6 +287,7 @@ def _as_epoch(value: Any) -> int | None:
 # Table handles
 # ---------------------------------------------------------------------------
 
+
 def _audit_table(dynamodb_resource: Any) -> Any:
     return dynamodb_resource.Table(os.environ["AUDIT_TABLE"])
 
@@ -298,6 +299,7 @@ def _reviews_table(dynamodb_resource: Any) -> Any:
 # ---------------------------------------------------------------------------
 # Bounded, paginating Query helpers. NEVER a Scan (module docstring).
 # ---------------------------------------------------------------------------
+
 
 def _query_pages(table: Any, limit: int, **kwargs: Any) -> list[dict[str, Any]]:
     """Run `table.query(**kwargs)`, following `LastEvaluatedKey` until
@@ -598,6 +600,7 @@ AUDIT_QUERY_NAMES: tuple[str, ...] = tuple(entry["query"] for entry in AUDIT_QUE
 # Parameter helpers
 # ---------------------------------------------------------------------------
 
+
 def _required(params: dict[str, Any], name: str) -> str:
     value = params.get(name)
     if value is None or str(value).strip() == "":
@@ -626,6 +629,7 @@ def _envelope(query: str, rows: list[dict[str, Any]], limit: int, **extra: Any) 
 # ---------------------------------------------------------------------------
 # The eleven catalogue entries
 # ---------------------------------------------------------------------------
+
 
 def _month_activity(dynamodb_resource: Any, params: dict[str, Any], now: float) -> dict[str, Any]:
     """`audit` by PK `YYYY-MM`, SK range on `timestamp`."""
@@ -1024,6 +1028,7 @@ _HANDLERS = {
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
 
 def run_audit_query(
     caller_user_row: dict[str, Any],

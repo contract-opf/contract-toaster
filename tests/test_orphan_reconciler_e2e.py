@@ -86,6 +86,7 @@ from ddb_fixtures import create_submissions_table  # noqa: E402
 # In-memory fakes (same shape/contract as tests/test_review_submission_e2e.py)
 # ---------------------------------------------------------------------------
 
+
 class FakeTable:
     """A tiny in-memory stand-in for a boto3 DynamoDB Table resource,
     extended (relative to the reviews.py e2e fake) with a `scan` that
@@ -107,8 +108,14 @@ class FakeTable:
             raise ClientError({"Error": {"Code": "ConditionalCheckFailedException"}}, "PutItem")
         self.items[key] = dict(Item)
 
-    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues=None,
-                     ConditionExpression=None, ExpressionAttributeNames=None):
+    def update_item(
+        self,
+        Key,
+        UpdateExpression,
+        ExpressionAttributeValues=None,
+        ConditionExpression=None,
+        ExpressionAttributeNames=None,
+    ):
         key = Key[self.key_name]
         vals = ExpressionAttributeValues or {}
 
@@ -167,8 +174,9 @@ class FakeTable:
         self.deleted_keys.append(key)
         self.items.pop(key, None)
 
-    def scan(self, FilterExpression=None, ExpressionAttributeNames=None,
-              ExpressionAttributeValues=None):
+    def scan(
+        self, FilterExpression=None, ExpressionAttributeNames=None, ExpressionAttributeValues=None
+    ):
         """Purpose-built interpreter for the specific FilterExpressions
         handler.py issues -- not a general DynamoDB expression engine."""
         vals = ExpressionAttributeValues or {}
@@ -209,7 +217,9 @@ class FakeDynamoDBResource:
                 os.environ["REVIEW_SUBMISSIONS_TABLE"]: "idempotency_key",
                 os.environ["REVIEWS_TABLE"]: "review_id",
                 os.environ["SEMAPHORE_TABLE"]: "lock_name",
-                os.environ.get("DAILY_SPEND_TABLE", "contract-toaster-daily-spend-test"): "spend_date",
+                os.environ.get(
+                    "DAILY_SPEND_TABLE", "contract-toaster-daily-spend-test"
+                ): "spend_date",
             }.get(name, "id")
             self._tables[name] = FakeTable(key_name)
         return self._tables[name]
@@ -239,7 +249,9 @@ class FakeSfnClient:
         if name in self.started_names:
             raise self.exceptions.ExecutionAlreadyExists()
         self.started_names.add(name)
-        return {"executionArn": f"{stateMachineArn.replace(':stateMachine:', ':execution:')}:{name}"}
+        return {
+            "executionArn": f"{stateMachineArn.replace(':stateMachine:', ':execution:')}:{name}"
+        }
 
     def describe_execution(self, executionArn):
         status = self.describe_execution_statuses.get(executionArn, "RUNNING")
@@ -266,6 +278,7 @@ class Boto3Stub:
 # Tests
 # ---------------------------------------------------------------------------
 
+
 class TestDeadExecutionReconciliation(unittest.TestCase):
     """Finding 1: dead-execution reconciliation must not be dead code --
     execution_arn must actually be discoverable on the reviews row."""
@@ -291,28 +304,29 @@ class TestDeadExecutionReconciliation(unittest.TestCase):
         self.submissions.put_item(Item=dict(submission))
 
     def submission_row(self, idempotency_key: str) -> dict:
-        return (
-            self.submissions.get_item(
-                Key={"idempotency_key": idempotency_key}
-            ).get("Item")
-            or {}
-        )
+        return self.submissions.get_item(Key={"idempotency_key": idempotency_key}).get("Item") or {}
 
-    def _seed_running_review_with_arn(self, review_id: str, execution_arn: str,
-                                       reservation_id: str = "res-1",
-                                       idempotency_key: str = "idem-1") -> None:
+    def _seed_running_review_with_arn(
+        self,
+        review_id: str,
+        execution_arn: str,
+        reservation_id: str = "res-1",
+        idempotency_key: str = "idem-1",
+    ) -> None:
         reviews_table = self.ddb.Table(os.environ["REVIEWS_TABLE"])
         reviews_table.items[review_id] = {
             "review_id": review_id,
             "status": "RUNNING",
             "execution_arn": execution_arn,
         }
-        self.seed_submission({
-            "idempotency_key": idempotency_key,
-            "review_id": review_id,
-            "execution_arn": execution_arn,
-            "spend_reservation_id": reservation_id,
-        })
+        self.seed_submission(
+            {
+                "idempotency_key": idempotency_key,
+                "review_id": review_id,
+                "execution_arn": execution_arn,
+                "spend_reservation_id": reservation_id,
+            }
+        )
         semaphore_table = self.ddb.Table(os.environ["SEMAPHORE_TABLE"])
         semaphore_table.items[f"review-slot#{review_id}"] = {
             "lock_name": f"review-slot#{review_id}",
@@ -411,8 +425,10 @@ class TestDeadExecutionReconciliation(unittest.TestCase):
                 f"arn:aws:states:us-east-1:123456789012:execution:contract-toaster-test:{review_id}"
             )
             self._seed_running_review_with_arn(
-                review_id, execution_arn,
-                reservation_id=f"res-{suffix}", idempotency_key=f"idem-{suffix}",
+                review_id,
+                execution_arn,
+                reservation_id=f"res-{suffix}",
+                idempotency_key=f"idem-{suffix}",
             )
             self.sfn.describe_execution_statuses[execution_arn] = status_value
 
@@ -493,8 +509,14 @@ class FakeTableForReviews:
             raise ClientError({"Error": {"Code": "ConditionalCheckFailedException"}}, "PutItem")
         self.items[key] = dict(Item)
 
-    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues=None,
-                     ConditionExpression=None, ExpressionAttributeNames=None):
+    def update_item(
+        self,
+        Key,
+        UpdateExpression,
+        ExpressionAttributeValues=None,
+        ConditionExpression=None,
+        ExpressionAttributeNames=None,
+    ):
         key = Key[self.key_name]
         item = self.items.setdefault(key, dict(Key))
         vals = ExpressionAttributeValues or {}
@@ -546,7 +568,9 @@ class FakeSfnClientForReviews:
         if name in self.started_names:
             raise self.exceptions.ExecutionAlreadyExists()
         self.started_names.add(name)
-        return {"executionArn": f"{stateMachineArn.replace(':stateMachine:', ':execution:')}:{name}"}
+        return {
+            "executionArn": f"{stateMachineArn.replace(':stateMachine:', ':execution:')}:{name}"
+        }
 
 
 os.environ.setdefault("DAILY_SPEND_TABLE", "contract-toaster-daily-spend-test")
@@ -577,12 +601,7 @@ class TestArnlessRedriveGetsWellFormedInput(unittest.TestCase):
         self.submissions.put_item(Item=dict(submission))
 
     def submission_row(self, idempotency_key: str) -> dict:
-        return (
-            self.submissions.get_item(
-                Key={"idempotency_key": idempotency_key}
-            ).get("Item")
-            or {}
-        )
+        return self.submissions.get_item(Key={"idempotency_key": idempotency_key}).get("Item") or {}
 
     def test_redrive_uses_stored_execution_input(self):
         review_id = "review-redrive-1"
@@ -596,13 +615,15 @@ class TestArnlessRedriveGetsWellFormedInput(unittest.TestCase):
             }
         )
         stale_created_at = 0  # epoch 0 is always "old enough"
-        self.seed_submission({
-            "idempotency_key": "idem-redrive-1",
-            "review_id": review_id,
-            "execution_name": f"review-{review_id}",
-            "execution_input": stored_input,
-            "created_at": stale_created_at,
-        })
+        self.seed_submission(
+            {
+                "idempotency_key": "idem-redrive-1",
+                "review_id": review_id,
+                "execution_name": f"review-{review_id}",
+                "execution_input": stored_input,
+                "created_at": stale_created_at,
+            }
+        )
 
         redriven = _handler_module._reconcile_arnless_submissions()
 
@@ -613,7 +634,8 @@ class TestArnlessRedriveGetsWellFormedInput(unittest.TestCase):
         self.assertEqual(sent_input["playbook_id"], "eiaa")
         self.assertEqual(sent_input["upload_s3_key"], "uploads/owner-redrive/in.docx")
         self.assertNotEqual(
-            self.sfn.start_execution_calls[0]["input"], "{}",
+            self.sfn.start_execution_calls[0]["input"],
+            "{}",
             "Re-driven execution must not be started with an empty payload.",
         )
 
@@ -626,19 +648,22 @@ class TestArnlessRedriveGetsWellFormedInput(unittest.TestCase):
     def test_submission_without_stored_input_is_skipped_not_redriven_empty(self):
         """A legacy/malformed row with no execution_input must be skipped,
         not silently re-driven with "{}"."""
-        self.seed_submission({
-            "idempotency_key": "idem-legacy-1",
-            "review_id": "review-legacy-1",
-            "execution_name": "review-review-legacy-1",
-            "created_at": 0,
-            # no execution_input key at all
-        })
+        self.seed_submission(
+            {
+                "idempotency_key": "idem-legacy-1",
+                "review_id": "review-legacy-1",
+                "execution_name": "review-review-legacy-1",
+                "created_at": 0,
+                # no execution_input key at all
+            }
+        )
 
         redriven = _handler_module._reconcile_arnless_submissions()
 
         self.assertEqual(redriven, [])
         self.assertEqual(
-            len(self.sfn.start_execution_calls), 0,
+            len(self.sfn.start_execution_calls),
+            0,
             "Must not call StartExecution for a submission with no stored execution_input.",
         )
 

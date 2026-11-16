@@ -156,10 +156,7 @@ def _build_docx_bytes(body_xml: str) -> bytes:
 
 
 def _heading_p(text: str) -> str:
-    return (
-        '<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr>'
-        f"<w:r><w:t>{text}</w:t></w:r></w:p>"
-    )
+    return f'<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>'
 
 
 def _body_p(text: str) -> str:
@@ -278,8 +275,7 @@ def test_a_deleted_paragraph_mark_is_disclosed() -> None:
     )
     assert _AUTHOR in notes, f"the note must name the revision author: {notes!r}"
     assert disclosure and "deleted paragraph mark" in disclosure, (
-        f"the byte-space report must disclose the stripped marker too: "
-        f"{disclosure!r}"
+        f"the byte-space report must disclose the stripped marker too: {disclosure!r}"
     )
 
 
@@ -289,9 +285,7 @@ def test_an_inserted_paragraph_mark_is_disclosed() -> None:
     from the deletion above because `_normalize_paragraph` branches on
     `operation` -- a deletion-only fixture leaves this half green forever."""
     docx_bytes = _build_docx_bytes(
-        _heading_p("Fees")
-        + _marked_p("ins", "First sentence.")
-        + _body_p("Second sentence.")
+        _heading_p("Fees") + _marked_p("ins", "First sentence.") + _body_p("Second sentence.")
     )
     out = stage.extract_and_normalize(docx_bytes)
     _, report = stage.materialize_accept_all_with_report(docx_bytes)
@@ -377,13 +371,11 @@ def test_disclosure_changes_no_text_no_block_id_and_no_materialized_structure() 
         ),
         "merge beside a content revision": (
             f'<w:p>{_mark_ppr("del")}<w:r><w:t xml:space="preserve">Pay in </w:t></w:r>'
-            f'{_content_revision("60", "45")}'
-            '<w:r><w:t xml:space="preserve"> days</w:t></w:r></w:p>'
-            + _body_p("of invoice."),
+            f"{_content_revision('60', '45')}"
+            '<w:r><w:t xml:space="preserve"> days</w:t></w:r></w:p>' + _body_p("of invoice."),
             '<w:p><w:r><w:t xml:space="preserve">Pay in </w:t></w:r>'
-            f'{_content_revision("60", "45")}'
-            '<w:r><w:t xml:space="preserve"> days</w:t></w:r></w:p>'
-            + _body_p("of invoice."),
+            f"{_content_revision('60', '45')}"
+            '<w:r><w:t xml:space="preserve"> days</w:t></w:r></w:p>' + _body_p("of invoice."),
         ),
         "merge on an EMPTY spacer paragraph": (
             f"<w:p>{_mark_ppr('del')}</w:p>" + _body_p("Body."),
@@ -466,8 +458,7 @@ def test_a_formatting_change_on_the_pilcrow_is_not_reported_as_a_merge() -> None
         f"the formatting sentence must still name the rPrChange: {disclosure!r}"
     )
     assert "deleted paragraph mark" in disclosure, (
-        f"the paragraph-mark sentence must still be present beside it: "
-        f"{disclosure!r}"
+        f"the paragraph-mark sentence must still be present beside it: {disclosure!r}"
     )
 
 
@@ -489,16 +480,14 @@ def test_a_document_with_no_paragraph_mark_gets_no_spurious_note() -> None:
     notes = out.get("normalization_notes") or ""
 
     assert "paragraph-mark" not in notes and "paragraph mark" not in notes, (
-        f"a document with no tracked paragraph mark must produce no "
-        f"paragraph-mark note: {notes!r}"
+        f"a document with no tracked paragraph mark must produce no paragraph-mark note: {notes!r}"
     )
     assert _ACCEPT_ALL_TAIL in notes, (
         f"fixture premise broken: the ordinary content revision must still "
         f"produce its own accept-all note: {notes!r}"
     )
     assert not set(report["accepted"]) - {"ins", "del"}, (
-        f"no paragraph-mark key may appear for a document without one: "
-        f"{report['accepted']!r}"
+        f"no paragraph-mark key may appear for a document without one: {report['accepted']!r}"
     )
     assert stage.accepted_revision_disclosure(report) is None, (
         "a document whose only revisions are content ins/del is disclosed "
@@ -574,9 +563,7 @@ def test_an_unknown_paragraph_mark_operation_fails_the_document_closed() -> None
         f"an unrecognised paragraph-mark operation has no documented "
         f"disposition and must fail closed: {result!r}"
     )
-    assert "unknown operation" in result["note"], (
-        f"the refusal must say why: {result['note']!r}"
-    )
+    assert "unknown operation" in result["note"], f"the refusal must say why: {result['note']!r}"
 
     # And the two documented values must NOT fail closed, so the guard
     # cannot be satisfied by refusing everything.
@@ -606,7 +593,7 @@ def test_a_struck_paragraph_that_also_carries_a_mark_keeps_both_dispositions() -
     disposition, or displacing it from first position."""
     docx_bytes = _build_docx_bytes(
         _heading_p("Term")
-        + f'<w:p>{_mark_ppr("del")}'
+        + f"<w:p>{_mark_ppr('del')}"
         + f'<w:del w:id="1" w:author="{_AUTHOR}" w:date="{_DATE}">'
         + '<w:r><w:delText xml:space="preserve">struck in full</w:delText></w:r>'
         + "</w:del></w:p>"
@@ -617,8 +604,7 @@ def test_a_struck_paragraph_that_also_carries_a_mark_keeps_both_dispositions() -
     notes = out.get("normalization_notes") or ""
 
     assert "The struck paragraph is omitted from the operative draft." in notes, (
-        f"the whole-paragraph strike-out disposition must survive beside the "
-        f"marker note: {notes!r}"
+        f"the whole-paragraph strike-out disposition must survive beside the marker note: {notes!r}"
     )
     assert "paragraph-mark deletion" in notes, (
         f"the marker note must reach the deleted_in_full exit too: {notes!r}"

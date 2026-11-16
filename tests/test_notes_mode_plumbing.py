@@ -131,14 +131,10 @@ class TestItReachesThePromptSeam(unittest.TestCase):
         the mode on an axis the epic does not have.
         """
         rendered = {
-            mode: pp.render_system_prompt(
-                pp.assemble_system_blocks(PLAYBOOK, notes_mode=mode)
-            )
+            mode: pp.render_system_prompt(pp.assemble_system_blocks(PLAYBOOK, notes_mode=mode))
             for mode in ("none", "external", "internal", "both")
         }
-        self.assertEqual(
-            len(set(rendered.values())), 2, "the modes differ on more than one axis"
-        )
+        self.assertEqual(len(set(rendered.values())), 2, "the modes differ on more than one axis")
         self.assertEqual(rendered["none"], rendered["external"])
         self.assertEqual(rendered["internal"], rendered["both"])
         for off in ("none", "external"):
@@ -159,9 +155,7 @@ class TestItReachesThePromptSeam(unittest.TestCase):
 
         for module in (pp, critic_review_pass):
             source = Path(module.__file__).read_text()
-            self.assertIn(
-                "notes_mode", source, f"{Path(module.__file__).name} never sees the mode"
-            )
+            self.assertIn("notes_mode", source, f"{Path(module.__file__).name} never sees the mode")
 
 
 class TestSayingNothingChangesNothing(unittest.TestCase):
@@ -212,13 +206,9 @@ class TestSayingNothingChangesNothing(unittest.TestCase):
             def Table(self, _name):  # noqa: N802
                 return _Table()
 
-        reviews._create_review_row(
-            "r", "o", "eiaa", "sha256:abc", _DDB(), notes_mode="external"
-        )
+        reviews._create_review_row("r", "o", "eiaa", "sha256:abc", _DDB(), notes_mode="external")
         self.assertNotIn("notes_mode", written[-1])
-        reviews._create_review_row(
-            "r", "o", "eiaa", "sha256:abc", _DDB(), notes_mode="internal"
-        )
+        reviews._create_review_row("r", "o", "eiaa", "sha256:abc", _DDB(), notes_mode="internal")
         self.assertEqual(written[-1].get("notes_mode"), "internal")
 
 

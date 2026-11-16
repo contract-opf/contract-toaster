@@ -196,10 +196,7 @@ def _build_raw_docx(body_paragraphs_xml: str) -> bytes:
 
 
 def _raw_heading_p(text: str) -> str:
-    return (
-        '<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr>'
-        f"<w:r><w:t>{text}</w:t></w:r></w:p>"
-    )
+    return f'<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>'
 
 
 def _prove(docx_bytes: bytes, *, patches=None, ops=None):
@@ -243,11 +240,7 @@ def _paragraph_texts(docx_bytes: bytes) -> list:
     out = []
     for p in _paragraphs(docx_bytes):
         out.append(
-            "".join(
-                el.text or ""
-                for el in p.iter()
-                if el.tag in (_qn("t"), _qn("delText"))
-            )
+            "".join(el.text or "" for el in p.iter() if el.tag in (_qn("t"), _qn("delText")))
         )
     return out
 
@@ -255,9 +248,7 @@ def _paragraph_texts(docx_bytes: bytes) -> list:
 def _visible_paragraph_texts(docx_bytes: bytes) -> list:
     """One entry per `<w:p>`: only `<w:t>` -- i.e. what survives once a
     deletion's `<w:delText>` is excluded, which is the accepted view."""
-    return [
-        "".join(t.text or "" for t in p.iter(_qn("t"))) for p in _paragraphs(docx_bytes)
-    ]
+    return ["".join(t.text or "" for t in p.iter(_qn("t"))) for p in _paragraphs(docx_bytes)]
 
 
 def _paragraph_mark_revision(p: ET.Element, tag: str):
@@ -367,9 +358,7 @@ def test_insert_block_after_anchor(failures: list) -> None:
     # AC 1b: tracked-insert semantics -- the body run is inside a <w:ins>
     # carrying all three revision attributes.
     body_ins = [
-        ins
-        for ins in new_p.iter(_qn("ins"))
-        if "".join(t.text or "" for t in ins.iter(_qn("t")))
+        ins for ins in new_p.iter(_qn("ins")) if "".join(t.text or "" for t in ins.iter(_qn("t")))
     ]
     if len(body_ins) != 1:
         failures.append(f"[{case}] expected exactly one text-bearing <w:ins>, got {len(body_ins)}")
@@ -663,9 +652,7 @@ def test_delete_block_deletes_runs_and_paragraph_mark(failures: list) -> None:
         if _TERM_BODY not in "".join(accepted):
             failures.append(f"[{case}] accept_all also removed the untouched clause")
         if "Section 2. Renewal" not in accepted:
-            failures.append(
-                f"[{case}] accept_all lost the struck clause's HEADING: {accepted!r}"
-            )
+            failures.append(f"[{case}] accept_all lost the struck clause's HEADING: {accepted!r}")
         if PLACEHOLDER not in accepted:
             failures.append(
                 f"[{case}] accept_all shows {accepted!r}; the emptied clause must read "
@@ -676,9 +663,7 @@ def test_delete_block_deletes_runs_and_paragraph_mark(failures: list) -> None:
 def test_delete_block_covers_every_physical_paragraph(failures: list) -> None:
     case = "delete_block_covers_every_physical_paragraph"
     clauses = ["First list clause of the block.", "Second list clause of the block."]
-    docx_bytes = _make_sectioned_docx(
-        [("Section 1. Term", clauses)], style="List Number"
-    )
+    docx_bytes = _make_sectioned_docx([("Section 1. Term", clauses)], style="List Number")
     before = _paragraph_texts(docx_bytes)
     proven, block_map = _prove(
         docx_bytes,
@@ -922,9 +907,7 @@ def test_span_edit_inside_a_table_cell_still_applies(failures: list) -> None:
     cell_paragraph = _paragraphs(out)[-1]
     deleted = "".join(t.text or "" for t in cell_paragraph.iter(_qn("delText")))
     inserted = "".join(
-        t.text or ""
-        for ins in cell_paragraph.iter(_qn("ins"))
-        for t in ins.iter(_qn("t"))
+        t.text or "" for ins in cell_paragraph.iter(_qn("ins")) for t in ins.iter(_qn("t"))
     )
     if deleted != "receipt" or inserted != "acceptance testing":
         failures.append(f"[{case}] cell revisions: deleted={deleted!r} inserted={inserted!r}")
@@ -1121,7 +1104,7 @@ def test_hyperlink_bearing_block_proves_and_applies(failures: list) -> None:
                     {"op": "keep", "text": source_text[:start]},
                     {"op": "delete", "text": target, "issue_key": issue_key},
                     {"op": "insert", "text": replacement, "issue_key": issue_key},
-                    {"op": "keep", "text": source_text[start + len(target):]},
+                    {"op": "keep", "text": source_text[start + len(target) :]},
                 ],
             }
         ]
@@ -1177,8 +1160,7 @@ def test_hyperlink_bearing_block_proves_and_applies(failures: list) -> None:
             )
         if target not in rejected or replacement in rejected:
             failures.append(
-                f"[{case}/{label}] reject_all did not restore the original text: "
-                f"{rejected!r}"
+                f"[{case}/{label}] reject_all did not restore the original text: {rejected!r}"
             )
 
         # Round two of a negotiation re-uploads the delivered redline, so
@@ -1200,10 +1182,9 @@ def test_hyperlink_bearing_block_proves_and_applies(failures: list) -> None:
                 f"[{case}/{label}] re-reading the delivered redline found "
                 f"{len(clusters)} pending clusters, expected 1: {clusters!r}"
             )
-        elif (
-            target not in clusters[0].get("original_text", "")
-            or replacement not in clusters[0].get("resulting_text", "")
-        ):
+        elif target not in clusters[0].get("original_text", "") or replacement not in clusters[
+            0
+        ].get("resulting_text", ""):
             failures.append(
                 f"[{case}/{label}] re-reading the delivered redline lost the revision "
                 f"nested in the <w:hyperlink>: {clusters[0]!r}"

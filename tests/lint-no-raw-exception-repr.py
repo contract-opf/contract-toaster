@@ -281,18 +281,12 @@ def _visit(
                 if caught is None:
                     continue
                 foreign = tuple(
-                    t
-                    for t in caught
-                    if t not in repo_exceptions and t not in REPO_RAISED_STDLIB
+                    t for t in caught if t not in repo_exceptions and t not in REPO_RAISED_STDLIB
                 )
                 if flavour == REPR_FLAVOUR:
-                    out.append(
-                        Violation(rel, name_node.lineno, name_node.id, caught, REPR_FLAVOUR)
-                    )
+                    out.append(Violation(rel, name_node.lineno, name_node.id, caught, REPR_FLAVOUR))
                 elif foreign:
-                    out.append(
-                        Violation(rel, name_node.lineno, name_node.id, foreign, STR_FLAVOUR)
-                    )
+                    out.append(Violation(rel, name_node.lineno, name_node.id, foreign, STR_FLAVOUR))
 
     for child in ast.iter_child_nodes(node):
         _visit(child, bindings, repo_exceptions, out, rel)
@@ -322,7 +316,7 @@ FIXTURE_REPO_EXCEPTIONS = {"OpfValidationError", "HostileFileError"}
 
 # The literal shape of the 15 pre-#124 sites (see `git show HEAD~:backend/
 # src/download.py`).
-DIRTY_SINGLE_LINE = '''
+DIRTY_SINGLE_LINE = """
 try:
     pass
 except ClientError as exc:
@@ -330,11 +324,11 @@ except ClientError as exc:
         status_code=503,
         detail=f"Unable to generate presigned URL: {exc!r}",
     ) from exc
-'''
+"""
 
 # The continuation form the physical-line regex could not see -- the repo's
 # own house style (backend/src/main.py, backend/src/upload_validation.py).
-DIRTY_MULTILINE = '''
+DIRTY_MULTILINE = """
 try:
     pass
 except UnicodeDecodeError as exc:
@@ -345,19 +339,19 @@ except UnicodeDecodeError as exc:
             f"and was rejected: {exc}"
         ),
     ) from exc
-'''
+"""
 
 # No f-string at all: the same leak one spelling over.
-DIRTY_STR_CALL = '''
+DIRTY_STR_CALL = """
 try:
     pass
 except Exception as exc:
     raise HTTPException(status_code=503, detail=str(exc)) from exc
-'''
+"""
 
 # A HostileFileError is the same leak one layer removed (`to_http_exception`
 # forwards `.detail` verbatim).
-DIRTY_HOSTILE_FILE = '''
+DIRTY_HOSTILE_FILE = """
 try:
     pass
 except expat.ExpatError as exc:
@@ -365,26 +359,26 @@ except expat.ExpatError as exc:
         reason_code="xml_entity_rejected",
         detail=f"XML part failed to parse safely: {exc}",
     ) from exc
-'''
+"""
 
 # A repr is never allowed -- not even for a type the repo raises itself. A
 # `UnicodeDecodeError` IS a `ValueError`, and its repr is the whole payload.
-DIRTY_REPR_OF_REPO_RAISED_TYPE = '''
+DIRTY_REPR_OF_REPO_RAISED_TYPE = """
 try:
     pass
 except ValueError as exc:
     raise HTTPException(status_code=400, detail=f"Rejected: {exc!r}") from exc
-'''
+"""
 
 # `.args` is the constructor arguments, i.e. the repr by another name.
-DIRTY_ARGS_ATTRIBUTE = '''
+DIRTY_ARGS_ATTRIBUTE = """
 try:
     pass
 except ValueError as exc:
     raise HTTPException(status_code=400, detail=f"Rejected: {exc.args}") from exc
-'''
+"""
 
-CLEAN_FIXED_STRING = '''
+CLEAN_FIXED_STRING = """
 try:
     pass
 except ClientError as exc:
@@ -393,12 +387,12 @@ except ClientError as exc:
         status_code=503,
         detail="Unable to generate presigned URL.",
     ) from exc
-'''
+"""
 
 # A repo-defined exception's message is written for the caller: shipping it
 # is the API contract, not a leak. This is the live shape at
 # backend/src/main.py's OpfValidationError handler.
-CLEAN_DOMAIN_EXCEPTION = '''
+CLEAN_DOMAIN_EXCEPTION = """
 try:
     pass
 except opf_load.OpfValidationError as exc:
@@ -409,11 +403,11 @@ except opf_load.OpfValidationError as exc:
             f"derived from its agreement_type: {exc}"
         ),
     ) from exc
-'''
+"""
 
 # A named, bounded field, not the exception. Live at
 # backend/src/upload_validation.py.
-CLEAN_NAMED_FIELD = '''
+CLEAN_NAMED_FIELD = """
 try:
     pass
 except HostileFileError as exc:
@@ -421,23 +415,23 @@ except HostileFileError as exc:
         reason_code="attached_template_sanitize_failed",
         detail=f"Sanitizing '{part_name}' produced invalid XML: {exc.detail}",
     ) from exc
-'''
+"""
 
 # The repo's own validators signal a bad request with a plain ValueError
 # carrying a fixed, documented sentence. Live at backend/src/review_routes.py
 # and backend/src/user_preferences.py.
-CLEAN_REPO_RAISED_VALUE_ERROR = '''
+CLEAN_REPO_RAISED_VALUE_ERROR = """
 try:
     resolved = reviews.resolve_notes_mode(notes_mode)
 except ValueError as exc:
     raise HTTPException(status_code=400, detail=str(exc)) from exc
-'''
+"""
 
 # Not an exception binding at all -- the risk of matching on a name.
-CLEAN_UNRELATED_NAME = '''
+CLEAN_UNRELATED_NAME = """
 e = compute_expected()
 raise HTTPException(status_code=400, detail=f"Expected {e}.")
-'''
+"""
 
 
 def _self_test() -> None:
@@ -496,9 +490,7 @@ def main() -> int:
     failures: list[Violation] = []
     for path in sorted(REPO_ROOT.glob(TARGET_GLOB)):
         rel = str(path.relative_to(REPO_ROOT))
-        failures.extend(
-            scan_source(path.read_text(encoding="utf-8"), repo_exceptions, rel=rel)
-        )
+        failures.extend(scan_source(path.read_text(encoding="utf-8"), repo_exceptions, rel=rel))
 
     if failures:
         print(

@@ -10,11 +10,11 @@ Amplify-hosting CSP has no `media-src` directive, so media falls back to
 `default-src 'self'` — bundled audio is allowed, remote audio is not. Never
 change these to remote URLs.
 
-| File | Source | Author | License |
-|---|---|---|---|
-| `lever.mp3` | [freesound.org/people/spanrucker/sounds/272232/](https://freesound.org/people/spanrucker/sounds/272232/) — "toaster lever" | spanrucker | CC0 1.0 |
-| `tick.mp3` | [freesound.org/people/knufds/sounds/670889/](https://freesound.org/people/knufds/sounds/670889/) — "Lux Kitchen Timer.wav" | knufds | CC0 1.0 |
-| `pop.mp3` | [freesound.org/people/ShadowSilhouette/sounds/489739/](https://freesound.org/people/ShadowSilhouette/sounds/489739/) — "toaster_up 01.wav" | ShadowSilhouette | CC0 1.0 |
+| File        | Source                                                                                                                                     | Author           | License |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ---------------- | ------- |
+| `lever.mp3` | [freesound.org/people/spanrucker/sounds/272232/](https://freesound.org/people/spanrucker/sounds/272232/) — "toaster lever"                 | spanrucker       | CC0 1.0 |
+| `tick.mp3`  | [freesound.org/people/knufds/sounds/670889/](https://freesound.org/people/knufds/sounds/670889/) — "Lux Kitchen Timer.wav"                 | knufds           | CC0 1.0 |
+| `pop.mp3`   | [freesound.org/people/ShadowSilhouette/sounds/489739/](https://freesound.org/people/ShadowSilhouette/sounds/489739/) — "toaster_up 01.wav" | ShadowSilhouette | CC0 1.0 |
 
 ## How these were derived
 

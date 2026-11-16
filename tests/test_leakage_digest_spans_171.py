@@ -96,9 +96,12 @@ def _digest_entries(doc: dict[str, Any]) -> list[tuple[str, str, str]]:
                 out.extend((clause["id"], "exemplar", e["text"]) for e in entry["exemplars"])
             else:
                 out.append((clause["id"], "signed_variant", entry["text"]))
-        out.extend((clause["id"], "refused_ask", e["text"]) for e in clause.get("refused_asks") or [])
         out.extend(
-            (clause["id"], "changed_opening", e["text"]) for e in clause.get("changed_openings") or []
+            (clause["id"], "refused_ask", e["text"]) for e in clause.get("refused_asks") or []
+        )
+        out.extend(
+            (clause["id"], "changed_opening", e["text"])
+            for e in clause.get("changed_openings") or []
         )
     return out
 
@@ -140,8 +143,10 @@ def test_a_digest_text_found_in_no_dossier_is_blocked_in_an_internal_note() -> N
         texts = [
             t
             for c, k, t in _digest_entries(doc)
-            if c == clause_id and k == kind
-            and t not in excerpts and json.dumps(t)[1:-1] not in rendered_dossiers
+            if c == clause_id
+            and k == kind
+            and t not in excerpts
+            and json.dumps(t)[1:-1] not in rendered_dossiers
         ]
         assert texts, (path.name, clause_id, kind)
         for text in texts:
@@ -235,7 +240,8 @@ def test_part_of_a_digest_text_passes_internally() -> None:
     doc = _load(GOLD)
     corpus = leakage_scan.ConfidentialCorpus.from_opf_document(doc, overrides=None)
     (text,) = [
-        t for c, k, t in _digest_entries(doc)
+        t
+        for c, k, t in _digest_entries(doc)
         if c == "clause.indemnification" and k == "refused_ask"
     ]
     assert _internal_scan(corpus, _note(text)).blocked

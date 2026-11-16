@@ -72,7 +72,9 @@ class PublishWorkflowSigns(unittest.TestCase):
         self.assertIn("digest=${digest}", steps[push]["run"])
         self.assertTrue(steps[install]["uses"].startswith("sigstore/cosign-installer@"))
         run = steps[sign]["run"]
-        self.assertIn('cosign sign --yes "${SUBJECT}"', run, "the command signs the digest reference")
+        self.assertIn(
+            'cosign sign --yes "${SUBJECT}"', run, "the command signs the digest reference"
+        )
         subject = steps[sign]["env"]["SUBJECT"]
         self.assertIn("steps.meta.outputs.image", subject)
         self.assertIn("@${{ steps.push.outputs.digest }}", subject)
@@ -87,11 +89,15 @@ class PublishWorkflowSigns(unittest.TestCase):
         move = next(i for i, n in enumerate(names) if n.startswith("Move :latest"))
         self.assertLess(sign, move)
         pushed_in_push_step = [
-            line for line in steps[push]["run"].splitlines() if line.strip().startswith("docker push")
+            line
+            for line in steps[push]["run"].splitlines()
+            if line.strip().startswith("docker push")
         ]
         self.assertTrue(pushed_in_push_step)
         for line in pushed_in_push_step:
-            self.assertNotIn(":latest", line, "the push step must not publish the tag the box watches")
+            self.assertNotIn(
+                ":latest", line, "the push step must not publish the tag the box watches"
+            )
         self.assertIn('docker push "${{ steps.meta.outputs.image }}:latest"', steps[move]["run"])
         pushing = [st for st in steps if "docker push" in (st.get("run") or "")]
         self.assertEqual(len(pushing), 2, "exactly the sha push and the late :latest push")
@@ -109,7 +115,9 @@ class PublishWorkflowSigns(unittest.TestCase):
         # that is already out. Remove `continue-on-error` (and this test) once a
         # signed run has succeeded; RUNBOOK.md says the same.
         job = workflow()["jobs"]["publish"]
-        sign = next(s for s in job["steps"] if s.get("name", "").startswith("Sign the pushed digest"))
+        sign = next(
+            s for s in job["steps"] if s.get("name", "").startswith("Sign the pushed digest")
+        )
         self.assertIs(sign.get("continue-on-error"), True)
         self.assertIn("continue-on-error", PUBLISH.read_text(encoding="utf-8"))
         self.assertIn("non-blocking", (REPO_ROOT / "RUNBOOK.md").read_text(encoding="utf-8"))
@@ -117,7 +125,9 @@ class PublishWorkflowSigns(unittest.TestCase):
     def test_the_minio_job_is_not_signed(self) -> None:
         # Not watched by autopull; immutable release tag. Say so if that changes.
         job = workflow()["jobs"]["publish-minio"]
-        self.assertFalse([n for n in step_names(job) if "cosign" in n.lower() or "sign" in n.lower()])
+        self.assertFalse(
+            [n for n in step_names(job) if "cosign" in n.lower() or "sign" in n.lower()]
+        )
 
 
 class AutopullExpectsThatSigner(unittest.TestCase):

@@ -149,8 +149,7 @@ class TestSettleReservationKeyedLookup(unittest.TestCase):
             ExpressionAttributeValues={":rid": TARGET_REVIEW_ID},
         )
         assert "LastEvaluatedKey" in scan_resp, (
-            "test setup did not produce a multi-page Scan -- increase "
-            "_FILLER_COUNT / _FILLER_BYTES"
+            "test setup did not produce a multi-page Scan -- increase _FILLER_COUNT / _FILLER_BYTES"
         )
         assert scan_resp.get("Items", []) == [], (
             "test setup's target row unexpectedly landed on Scan's first "
@@ -160,9 +159,9 @@ class TestSettleReservationKeyedLookup(unittest.TestCase):
     def test_settle_finds_and_settles_a_late_inserted_row_beyond_scan_page_1(self) -> None:
         pr._settle_reservation(TARGET_REVIEW_ID, self.ddb)
 
-        submission = self.subs_table.get_item(
-            Key={"idempotency_key": TARGET_IDEMPOTENCY_KEY}
-        )["Item"]
+        submission = self.subs_table.get_item(Key={"idempotency_key": TARGET_IDEMPOTENCY_KEY})[
+            "Item"
+        ]
         self.assertTrue(
             submission.get("reservation_released"),
             "target submission's reservation was never released -- settle "

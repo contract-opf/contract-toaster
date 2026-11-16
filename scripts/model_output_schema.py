@@ -173,6 +173,7 @@ def confidence_state_levels(path: Path = OUTPUT_SCHEMA_PATH) -> tuple[str, ...]:
         schema: dict[str, Any] = json.load(fh)
     return tuple(schema["properties"]["confidence_state"]["enum"])
 
+
 # Pipeline-stamped fields the model must not be asked to produce -- see the
 # module docstring. Kept as their own named tuples (rather than one shared
 # list) so a future stamped field can be added to just the level it applies
@@ -209,6 +210,7 @@ def authors_block_transcripts(schema: dict[str, Any]) -> bool:
     the model author replacement text here?" from ONE answer.
     """
     return "block_patches" in (schema.get("properties") or {})
+
 
 # Issue-level fields the model is asked for ONLY when this review's notes
 # mode puts internal-audience content in scope -- removed from the
@@ -390,9 +392,7 @@ def model_facing_output_schema(
     # artifact itself declares keeps its order. Required, so the one shared
     # tool asks every answer to say which pass it is -- see
     # `ROLE_DISCRIMINATOR_FIELD` for why it is never enforced on the way back.
-    schema.setdefault("properties", {})[ROLE_DISCRIMINATOR_FIELD] = dict(
-        _ROLE_DISCRIMINATOR_SCHEMA
-    )
+    schema.setdefault("properties", {})[ROLE_DISCRIMINATOR_FIELD] = dict(_ROLE_DISCRIMINATOR_SCHEMA)
     schema["required"] = [*schema.get("required", []), ROLE_DISCRIMINATOR_FIELD]
 
     return schema
@@ -882,9 +882,7 @@ def _already_permits_null(prop_schema: Any) -> bool:
         return True
     any_of = prop_schema.get("anyOf")
     if isinstance(any_of, list):
-        return any(
-            isinstance(branch, dict) and branch.get("type") == "null" for branch in any_of
-        )
+        return any(isinstance(branch, dict) and branch.get("type") == "null" for branch in any_of)
     return False
 
 
@@ -1066,11 +1064,7 @@ def project_output_schema_for_provider(
     read (`model_facing_output_schema` never caches either) nor the
     caller-supplied `schema` argument is mutated.
     """
-    base = (
-        schema
-        if schema is not None
-        else model_facing_output_schema(path, notes_mode=notes_mode)
-    )
+    base = schema if schema is not None else model_facing_output_schema(path, notes_mode=notes_mode)
     projected: dict[str, Any] = json.loads(json.dumps(base))
     _break_recursive_refs_in_place(projected)
     _strip_unsupported_constraints_in_place(projected)

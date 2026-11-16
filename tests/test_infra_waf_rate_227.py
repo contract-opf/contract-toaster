@@ -212,20 +212,17 @@ def check_upload_rate_rule_scoped_to_post() -> list[str]:
     path_matches = [
         bm
         for bm in byte_matches
-        if "uriPath" in bm.get("FieldToMatch", {})
-        or "UriPath" in bm.get("FieldToMatch", {})
+        if "uriPath" in bm.get("FieldToMatch", {}) or "UriPath" in bm.get("FieldToMatch", {})
     ]
     method_matches = [
         bm
         for bm in byte_matches
-        if "method" in bm.get("FieldToMatch", {})
-        or "Method" in bm.get("FieldToMatch", {})
+        if "method" in bm.get("FieldToMatch", {}) or "Method" in bm.get("FieldToMatch", {})
     ]
 
     failures += _assert(
         len(path_matches) >= 1,
-        "AndStatement retains the URI-path ByteMatchStatement "
-        "(/api/reviews)",
+        "AndStatement retains the URI-path ByteMatchStatement (/api/reviews)",
         f"ByteMatchStatements found: {byte_matches!r}",
     )
 
@@ -244,10 +241,7 @@ def check_upload_rate_rule_scoped_to_post() -> list[str]:
             f"SearchString={path_bm.get('SearchString')!r}",
         )
         failures += _assert(
-            any(
-                t.get("Type") == "LOWERCASE"
-                for t in path_bm.get("TextTransformations", [])
-            ),
+            any(t.get("Type") == "LOWERCASE" for t in path_bm.get("TextTransformations", [])),
             "Rule 4's path match keeps the LOWERCASE transform (case cannot dodge the scope)",
             f"TextTransformations={path_bm.get('TextTransformations')!r}",
         )

@@ -5,6 +5,7 @@ REDLINE ADDED, never the ones the counterparty's own document already held.
 Before the fix every ordinary contract with a page-number field, a
 cross-reference or a hyperlink failed closed as `output_ooxml_scan_failed`
 after both model passes were paid for. Synthetic fixtures only."""
+
 from __future__ import annotations
 
 import io
@@ -27,13 +28,15 @@ PAGE_FIELD = (
     '<w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>1</w:t></w:r>'
     '<w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>'
 )
-REF_FIELD = '<w:p><w:fldSimple w:instr=" REF _Ref1 "><w:r><w:t>Section 4</w:t></w:r></w:fldSimple></w:p>'
+REF_FIELD = (
+    '<w:p><w:fldSimple w:instr=" REF _Ref1 "><w:r><w:t>Section 4</w:t></w:r></w:fldSimple></w:p>'
+)
 LINK = '<w:p><w:hyperlink w:anchor="_Toc1"><w:r><w:t>Definitions</w:t></w:r></w:hyperlink></w:p>'
 BODY = '<w:p><w:r><w:t xml:space="preserve">Supplier shall pay within 30 days.</w:t></w:r></w:p>'
 TEXT_EDIT = (
     '<w:p><w:r><w:t xml:space="preserve">Supplier shall pay within </w:t></w:r>'
     '<w:del w:id="91" w:author="contract-toaster" w:date="2026-10-06T00:00:00Z">'
-    '<w:r><w:delText>30</w:delText></w:r></w:del>'
+    "<w:r><w:delText>30</w:delText></w:r></w:del>"
     '<w:ins w:id="92" w:author="contract-toaster" w:date="2026-10-06T00:00:00Z">'
     '<w:r><w:t>45</w:t></w:r></w:ins><w:r><w:t xml:space="preserve"> days.</w:t></w:r></w:p>'
 )
@@ -93,7 +96,7 @@ def test_an_inserted_field_cannot_hide_behind_a_deleted_source_field() -> None:
     swapped = (
         '<w:p><w:ins w:id="94" w:author="contract-toaster" w:date="2026-10-06T00:00:00Z">'
         '<w:fldSimple w:instr=" HYPERLINK &quot;https://attacker.example&quot; ">'
-        '<w:r><w:t>here</w:t></w:r></w:fldSimple></w:ins></w:p>'
+        "<w:r><w:t>here</w:t></w:r></w:fldSimple></w:ins></w:p>"
     )
     assert _refused(_docx(PAGE_FIELD + swapped + LINK + BODY), SOURCE)
 
@@ -104,7 +107,10 @@ def test_more_field_elements_than_the_source_held_is_refused() -> None:
 
 def test_a_field_in_a_part_the_source_did_not_have_is_refused() -> None:
     out = io.BytesIO()
-    with zipfile.ZipFile(io.BytesIO(_docx(PAGE_FIELD + REF_FIELD + LINK + BODY))) as src, zipfile.ZipFile(out, "w") as dst:
+    with (
+        zipfile.ZipFile(io.BytesIO(_docx(PAGE_FIELD + REF_FIELD + LINK + BODY))) as src,
+        zipfile.ZipFile(out, "w") as dst,
+    ):
         for info in src.infolist():
             dst.writestr(info, src.read(info.filename))
         dst.writestr(

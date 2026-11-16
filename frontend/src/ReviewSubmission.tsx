@@ -108,11 +108,7 @@ import { describeOutcome } from './outcome';
 import { readLastPlaybookId, writeLastPlaybookId } from './lastPlaybook';
 // The one shared read of GET /api/playbooks (issue #72) — see that module's
 // docstring for why the catalog is held once rather than per panel.
-import {
-  invalidateCatalog,
-  usePlaybookCatalog,
-  type PlaybookCatalogEntry,
-} from './playbooksStore';
+import { invalidateCatalog, usePlaybookCatalog, type PlaybookCatalogEntry } from './playbooksStore';
 // Which review this TAB has in flight, so a reload resumes the exact review
 // rather than the newest one the account happens to be running (issue #58,
 // audit finding F8/A8). See inflightReview.ts's module docstring for the
@@ -174,7 +170,10 @@ import {
   type ReviewProjectionState,
   type ReviewSubmissionCallbacks,
 } from './orbit-diner/projection';
-import { copyReceipt as copyOrbitReceipt, saveReceipt as saveOrbitReceipt } from './orbit-diner/receipt';
+import {
+  copyReceipt as copyOrbitReceipt,
+  saveReceipt as saveOrbitReceipt,
+} from './orbit-diner/receipt';
 import { criticDeltaHasContent } from './toaster/criticDelta';
 import {
   composeGuidance,
@@ -187,12 +186,7 @@ import {
 // name the review this panel should prefill itself from. No storage, no
 // props threaded through App.tsx — see that module's docstring.
 import { consumeRunAgainRequest, subscribeRunAgain } from './runAgainRequest';
-import {
-  DEFAULT_NOTES_MODE,
-  isNotesMode,
-  isNotesModeAvailable,
-  type NotesMode,
-} from './notesMode';
+import { DEFAULT_NOTES_MODE, isNotesMode, isNotesModeAvailable, type NotesMode } from './notesMode';
 import {
   primeAudio,
   playLever,
@@ -423,10 +417,7 @@ const HISTORY_TAB_HASH = '#/history';
  * split back into lines — so the printed slip, the copied text and the saved
  * image can never drift from each other or from `toaster/receipt.ts`.
  */
-function orbitReceiptLines(
-  source: ReceiptSource,
-  playbookName: string | null,
-): string[] {
+function orbitReceiptLines(source: ReceiptSource, playbookName: string | null): string[] {
   return receiptText(receiptLines(source, playbookName)).split('\n');
 }
 
@@ -742,9 +733,7 @@ export const POLL_404_GRACE_MS = 60_000;
 // path forever (same as any unclassified status): nothing outside tests can
 // produce one on this GET — every 429 in `backend/src` belongs to a POST
 // path — and the owner's decision says explicitly it must never terminate.
-export type PollFailureOutcome =
-  | { readonly kind: 'transient' }
-  | { readonly kind: 'terminal' };
+export type PollFailureOutcome = { readonly kind: 'transient' } | { readonly kind: 'terminal' };
 
 export function classifyPollFailure(status: number, ageMs: number): PollFailureOutcome {
   if (status === 404) {
@@ -907,7 +896,8 @@ export const REASON_EXPLANATIONS: Record<string, FailureExplanation> = {
     fix: 'An admin can replace the key under “Models”. Until then every review will fail the same way.',
   },
   model_rate_limited: {
-    cause: 'The model provider is temporarily refusing requests because too many were sent at once.',
+    cause:
+      'The model provider is temporarily refusing requests because too many were sent at once.',
     fix: 'Wait a few minutes and submit again. If it keeps happening, an admin should check the account’s limits under “Models”.',
   },
   model_unavailable: {
@@ -1031,12 +1021,14 @@ export const REASON_EXPLANATIONS: Record<string, FailureExplanation> = {
     fix: 'Pick a different contract type, or ask an admin when this one will be available.',
   },
   submission_time_bundle_retired: {
-    cause: 'The playbook this review was submitted against was replaced or switched off before the review started, so it was stopped rather than run against different rules than you chose.',
+    cause:
+      'The playbook this review was submitted against was replaced or switched off before the review started, so it was stopped rather than run against different rules than you chose.',
     fix: 'Submit the document again — it will be reviewed against the playbook that is active now.',
   },
   // --- The system's problem: nothing the reader can do --------------------
   structured_output_retry_exhausted: {
-    cause: 'The model kept returning a result the system could not read, so no review was produced.',
+    cause:
+      'The model kept returning a result the system could not read, so no review was produced.',
     fix: 'This has been recorded. Please try again; if it keeps happening, an admin should try a different model under “Models”.',
   },
   // Issue #670: the first review pass answered in the right shape but kept
@@ -1049,11 +1041,13 @@ export const REASON_EXPLANATIONS: Record<string, FailureExplanation> = {
   // structured-output failure above, stored a null reason and rendered the
   // vague `STAGE_EXPLANATIONS.run_review` fallback.
   primary_block_transcript_rejected: {
-    cause: 'The review kept quoting your document inaccurately when drafting its changes, so it was stopped rather than finished against wording that does not match your file.',
+    cause:
+      'The review kept quoting your document inaccurately when drafting its changes, so it was stopped rather than finished against wording that does not match your file.',
     fix: 'Nothing is wrong with your document. This has been recorded — please try again; if it keeps happening, an admin should try a different model under “Models”.',
   },
   quote_patches_not_applied: {
-    cause: 'The review found changes to request, but none of them could be placed into your document, so no marked-up copy was produced.',
+    cause:
+      'The review found changes to request, but none of them could be placed into your document, so no marked-up copy was produced.',
     fix: 'Try submitting the document again. If it keeps happening, the document may be formatted in a way the tool cannot mark up, and the changes will need to be made by hand.',
   },
   leakage_detected: {
@@ -1065,7 +1059,8 @@ export const REASON_EXPLANATIONS: Record<string, FailureExplanation> = {
     fix: 'This is a fault in the tool, not in your document. It has been recorded — please try again, or contact an admin if it keeps happening.',
   },
   round_trip_verification_failed: {
-    cause: 'The marked-up document could not be verified as safe to open in Word, so it was not released.',
+    cause:
+      'The marked-up document could not be verified as safe to open in Word, so it was not released.',
     fix: 'This is a fault in the tool, not in your document. It has been recorded — please try again, or contact an admin if it keeps happening.',
   },
   // --- The operator's problem: the activated playbook itself (issue #479) -
@@ -1075,15 +1070,18 @@ export const REASON_EXPLANATIONS: Record<string, FailureExplanation> = {
   // trying to compose the activated OPF playbook into a review, never
   // something wrong with the submitted document.
   opf_knowledge_refused: {
-    cause: 'The contract type you submitted for is set up in a way the tool cannot honestly turn into review instructions.',
+    cause:
+      'The contract type you submitted for is set up in a way the tool cannot honestly turn into review instructions.',
     fix: 'Nothing is wrong with your document. An admin needs to check how this contract type is configured before it can be reviewed.',
   },
   opf_digest_missing: {
-    cause: 'The contract type you submitted for is missing the reference material the review needs, so it was not reviewed.',
+    cause:
+      'The contract type you submitted for is missing the reference material the review needs, so it was not reviewed.',
     fix: 'Nothing is wrong with your document. An admin needs to fix or re-upload this contract type before it can be reviewed.',
   },
   floor_invariant_unjudged: {
-    cause: 'One of this contract type’s required rules could not be checked, so the review was stopped rather than finish with a rule unverified.',
+    cause:
+      'One of this contract type’s required rules could not be checked, so the review was stopped rather than finish with a rule unverified.',
     fix: 'This has been recorded. It is worth submitting again; if it keeps happening, an admin should check the account and model under “Models”.',
   },
   // Issue #682: the SAME stopped-with-a-rule-unverified outcome as
@@ -1097,7 +1095,8 @@ export const REASON_EXPLANATIONS: Record<string, FailureExplanation> = {
   // deterministic limit, just reached by the rule check rather than by the
   // review itself.
   floor_invariant_truncated: {
-    cause: 'Checking one of this contract type’s required rules needed more room to write than the model was allowed, so the answer was cut off and the review was stopped rather than finish with a rule unverified.',
+    cause:
+      'Checking one of this contract type’s required rules needed more room to write than the model was allowed, so the answer was cut off and the review was stopped rather than finish with a rule unverified.',
     fix: 'Nothing is wrong with your document, and sending it again will run into the same limit — whoever operates this deployment has to raise the output budget the rule check is allowed to write.',
   },
   // Issue #584: the review found changes to request but produced no
@@ -1107,7 +1106,8 @@ export const REASON_EXPLANATIONS: Record<string, FailureExplanation> = {
   // attempted and failed to place; this one means nothing was ever
   // attempted because there was no located text to change.
   redline_not_persisted: {
-    cause: 'The review found changes to request, but no marked-up document was produced to deliver them in.',
+    cause:
+      'The review found changes to request, but no marked-up document was produced to deliver them in.',
     fix: 'This has been recorded for an admin to investigate. Please try again; if it keeps happening, contact an admin.',
   },
   // Issue #665: the second review pass — the one that checks the first
@@ -1134,20 +1134,23 @@ export const REASON_EXPLANATIONS: Record<string, FailureExplanation> = {
   // consecutive attempts, and the review terminated here. The admin lead is
   // therefore schema enforcement and the model behind it, not the document.
   critic_schema_invalid: {
-    cause: 'The second review pass, which checks the first one’s work, kept answering in the wrong shape — so the review was stopped rather than finished on one unchecked pass.',
+    cause:
+      'The second review pass, which checks the first one’s work, kept answering in the wrong shape — so the review was stopped rather than finished on one unchecked pass.',
     fix: 'This has been recorded. It is worth submitting again; if it keeps happening, an admin should check under “Models” that the checking pass is on a model that can be held to the required answer format.',
   },
   // The critic's answers were not readable as an answer at all — the
   // prose-preamble / markdown-fence class. A different lead from the shape
   // failure above, which is why it is a different token.
   critic_invalid_json: {
-    cause: 'The second review pass, which checks the first one’s work, kept answering with something the system could not read at all — so the review was stopped rather than finished on one unchecked pass.',
+    cause:
+      'The second review pass, which checks the first one’s work, kept answering with something the system could not read at all — so the review was stopped rather than finished on one unchecked pass.',
     fix: 'This has been recorded. It is worth submitting again; if it keeps happening, an admin should try a different model for the checking pass under “Models”.',
   },
   // The residual: the pass gave up, and its recorded error was not one of
   // the two classes above (or none was recorded). Says only what is known.
   critic_retry_exhausted: {
-    cause: 'The second review pass, which checks the first one’s work, kept returning a result the system could not use — so the review was stopped rather than finished on one unchecked pass.',
+    cause:
+      'The second review pass, which checks the first one’s work, kept returning a result the system could not use — so the review was stopped rather than finished on one unchecked pass.',
     fix: 'This has been recorded. It is worth submitting again; if it keeps happening, an admin should try a different model for the checking pass under “Models”.',
   },
   // Issue #665 item 4: three more tokens `scripts/review_spine.py` can put
@@ -1158,15 +1161,18 @@ export const REASON_EXPLANATIONS: Record<string, FailureExplanation> = {
   // all three left the reader on the same "cause not identified" fallback
   // this issue is about.
   block_transcript_rejected: {
-    cause: 'The changes the review proposed did not line up with the document they were meant for, so none of them were written into it.',
+    cause:
+      'The changes the review proposed did not line up with the document they were meant for, so none of them were written into it.',
     fix: 'This is a fault in the tool, not in your document. It has been recorded — please try again, and contact an admin if it keeps happening.',
   },
   block_edits_not_applied: {
-    cause: 'The review found changes to request, but none of them could be written into your document, so no marked-up copy was produced.',
+    cause:
+      'The review found changes to request, but none of them could be written into your document, so no marked-up copy was produced.',
     fix: 'The changes themselves are listed for you to apply by hand. It is worth submitting again; if it keeps happening, contact an admin.',
   },
   projection_verification_failed: {
-    cause: 'The marked-up document failed the tool’s own check that it changes only what the review asked for, so it was not released.',
+    cause:
+      'The marked-up document failed the tool’s own check that it changes only what the review asked for, so it was not released.',
     fix: 'This is a fault in the tool, not in your document. It has been recorded — please try again, or contact an admin if it keeps happening.',
   },
 };
@@ -1190,8 +1196,7 @@ export const REASON_EXPLANATIONS: Record<string, FailureExplanation> = {
 // specificity, never remove the existing fallback.
 export const REASON_DETAIL_EXPLANATIONS: Record<string, FailureExplanation> = {
   suspicious_control_characters: {
-    cause:
-      'The document contains invisible control characters the tool refuses to review.',
+    cause: 'The document contains invisible control characters the tool refuses to review.',
     fix: 'Paste the text into a fresh document, or ask an admin to allow this character class.',
   },
 };
@@ -1255,11 +1260,13 @@ const STAGE_EXPLANATIONS: Record<string, FailureExplanation> = {
     fix: 'Resubmitting will not usually help. Contact an admin and quote the review id.',
   },
   critic_pass: {
-    cause: 'The review stopped during its second pass, which checks the first one’s work, before it could finish.',
+    cause:
+      'The review stopped during its second pass, which checks the first one’s work, before it could finish.',
     fix: 'Resubmitting will not usually help. Contact an admin and quote the review id.',
   },
   reconciliation: {
-    cause: 'The review had finished both passes over your document, but stopped while combining their results, before it could finish.',
+    cause:
+      'The review had finished both passes over your document, but stopped while combining their results, before it could finish.',
     fix: 'Resubmitting will not usually help. Contact an admin and quote the review id.',
   },
   persist_result: {
@@ -1289,7 +1296,8 @@ const STAGE_EXPLANATIONS: Record<string, FailureExplanation> = {
   // fallback for them — it is the only copy they will ever have. Keep the
   // keys in step with the `withStageErrorHandling(…, '<token>', …)` calls.
   acquire_semaphore_slot: {
-    cause: 'The review never started: the tool could not reserve one of the slots it runs reviews in.',
+    cause:
+      'The review never started: the tool could not reserve one of the slots it runs reviews in.',
     fix: 'Nothing is wrong with your document. This usually means the tool was busy — please submit again in a few minutes, and tell an admin if it keeps happening.',
   },
   extract: {
@@ -1321,7 +1329,8 @@ const STAGE_EXPLANATIONS: Record<string, FailureExplanation> = {
   // describe the same reader-facing fact; split it only if that stops being
   // true for one of the two targets.
   redline: {
-    cause: 'The review ran, but the marked-up copy of your document could not be produced, so nothing was released.',
+    cause:
+      'The review ran, but the marked-up copy of your document could not be produced, so nothing was released.',
     fix: 'This is a fault in the tool, not in your document. It has been recorded — please try again, or contact an admin if it keeps happening.',
   },
   persist: {
@@ -1329,11 +1338,13 @@ const STAGE_EXPLANATIONS: Record<string, FailureExplanation> = {
     fix: 'Please try again — the review will need to be re-run.',
   },
   audit: {
-    cause: 'The review reached its last record-keeping step and stopped there, so it was never marked complete.',
+    cause:
+      'The review reached its last record-keeping step and stopped there, so it was never marked complete.',
     fix: 'Check History first — a review that did finish is still listed there. If it is not, please submit again and tell an admin.',
   },
   release_semaphore_slot: {
-    cause: 'The review reached its last clean-up step and stopped there, so it was never marked complete.',
+    cause:
+      'The review reached its last clean-up step and stopped there, so it was never marked complete.',
     fix: 'Check History first — a review that did finish is still listed there. If it is not, please submit again and tell an admin.',
   },
 };
@@ -1471,11 +1482,14 @@ function findMatchingPlaybook(
         normName.includes(normalizedGuess) ||
         normalizedGuess.includes(normName) ||
         (normalizedGuess.includes('nda') && (normId.includes('nda') || normName.includes('nda'))) ||
-        (normalizedGuess.includes('non-disclosure') && (normId.includes('nda') || normName.includes('nda'))) ||
+        (normalizedGuess.includes('non-disclosure') &&
+          (normId.includes('nda') || normName.includes('nda'))) ||
         (normalizedGuess.includes('dpa') && (normId.includes('dpa') || normName.includes('dpa'))) ||
-        (normalizedGuess.includes('data protection') && (normId.includes('dpa') || normName.includes('dpa'))) ||
+        (normalizedGuess.includes('data protection') &&
+          (normId.includes('dpa') || normName.includes('dpa'))) ||
         (normalizedGuess.includes('msa') && (normId.includes('msa') || normName.includes('msa'))) ||
-        (normalizedGuess.includes('master services') && (normId.includes('msa') || normName.includes('msa')))
+        (normalizedGuess.includes('master services') &&
+          (normId.includes('msa') || normName.includes('msa')))
       );
     }) ?? null
   );
@@ -1863,9 +1877,7 @@ export default function ReviewSubmission(): React.ReactElement {
       ? detail.estimated_usd_cents
       : undefined;
   const submittedEstimateCents: number | null | undefined =
-    submittedEstimate === undefined
-      ? detailEstimateCents
-      : (submittedEstimate?.cents ?? null);
+    submittedEstimate === undefined ? detailEstimateCents : (submittedEstimate?.cents ?? null);
   const costWords = preflight?.wordCount ?? 0;
   useEffect(() => {
     let cancelled = false;
@@ -1916,16 +1928,22 @@ export default function ReviewSubmission(): React.ReactElement {
   // event, which the one audio owner already sounds, so the caller that goes
   // through the console must be able to move the setting silently. Every other
   // caller wants the detent and uses `handleBrowningChange` below.
-  const applyBrowningChange = useCallback((level: BrowningLevel): boolean => {
-    if (level === browning) return false;
-    setBrowning(level);
-    writeLastBrowning(level);
-    return true;
-  }, [browning]);
+  const applyBrowningChange = useCallback(
+    (level: BrowningLevel): boolean => {
+      if (level === browning) return false;
+      setBrowning(level);
+      writeLastBrowning(level);
+      return true;
+    },
+    [browning],
+  );
 
-  const handleBrowningChange = useCallback((level: BrowningLevel) => {
-    if (applyBrowningChange(level)) playDetent();
-  }, [applyBrowningChange, playDetent]);
+  const handleBrowningChange = useCallback(
+    (level: BrowningLevel) => {
+      if (applyBrowningChange(level)) playDetent();
+    },
+    [applyBrowningChange, playDetent],
+  );
 
   // Issue #523 / Review Tab Defaults: auto-save footnote preference in the
   // background and persist to localStorage whenever the control moves.
@@ -1984,7 +2002,7 @@ export default function ReviewSubmission(): React.ReactElement {
       writeLastNotesMode(mode);
       void saveNotesModePreference(mode);
     },
-    [notesModeInternalAvailable, saveNotesModePreference]
+    [notesModeInternalAvailable, saveNotesModePreference],
   );
 
   // Issue #491: fire the cheap preflight check the moment a file is chosen.
@@ -2219,8 +2237,7 @@ export default function ReviewSubmission(): React.ReactElement {
           return false;
         }
         const detailResponse = (await response.json()) as { status?: unknown };
-        const statusValue =
-          typeof detailResponse.status === 'string' ? detailResponse.status : '';
+        const statusValue = typeof detailResponse.status === 'string' ? detailResponse.status : '';
         if (!NON_TERMINAL_STATUSES.has(statusValue)) {
           clearInflightReviewId();
           return false;
@@ -2349,9 +2366,7 @@ export default function ReviewSubmission(): React.ReactElement {
   // currently-viewed draft is the free cached one.
   const [coverNoteDraft, setCoverNoteDraft] = useState<string | null>(null);
   const [coverNoteCostCents, setCoverNoteCostCents] = useState<number | null>(null);
-  const [coverNoteLastRealCostCents, setCoverNoteLastRealCostCents] = useState<number | null>(
-    null,
-  );
+  const [coverNoteLastRealCostCents, setCoverNoteLastRealCostCents] = useState<number | null>(null);
   const [coverNoteCached, setCoverNoteCached] = useState(false);
   const [coverNoteLoading, setCoverNoteLoading] = useState(false);
   const [coverNoteFailed, setCoverNoteFailed] = useState(false);
@@ -2456,35 +2471,41 @@ export default function ReviewSubmission(): React.ReactElement {
   }, []);
 
   // `navigator.clipboard` guard mirrors copyReviewId above — same reason.
-  const copyReceiptSlip = useCallback((rows: readonly string[]) => {
-    const clipboard = navigator.clipboard;
-    if (!clipboard?.writeText) {
-      return;
-    }
-    void copyOrbitReceipt(rows)
-      .then(() => {
-        setReceiptCopied(true);
-        recordReceiptAction('copy');
-        window.setTimeout(() => setReceiptCopied(false), 2000);
-      })
-      .catch(() => {
-        // Clipboard permission denied. The slip is still printed in the open
-        // dialog for a manual select-and-copy, and nothing confirms a copy
-        // that did not happen.
-      });
-  }, [recordReceiptAction]);
+  const copyReceiptSlip = useCallback(
+    (rows: readonly string[]) => {
+      const clipboard = navigator.clipboard;
+      if (!clipboard?.writeText) {
+        return;
+      }
+      void copyOrbitReceipt(rows)
+        .then(() => {
+          setReceiptCopied(true);
+          recordReceiptAction('copy');
+          window.setTimeout(() => setReceiptCopied(false), 2000);
+        })
+        .catch(() => {
+          // Clipboard permission denied. The slip is still printed in the open
+          // dialog for a manual select-and-copy, and nothing confirms a copy
+          // that did not happen.
+        });
+    },
+    [recordReceiptAction],
+  );
 
   // The filename is `receiptFilename()`'s, the same one "Save receipt" uses on
   // the existing panel — the console never names the file itself.
-  const saveReceiptSlip = useCallback((rows: readonly string[], id: string | null) => {
-    if (!saveOrbitReceipt(rows, receiptFilename(id, 'png'))) {
-      // No 2D context — nothing was downloaded, so nothing is confirmed.
-      return;
-    }
-    setReceiptSaved(true);
-    recordReceiptAction('save');
-    window.setTimeout(() => setReceiptSaved(false), 2000);
-  }, [recordReceiptAction]);
+  const saveReceiptSlip = useCallback(
+    (rows: readonly string[], id: string | null) => {
+      if (!saveOrbitReceipt(rows, receiptFilename(id, 'png'))) {
+        // No 2D context — nothing was downloaded, so nothing is confirmed.
+        return;
+      }
+      setReceiptSaved(true);
+      recordReceiptAction('save');
+      window.setTimeout(() => setReceiptSaved(false), 2000);
+    },
+    [recordReceiptAction],
+  );
 
   const handleCancel = useCallback(async (): Promise<void> => {
     if (!reviewId) {
@@ -2637,9 +2658,12 @@ export default function ReviewSubmission(): React.ReactElement {
         setDetail(data);
         setPollError(null);
         if (NON_TERMINAL_STATUSES.has(data.status)) {
-          pollTimer.current = setTimeout(() => {
-            void poll();
-          }, nextPollDelayMs(ageNow(), 0));
+          pollTimer.current = setTimeout(
+            () => {
+              void poll();
+            },
+            nextPollDelayMs(ageNow(), 0),
+          );
         } else {
           // Issue #58: terminal means there is nothing left to resume. The
           // finished review stays on screen for this render, but a reload
@@ -2665,9 +2689,12 @@ export default function ReviewSubmission(): React.ReactElement {
             serverErrors >= POLL_SERVER_ERROR_STREAK ? SERVER_ERROR_COPY : STILL_CHECKING_COPY,
           ),
         );
-        pollTimer.current = setTimeout(() => {
-          void poll();
-        }, nextPollDelayMs(ageNow(), attempt));
+        pollTimer.current = setTimeout(
+          () => {
+            void poll();
+          },
+          nextPollDelayMs(ageNow(), attempt),
+        );
       } finally {
         clearTimeout(timer);
       }
@@ -2706,7 +2733,9 @@ export default function ReviewSubmission(): React.ReactElement {
       // `file.name` so the reviewer knows which of possibly several
       // selections this was.
       if (file.size === 0) {
-        setSubmitError(`"${file.name}" is empty (0 bytes). Choose the complete .docx file and try again.`);
+        setSubmitError(
+          `"${file.name}" is empty (0 bytes). Choose the complete .docx file and try again.`,
+        );
         return;
       }
 
@@ -2974,42 +3003,45 @@ export default function ReviewSubmission(): React.ReactElement {
   // audit row (a browser may suppress its anchor click, so nothing is known to
   // have downloaded) and allows once per review. Only the reviewer's own click
   // — the default — is charged and audited.
-  const fetchOutputUrl = useCallback(async (autosave = false): Promise<string> => {
-    const response = await authorizedFetch(
-      `/api/reviews/${reviewId}/output${autosave ? '?autosave=1' : ''}`,
-    );
-    if (autosave && response.status === 409) {
-      // The review's single auto-save was already used (a reload re-reaching
-      // DONE). Not a failure: the redline was offered once, and the Save
-      // button is still there.
-      throw new AutoSaveAlreadyUsedError();
-    }
-    if (!response.ok) {
-      // A 503 here carries a `detail` naming the unset storage env var
-      // (#465's own failure mode) — server configuration, never something a
-      // reviewer should read. Route through the shared friendlyDownloadError
-      // instead of rendering readErrorDetail's string verbatim (issue #466);
-      // the raw detail still reaches the console.
-      const errorDetail = await readErrorDetail(response);
-      throw new UserFacingError(
-        downloadFailureMessage(
-          response.status,
-          errorDetail ?? `GET /api/reviews/${reviewId}/output returned HTTP ${response.status}`,
-        ),
+  const fetchOutputUrl = useCallback(
+    async (autosave = false): Promise<string> => {
+      const response = await authorizedFetch(
+        `/api/reviews/${reviewId}/output${autosave ? '?autosave=1' : ''}`,
       );
-    }
-    const data = (await response.json()) as Partial<OutputResponse>;
-    // QA 2026-10-31 W9: a 200 without a usable `url` is a failed download,
-    // not an anchor pointed at "/undefined". Same friendly copy and the same
-    // console-only detail as every other download failure, and the same
-    // check `downloadInputDocument` below already made.
-    if (typeof data.url !== 'string' || !data.url) {
-      throw new UserFacingError(
-        friendlyDownloadError(`GET /api/reviews/${reviewId}/output returned no url`),
-      );
-    }
-    return data.url;
-  }, [reviewId]);
+      if (autosave && response.status === 409) {
+        // The review's single auto-save was already used (a reload re-reaching
+        // DONE). Not a failure: the redline was offered once, and the Save
+        // button is still there.
+        throw new AutoSaveAlreadyUsedError();
+      }
+      if (!response.ok) {
+        // A 503 here carries a `detail` naming the unset storage env var
+        // (#465's own failure mode) — server configuration, never something a
+        // reviewer should read. Route through the shared friendlyDownloadError
+        // instead of rendering readErrorDetail's string verbatim (issue #466);
+        // the raw detail still reaches the console.
+        const errorDetail = await readErrorDetail(response);
+        throw new UserFacingError(
+          downloadFailureMessage(
+            response.status,
+            errorDetail ?? `GET /api/reviews/${reviewId}/output returned HTTP ${response.status}`,
+          ),
+        );
+      }
+      const data = (await response.json()) as Partial<OutputResponse>;
+      // QA 2026-10-31 W9: a 200 without a usable `url` is a failed download,
+      // not an anchor pointed at "/undefined". Same friendly copy and the same
+      // console-only detail as every other download failure, and the same
+      // check `downloadInputDocument` below already made.
+      if (typeof data.url !== 'string' || !data.url) {
+        throw new UserFacingError(
+          friendlyDownloadError(`GET /api/reviews/${reviewId}/output returned no url`),
+        );
+      }
+      return data.url;
+    },
+    [reviewId],
+  );
 
   const handleDownload = useCallback(async () => {
     if (!reviewId) {
@@ -3316,17 +3348,17 @@ export default function ReviewSubmission(): React.ReactElement {
       reviewLost
       ? 'lost'
       : !detail || NON_TERMINAL_STATUSES.has(detail.status)
-      ? 'working'
-      : detail.status === 'DONE'
-        ? 'done'
-        : // A review the reviewer stopped rests, it does not burn. `error`
-          // would give it the burnt-toast treatment and read as a malfunction
-          // — the #458 lesson, at its most obvious: nothing went wrong, the
-          // user asked for this. The result panel below still renders the
-          // terminal outcome ("Stopped"), so nothing is hidden.
-          detail.status === 'CANCELLED'
-          ? 'idle'
-          : 'error';
+        ? 'working'
+        : detail.status === 'DONE'
+          ? 'done'
+          : // A review the reviewer stopped rests, it does not burn. `error`
+            // would give it the burnt-toast treatment and read as a malfunction
+            // — the #458 lesson, at its most obvious: nothing went wrong, the
+            // user asked for this. The result panel below still renders the
+            // terminal outcome ("Stopped"), so nothing is hidden.
+            detail.status === 'CANCELLED'
+            ? 'idle'
+            : 'error';
 
   // Issue #71: the clock behind the time-remaining line, and the ONE place
   // it ticks. It runs only in the `working` phase and is torn down the moment

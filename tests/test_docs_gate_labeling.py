@@ -90,7 +90,7 @@ def check_gate_kind_marker_in_source() -> list[str]:
         if not GATE_KIND_PATTERN.search(text):
             failures.append(
                 f"  tests/{filename} does not declare a module-level\n"
-                f"  GATE_KIND = \"documentation-lint\" line. Every prose-asserting\n"
+                f'  GATE_KIND = "documentation-lint" line. Every prose-asserting\n'
                 f"  docs-gate named in issue #196's Evidence must carry this\n"
                 f"  machine-readable marker so a green suite does not imply an\n"
                 f"  enforced runtime invariant for gates that are actually prose\n"
@@ -147,9 +147,7 @@ def check_no_active_bundle_gate_1a_behavioral() -> list[str]:
     path = TESTS_DIR / "test_no_active_bundle.py"
     text = _read(path)
 
-    behavioral_call_present = re.search(
-        r"TestClient|\.post\(\s*[\"']\/api\/reviews[\"']", text
-    )
+    behavioral_call_present = re.search(r"TestClient|\.post\(\s*[\"']\/api\/reviews[\"']", text)
     if not behavioral_call_present:
         failures.append(
             "  tests/test_no_active_bundle.py has no TestClient / real HTTP\n"
@@ -157,9 +155,7 @@ def check_no_active_bundle_gate_1a_behavioral() -> list[str]:
             "  when it is wired, not just read docs. (issue #196)"
         )
 
-    documented_skip_present = re.search(
-        r"SKIP \(documented reason\)", text
-    )
+    documented_skip_present = re.search(r"SKIP \(documented reason\)", text)
     if not documented_skip_present:
         failures.append(
             "  tests/test_no_active_bundle.py has no documented-skip path for\n"
@@ -215,7 +211,7 @@ def main() -> int:
     checks = [
         (
             "1",
-            "Each named docs-gate file declares GATE_KIND = \"documentation-lint\" (source scan)",
+            'Each named docs-gate file declares GATE_KIND = "documentation-lint" (source scan)',
             check_gate_kind_marker_in_source,
         ),
         (

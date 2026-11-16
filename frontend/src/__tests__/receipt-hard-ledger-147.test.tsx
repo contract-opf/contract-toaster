@@ -63,7 +63,9 @@ describe('the receipt hard-rejection ledger line (issue #147)', () => {
   });
 
   it('prints nothing for an all-cleared ledger or no ledger at all', () => {
-    expect(ledgerLineText({ ...BASE, hard_ledger: { asserted: 0, inserted: 0, cleared: 2 } })).toBeUndefined();
+    expect(
+      ledgerLineText({ ...BASE, hard_ledger: { asserted: 0, inserted: 0, cleared: 2 } }),
+    ).toBeUndefined();
     expect(ledgerLineText({ ...BASE, hard_ledger: null })).toBeUndefined();
     expect(ledgerLineText(BASE)).toBeUndefined();
   });

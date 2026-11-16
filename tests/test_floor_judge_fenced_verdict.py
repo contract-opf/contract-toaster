@@ -47,13 +47,28 @@ def main() -> int:
     check(failures, "```json fence", f"```json\n{VERDICT}\n```", True)
     check(failures, "bare ``` fence", f"```\n{VERDICT}\n```", True)
     check(failures, "prose preamble", f"Here is my verdict:\n{VERDICT}", True)
-    check(failures, "malformed body inside a fence", '```json\n{"invariant_id": "inv-synthetic-1", "violated": tru}\n```', False)
-    check(failures, "fenced verdict for the wrong invariant", "```json\n" + VERDICT.replace(INV, "other") + "\n```", False)
+    check(
+        failures,
+        "malformed body inside a fence",
+        '```json\n{"invariant_id": "inv-synthetic-1", "violated": tru}\n```',
+        False,
+    )
+    check(
+        failures,
+        "fenced verdict for the wrong invariant",
+        "```json\n" + VERDICT.replace(INV, "other") + "\n```",
+        False,
+    )
     check(failures, "no object at all", "I cannot judge this.", False)
     # A judge that retracts its verdict must not pass as its first answer.
     retracted = VERDICT.replace("true", "false")
     check(failures, "verdict then a correcting object", f"{retracted} Correction: {VERDICT}", False)
-    check(failures, "fenced verdict then retracting prose", f"```json\n{retracted}\n```\nOn reflection this IS violated.", False)
+    check(
+        failures,
+        "fenced verdict then retracting prose",
+        f"```json\n{retracted}\n```\nOn reflection this IS violated.",
+        False,
+    )
     check(failures, "non-string response", None, False)
     if failures:
         print("\n".join(failures))

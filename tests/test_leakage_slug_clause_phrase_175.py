@@ -107,7 +107,9 @@ def _loadable(slug: str, old_slug: str = "delta-ventures") -> dict[str, Any]:
     return doc
 
 
-def _scan(text: str, corpus: leakage_scan.ConfidentialCorpus, field: str = _EXTERNAL) -> leakage_scan.ScanResult:
+def _scan(
+    text: str, corpus: leakage_scan.ConfidentialCorpus, field: str = _EXTERNAL
+) -> leakage_scan.ScanResult:
     return leakage_scan.scan_model_output(_output(_issue(**{field: text})), corpus)
 
 
@@ -170,9 +172,21 @@ def test_a_clause_name_slug_the_posture_prose_renders_is_not_held() -> None:
 # owner-authored Floor statement that renders the slug as written.
 _CLAUSE_NAME_SLUGS = (
     ("governing-law", "Governing Law", "Any governing-law clause names the State of New York."),
-    ("Limitation_of_Liability", "Limitation of Liability", "Every Limitation_of_Liability clause excludes this breach."),
-    ("Non-Solicitation-of-Employees", "Non-Solicitation of Employees", "A Non-Solicitation-of-Employees clause lasts one year."),
-    ("dispute-resolution-venue", "Dispute Resolution & Venue", "The dispute-resolution-venue clause names New York."),
+    (
+        "Limitation_of_Liability",
+        "Limitation of Liability",
+        "Every Limitation_of_Liability clause excludes this breach.",
+    ),
+    (
+        "Non-Solicitation-of-Employees",
+        "Non-Solicitation of Employees",
+        "A Non-Solicitation-of-Employees clause lasts one year.",
+    ),
+    (
+        "dispute-resolution-venue",
+        "Dispute Resolution & Venue",
+        "The dispute-resolution-venue clause names New York.",
+    ),
 )
 
 
@@ -182,7 +196,9 @@ def test_every_spelling_of_a_clause_name_slug_is_not_held() -> None:
         assert statement in composed, slug  # rendered verbatim
         # Not vacuous: the slug stands as a whole token in that statement by
         # check 3's own matching rule, so the residual hold reads it.
-        assert leakage_scan._contains_token(leakage_scan._normalize(statement), leakage_scan._normalize(slug))
+        assert leakage_scan._contains_token(
+            leakage_scan._normalize(statement), leakage_scan._normalize(slug)
+        )
         doc = _loadable(slug)
         assert any(
             leakage_scan._clause_phrase_key(term) == leakage_scan._clause_phrase_key(label)
@@ -246,7 +262,11 @@ def test_a_slug_that_is_not_a_whole_clause_name_is_still_held() -> None:
 
 def test_the_clause_phrase_key() -> None:
     key = leakage_scan._clause_phrase_key
-    assert key("limitation-of-liability") == key("Limitation of Liability") == key("limitation_of_liability")
+    assert (
+        key("limitation-of-liability")
+        == key("Limitation of Liability")
+        == key("limitation_of_liability")
+    )
     assert key("dispute-resolution-venue") == key("Dispute Resolution & Venue")
     assert key("no-license-ip-ownership") == key("No License / IP Ownership")
     assert key("Limitation\u2011of\u2011Liability") == "limitation of liability"

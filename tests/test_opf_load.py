@@ -120,10 +120,14 @@ def check_2_rejects_missing_evidence() -> list[str]:
         except opf_load.OpfValidationError as exc:
             message = str(exc)
             if "/" not in message and "root" not in message.lower():
-                failures.append(f"  [2a] error message has no JSON-pointer-shaped location: {message!r}")
+                failures.append(
+                    f"  [2a] error message has no JSON-pointer-shaped location: {message!r}"
+                )
             for marker in _DOCUMENT_CONTENT_MARKERS:
                 if marker in message:
-                    failures.append(f"  [2a] error message leaked document content ({marker!r}): {message!r}")
+                    failures.append(
+                        f"  [2a] error message leaked document content ({marker!r}): {message!r}"
+                    )
         except Exception as exc:  # noqa: BLE001
             failures.append(f"  [2a] wrong exception type raised: {type(exc).__name__}: {exc}")
     finally:
@@ -140,14 +144,20 @@ def check_2_rejects_wrong_type_invariants() -> list[str]:
     try:
         try:
             opf_load.load_opf(tmp_path)
-            failures.append("  [2b] load_opf did not raise on a doc with wrong-type floor.invariants.")
+            failures.append(
+                "  [2b] load_opf did not raise on a doc with wrong-type floor.invariants."
+            )
         except opf_load.OpfValidationError as exc:
             message = str(exc)
             if "/floor/invariants" not in message:
-                failures.append(f"  [2b] error message missing JSON pointer '/floor/invariants': {message!r}")
+                failures.append(
+                    f"  [2b] error message missing JSON pointer '/floor/invariants': {message!r}"
+                )
             for marker in _DOCUMENT_CONTENT_MARKERS:
                 if marker in message:
-                    failures.append(f"  [2b] error message leaked document content ({marker!r}): {message!r}")
+                    failures.append(
+                        f"  [2b] error message leaked document content ({marker!r}): {message!r}"
+                    )
         except Exception as exc:  # noqa: BLE001
             failures.append(f"  [2b] wrong exception type raised: {type(exc).__name__}: {exc}")
     finally:
@@ -155,7 +165,9 @@ def check_2_rejects_wrong_type_invariants() -> list[str]:
     return failures
 
 
-def _duplicate_id_case(section: str, subkey: str, id_field: str, pointer: str) -> tuple[str, list[str]]:
+def _duplicate_id_case(
+    section: str, subkey: str, id_field: str, pointer: str
+) -> tuple[str, list[str]]:
     """Duplicate the id_field of the first two entries in doc[section][subkey]
     (or doc[section] itself when subkey is ""), write a tmp fixture, load it,
     and return (name, failures). A single helper covers all four sibling-id
@@ -164,7 +176,9 @@ def _duplicate_id_case(section: str, subkey: str, id_field: str, pointer: str) -
     doc = _load_fixture_dict()
     items = doc[section][subkey] if subkey else doc[section]
     if len(items) < 2:
-        failures.append(f"  [dup:{pointer}] fixture has fewer than 2 entries in {pointer}; cannot exercise a duplicate")
+        failures.append(
+            f"  [dup:{pointer}] fixture has fewer than 2 entries in {pointer}; cannot exercise a duplicate"
+        )
         return pointer, failures
     dup_id = items[0][id_field]
     items[1][id_field] = dup_id
@@ -173,11 +187,15 @@ def _duplicate_id_case(section: str, subkey: str, id_field: str, pointer: str) -
     try:
         try:
             opf_load.load_opf(tmp_path)
-            failures.append(f"  [dup:{pointer}] load_opf did not raise on a duplicated {id_field} in {pointer}.")
+            failures.append(
+                f"  [dup:{pointer}] load_opf did not raise on a duplicated {id_field} in {pointer}."
+            )
         except opf_load.OpfDuplicateIdError as exc:
             message = str(exc)
             if pointer not in message:
-                failures.append(f"  [dup:{pointer}] error message missing JSON pointer {pointer!r}: {message!r}")
+                failures.append(
+                    f"  [dup:{pointer}] error message missing JSON pointer {pointer!r}: {message!r}"
+                )
             # NOTE: unlike check_2's _DOCUMENT_CONTENT_MARKERS assertion, we do
             # NOT assert the duplicated id is absent from the message here --
             # these fixture ids happen to match `^[a-z0-9_-]+$` and are short,
@@ -191,7 +209,9 @@ def _duplicate_id_case(section: str, subkey: str, id_field: str, pointer: str) -
             # docstring and check_5_rejects_duplicate_id_with_hostile_content
             # below for the case where the id does NOT get echoed.
         except Exception as exc:  # noqa: BLE001
-            failures.append(f"  [dup:{pointer}] wrong exception type raised: {type(exc).__name__}: {exc}")
+            failures.append(
+                f"  [dup:{pointer}] wrong exception type raised: {type(exc).__name__}: {exc}"
+            )
     finally:
         tmp_path.unlink(missing_ok=True)
     return pointer, failures
@@ -261,17 +281,23 @@ def check_5_rejects_duplicate_id_with_hostile_content() -> list[str]:
     try:
         try:
             opf_load.load_opf(tmp_path)
-            failures.append("  [dup:hostile] load_opf did not raise on a duplicated hostile document_id.")
+            failures.append(
+                "  [dup:hostile] load_opf did not raise on a duplicated hostile document_id."
+            )
         except opf_load.OpfDuplicateIdError as exc:
             message = str(exc)
             if "/corpus/documents" not in message:
-                failures.append(f"  [dup:hostile] error message missing JSON pointer '/corpus/documents': {message!r}")
+                failures.append(
+                    f"  [dup:hostile] error message missing JSON pointer '/corpus/documents': {message!r}"
+                )
             if _HOSTILE_ID_TEXT in message:
                 failures.append(
                     f"  [dup:hostile] error message leaked the hostile document_id verbatim: {message!r}"
                 )
         except Exception as exc:  # noqa: BLE001
-            failures.append(f"  [dup:hostile] wrong exception type raised: {type(exc).__name__}: {exc}")
+            failures.append(
+                f"  [dup:hostile] wrong exception type raised: {type(exc).__name__}: {exc}"
+            )
     finally:
         tmp_path.unlink(missing_ok=True)
     return failures
@@ -289,7 +315,9 @@ def check_6_one_format() -> list[str]:
             if pointer not in str(exc):
                 failures.append(f"  [6] {label}: message does not name {pointer}: {exc}")
         except Exception as exc:  # noqa: BLE001
-            failures.append(f"  [6] {label}: raised {type(exc).__name__}, expected {expected.__name__}: {exc}")
+            failures.append(
+                f"  [6] {label}: raised {type(exc).__name__}, expected {expected.__name__}: {exc}"
+            )
 
     for version in (None, "0.2", "0.3", "0.4", "0.5", 5, 0.6):
         doc = copy.deepcopy(base)
@@ -301,7 +329,12 @@ def check_6_one_format() -> list[str]:
     for version in ("1", "2", "3", "4", 5, None):
         doc = copy.deepcopy(base)
         doc["digest"]["digest_version"] = version
-        _refused(doc, opf_load.OpfDigestVersionError, f"digest_version={version!r}", "/digest/digest_version")
+        _refused(
+            doc,
+            opf_load.OpfDigestVersionError,
+            f"digest_version={version!r}",
+            "/digest/digest_version",
+        )
     # A 0.5 document (both versions stamped as 0.5 emits them) is refused for
     # its opf_version, and the message names the one version accepted.
     doc = copy.deepcopy(base)
@@ -313,7 +346,9 @@ def check_6_one_format() -> list[str]:
         if "OPF 0.6" not in str(exc):
             failures.append(f"  [6] the 0.5 refusal does not name 0.6: {exc}")
     except Exception as exc:  # noqa: BLE001
-        failures.append(f"  [6] a 0.5 document raised {type(exc).__name__}, not OpfVersionError: {exc}")
+        failures.append(
+            f"  [6] a 0.5 document raised {type(exc).__name__}, not OpfVersionError: {exc}"
+        )
     # A digest-2 shaped digest is refused for its VERSION, not a schema symptom.
     doc = copy.deepcopy(base)
     doc["digest"] = {"digest_version": "2", "clause_count": 0, "clauses": []}
@@ -324,15 +359,23 @@ def check_6_one_format() -> list[str]:
         if (loaded.get("opf_version"), loaded["digest"].get("digest_version")) != ("0.6", "5"):
             failures.append("  [6] the engine's NDA example is not OPF 0.6 / digest 5")
     except Exception as exc:  # noqa: BLE001
-        failures.append(f"  [6] the engine's own NDA example does not load: {type(exc).__name__}: {exc}")
+        failures.append(
+            f"  [6] the engine's own NDA example does not load: {type(exc).__name__}: {exc}"
+        )
     return failures
 
 
 def check_7_conformance_vectors_load() -> list[str]:
     failures: list[str] = []
     manifest = json.loads((CONFORMANCE_DIR / "manifest.json").read_text(encoding="utf-8"))
-    if manifest["format_version"] != {"opf_version": "0.6", "engine_version": "1.0.0", "digest_version": "5"}:
-        failures.append(f"  [7] the vendored set is stamped {manifest['format_version']!r}, not OPF 0.6 / digest 5")
+    if manifest["format_version"] != {
+        "opf_version": "0.6",
+        "engine_version": "1.0.0",
+        "digest_version": "5",
+    }:
+        failures.append(
+            f"  [7] the vendored set is stamped {manifest['format_version']!r}, not OPF 0.6 / digest 5"
+        )
     files = [entry["file"] for entry in manifest["vectors"]]
     numbers = [name.split("/")[-1][:3] for name in files]
     if numbers != [f"{n:03d}" for n in range(1, 16)]:
@@ -367,7 +410,9 @@ def check_4_match_registry_playbook() -> list[str]:
     doc = _load_fixture_dict()
     matched = opf_load.match_registry_playbook(doc)
     if matched != "synthetic-generic":
-        failures.append(f"  [4] match_registry_playbook(fixture) == {matched!r}, expected 'synthetic-generic'")
+        failures.append(
+            f"  [4] match_registry_playbook(fixture) == {matched!r}, expected 'synthetic-generic'"
+        )
 
     unmatched_doc = copy.deepcopy(doc)
     unmatched_doc["agreement_type"] = {
@@ -385,17 +430,61 @@ def check_4_match_registry_playbook() -> list[str]:
 def main() -> int:
     checks = [
         ("1", "load_opf accepts the synthetic fixture", check_1_fixture_validates),
-        ("2a", "load_opf rejects a doc missing 'evidence' (pointer, no doc content)", check_2_rejects_missing_evidence),
-        ("2b", "load_opf rejects wrong-type floor.invariants (pointer, no doc content)", check_2_rejects_wrong_type_invariants),
-        ("3", "agreement_type_keys returns id + aliases, lowercased/deduped", check_3_agreement_type_keys),
-        ("4", "match_registry_playbook matches via aliases; unmatched -> None", check_4_match_registry_playbook),
-        ("5a", "load_opf rejects a duplicated evidence.clauses[].id (issue #480)", check_5_rejects_duplicate_clause_id),
-        ("5b", "load_opf rejects a duplicated evidence.precedent[].id (issues #480, #128)", check_5_rejects_duplicate_precedent_id),
-        ("5c", "load_opf rejects a duplicated floor.invariants[].id (issue #480)", check_5_rejects_duplicate_invariant_id),
-        ("5d", "load_opf rejects a duplicated corpus.documents[].document_id (issue #480)", check_5_rejects_duplicate_document_id),
-        ("5e", "load_opf rejects a duplicated document_id without echoing hostile content (issue #480)", check_5_rejects_duplicate_id_with_hostile_content),
-        ("6", "only OPF 0.6 / digest 5 loads, 0.5 refused naming 0.6; the engine's NDA example loads (issues #128, #177)", check_6_one_format),
-        ("7", "all 15 engine conformance vectors, as emitted, load (issues #128, #177)", check_7_conformance_vectors_load),
+        (
+            "2a",
+            "load_opf rejects a doc missing 'evidence' (pointer, no doc content)",
+            check_2_rejects_missing_evidence,
+        ),
+        (
+            "2b",
+            "load_opf rejects wrong-type floor.invariants (pointer, no doc content)",
+            check_2_rejects_wrong_type_invariants,
+        ),
+        (
+            "3",
+            "agreement_type_keys returns id + aliases, lowercased/deduped",
+            check_3_agreement_type_keys,
+        ),
+        (
+            "4",
+            "match_registry_playbook matches via aliases; unmatched -> None",
+            check_4_match_registry_playbook,
+        ),
+        (
+            "5a",
+            "load_opf rejects a duplicated evidence.clauses[].id (issue #480)",
+            check_5_rejects_duplicate_clause_id,
+        ),
+        (
+            "5b",
+            "load_opf rejects a duplicated evidence.precedent[].id (issues #480, #128)",
+            check_5_rejects_duplicate_precedent_id,
+        ),
+        (
+            "5c",
+            "load_opf rejects a duplicated floor.invariants[].id (issue #480)",
+            check_5_rejects_duplicate_invariant_id,
+        ),
+        (
+            "5d",
+            "load_opf rejects a duplicated corpus.documents[].document_id (issue #480)",
+            check_5_rejects_duplicate_document_id,
+        ),
+        (
+            "5e",
+            "load_opf rejects a duplicated document_id without echoing hostile content (issue #480)",
+            check_5_rejects_duplicate_id_with_hostile_content,
+        ),
+        (
+            "6",
+            "only OPF 0.6 / digest 5 loads, 0.5 refused naming 0.6; the engine's NDA example loads (issues #128, #177)",
+            check_6_one_format,
+        ),
+        (
+            "7",
+            "all 15 engine conformance vectors, as emitted, load (issues #128, #177)",
+            check_7_conformance_vectors_load,
+        ),
     ]
 
     overall_pass = True

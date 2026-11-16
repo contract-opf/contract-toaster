@@ -138,6 +138,7 @@ GSI_NAME = "review_id-index"
 # moto table/bucket provisioning helpers.
 # ---------------------------------------------------------------------------
 
+
 def _create_reviews_table(ddb: Any) -> Any:
     ddb.create_table(
         TableName=REVIEWS_TABLE,
@@ -226,7 +227,9 @@ _SEC8_DRAFT_TEXT = "Each party's liability under this Agreement shall be unlimit
 
 
 def _heading_p(text: str, level: int = 1) -> str:
-    return f'<w:p><w:pPr><w:pStyle w:val="Heading{level}"/></w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>'
+    return (
+        f'<w:p><w:pPr><w:pStyle w:val="Heading{level}"/></w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>'
+    )
 
 
 def _body_p(text: str) -> str:
@@ -368,6 +371,7 @@ class MotoBackedTestCase(unittest.TestCase):
 # Defect (b): record_stage_failure clobbered a terminal row.
 # ---------------------------------------------------------------------------
 
+
 class TestRecordStageFailureCannotDowngradeADoneReview(MotoBackedTestCase):
     def setUp(self) -> None:
         super().setUp()
@@ -446,6 +450,7 @@ class TestRecordStageFailureCannotDowngradeADoneReview(MotoBackedTestCase):
 # The end-to-end production shape: a settle that raises must not destroy a
 # persisted result.
 # ---------------------------------------------------------------------------
+
 
 class TestSettleFailureLeavesTheReviewDone(MotoBackedTestCase):
     def setUp(self) -> None:
@@ -542,6 +547,7 @@ class TestSettleFailureLeavesTheReviewDone(MotoBackedTestCase):
 # ---------------------------------------------------------------------------
 # Defect (a): the bootstrap could never repair an existing deployment.
 # ---------------------------------------------------------------------------
+
 
 class TestBootstrapConvergesAMissingGsi(MotoBackedTestCase):
     def setUp(self) -> None:

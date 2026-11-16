@@ -407,7 +407,6 @@ def record_playbook_version_download(
     )
 
 
-
 def activate_playbook_version(
     playbook_id: str,
     version: str,
@@ -1092,9 +1091,7 @@ def remove_playbook(
     resp = versions_table.query(KeyConditionExpression=Key("playbook_id").eq(playbook_id))
     items = list(resp.get("Items", []))
     for item in items:
-        versions_table.delete_item(
-            Key={"playbook_id": playbook_id, "version": item["version"]}
-        )
+        versions_table.delete_item(Key={"playbook_id": playbook_id, "version": item["version"]})
 
     playbooks_table = dynamodb_resource.Table(os.environ["PLAYBOOKS_TABLE"])
     playbooks_table.update_item(

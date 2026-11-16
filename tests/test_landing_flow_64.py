@@ -228,9 +228,7 @@ def _run_land(
         SHIM_PUSH_RC=str(push_rc),
         SHIM_GH_RC=str(gh_rc),
         LAND_GATE_LINT_CMD=f'printf "gate lint\\n" >> "$SHIM_LOG"; exit {lint_rc}',
-        LAND_GATE_FRONTEND_CMD=(
-            f'printf "gate frontend\\n" >> "$SHIM_LOG"; exit {frontend_rc}'
-        ),
+        LAND_GATE_FRONTEND_CMD=(f'printf "gate frontend\\n" >> "$SHIM_LOG"; exit {frontend_rc}'),
         LAND_GATE_CHECK_CMD=(
             'printf "gate check SKIP_INFRA=[${SKIP_INFRA:-unset}]\\n" >> "$SHIM_LOG"; '
             f"exit {check_rc}"
@@ -346,12 +344,8 @@ def check_green_pushes_and_opens_pr() -> int:
             rc, output, log = _run_land(root, repo)
 
         failures += _assert(rc == 0, f"green run exits 0 ({label})", f"exit {rc}; {output[-400:]}")
-        push_idx = next(
-            (i for i, line in enumerate(log) if line.startswith("git push")), None
-        )
-        pr_idx = next(
-            (i for i, line in enumerate(log) if line.startswith("gh pr create")), None
-        )
+        push_idx = next((i for i, line in enumerate(log) if line.startswith("git push")), None)
+        pr_idx = next((i for i, line in enumerate(log) if line.startswith("gh pr create")), None)
         failures += _assert(
             push_idx is not None, f"green run pushed the branch ({label})", f"shim log: {log}"
         )
@@ -390,9 +384,7 @@ def check_green_pushes_and_opens_pr() -> int:
     # against. Unknown must resolve to the FULL gate, never to a quietly fast one.
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        repo = _make_repo(
-            root, branch="phase-9/green", touches_infra=False, base_branch="trunk"
-        )
+        repo = _make_repo(root, branch="phase-9/green", touches_infra=False, base_branch="trunk")
         rc, output, log = _run_land(root, repo)
     failures += _assert(rc == 0, "green run exits 0 (no main to diff against)", f"exit {rc}")
     failures += _assert(
@@ -415,9 +407,7 @@ def check_green_pushes_and_opens_pr() -> int:
     # this one can.
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        repo = _make_repo(
-            root, branch="phase-9/big", touches_infra=True, bulk_files=200
-        )
+        repo = _make_repo(root, branch="phase-9/big", touches_infra=True, bulk_files=200)
         name_only = _git(repo, "diff", "--name-only", "main...").stdout
         rc, output, log = _run_land(root, repo)
     failures += _assert(
@@ -548,7 +538,9 @@ def check_pre_push_guard() -> int:
             repo = _hook_repo(root, with_counterparty_lint=False)
             rc, output, _log = _run_hook(repo, stdin, root / "hook.log", **env_extra)
         if should_allow:
-            failures += _assert(rc == 0, f"pre-push ALLOWS: {label}", f"exit {rc}; {output.strip()}")
+            failures += _assert(
+                rc == 0, f"pre-push ALLOWS: {label}", f"exit {rc}; {output.strip()}"
+            )
         else:
             failures += _assert(
                 rc != 0, f"pre-push REFUSES: {label}", f"exit {rc}; {output.strip()}"
@@ -572,9 +564,7 @@ def check_pre_push_guard() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         repo = _hook_repo(root, with_counterparty_lint=True)
-        rc, out, log = _run_hook(
-            repo, FEATURE_REF_LINE, root / "hook.log", COUNTERPARTY_RC="1"
-        )
+        rc, out, log = _run_hook(repo, FEATURE_REF_LINE, root / "hook.log", COUNTERPARTY_RC="1")
     failures += _assert(
         rc != 0, "a red counterparty-name lint refuses the push", f"exit {rc}; {out.strip()}"
     )
@@ -643,7 +633,13 @@ def check_workflow_closes_main_red() -> int:
         "always()" not in block,
         "close-main-red has no always() — a red gate skips it",
     )
-    for needed in ("test-suite", "docs-lint", "detector-correctness", "security-scan", "frontend-gate"):
+    for needed in (
+        "test-suite",
+        "docs-lint",
+        "detector-correctness",
+        "security-scan",
+        "frontend-gate",
+    ):
         failures += _assert(
             re.search(rf"needs:.*\b{re.escape(needed)}\b", block) is not None,
             f"close-main-red waits on the {needed} gate",

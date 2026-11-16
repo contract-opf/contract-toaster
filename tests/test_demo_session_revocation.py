@@ -75,9 +75,7 @@ ALICE_PASSWORD = "alice-original-pw"
 
 class _Base(unittest.TestCase):
     def setUp(self) -> None:
-        self._env = patch.dict(
-            os.environ, {"AUTH_MODE": "password", "DEMO_TOKEN_SECRET": SECRET}
-        )
+        self._env = patch.dict(os.environ, {"AUTH_MODE": "password", "DEMO_TOKEN_SECRET": SECRET})
         self._env.start()
         self._mock_aws = mock_aws()
         self._mock_aws.start()
@@ -104,22 +102,25 @@ class _Base(unittest.TestCase):
         self.users = self.ddb.Table(os.environ["USERS_TABLE"])
         # A rotated (non-seed) admin, created the way bootstrap/admins do.
         self.admin_row = {
-            "cognito_sub": ADMIN_SUB, "username": "boss", "user_type": "password",
+            "cognito_sub": ADMIN_SUB,
+            "username": "boss",
+            "user_type": "password",
             "password_hash": demo_auth._hash_password("boss-strong-pw"),
-            "role": "admin", "is_admin": True, "status": "active",
+            "role": "admin",
+            "is_admin": True,
+            "status": "active",
         }
         self.users.put_item(Item=self.admin_row)
         demo_auth.set_auth_mode(demo_auth.AUTH_MODE_PASSWORD, self.admin_row, self.ddb)
         demo_auth.add_user(
             {"user_type": "password", "username": "alice", "password": ALICE_PASSWORD},
-            self.admin_row, self.ddb,
+            self.admin_row,
+            self.ddb,
         )
         self.client = TestClient(backend_main.app, raise_server_exceptions=False)
-        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = (
-            lambda: self.ddb
-        )
-        backend_main.app.dependency_overrides[review_routes.get_dynamodb_resource] = (
-            lambda: self.ddb
+        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = lambda: self.ddb
+        backend_main.app.dependency_overrides[review_routes.get_dynamodb_resource] = lambda: (
+            self.ddb
         )
 
     def tearDown(self) -> None:
@@ -156,18 +157,29 @@ class TestTokenVersionCheck(_Base):
     def test_token_without_a_version_claim_is_401(self) -> None:
         now = int(time.time())
         token = jwt.encode(
-            {"sub": "local:alice", "iss": demo_auth.DEMO_TOKEN_ISSUER,
-             "iat": now, "exp": now + 600},
-            SECRET, algorithm="HS256",
+            {
+                "sub": "local:alice",
+                "iss": demo_auth.DEMO_TOKEN_ISSUER,
+                "iat": now,
+                "exp": now + 600,
+            },
+            SECRET,
+            algorithm="HS256",
         )
         self.assertEqual(self._me(token), 401)
 
     def test_row_without_a_stored_version_reads_as_zero(self) -> None:
-        self.users.put_item(Item={
-            "cognito_sub": "local:legacy", "username": "legacy", "user_type": "password",
-            "password_hash": demo_auth._hash_password("legacy-strong-pw"),
-            "role": "user", "is_admin": False, "status": "active",
-        })
+        self.users.put_item(
+            Item={
+                "cognito_sub": "local:legacy",
+                "username": "legacy",
+                "user_type": "password",
+                "password_hash": demo_auth._hash_password("legacy-strong-pw"),
+                "role": "user",
+                "is_admin": False,
+                "status": "active",
+            }
+        )
         token = self._login("legacy", "legacy-strong-pw")
         self.assertEqual(demo_auth.verify_demo_token(token)["tv"], 0)
         self.assertEqual(self._me(token), 200)
@@ -179,9 +191,7 @@ class TestTokenVersionCheck(_Base):
             self.client.get("/api/reviews", cookies={COOKIE: token}).status_code, 401
         )
         self.client.post("/api/auth/logout", cookies={COOKIE: token})
-        self.assertEqual(
-            self.client.get("/api/reviews", cookies={COOKIE: token}).status_code, 401
-        )
+        self.assertEqual(self.client.get("/api/reviews", cookies={COOKIE: token}).status_code, 401)
 
 
 class TestRevocationEvents(_Base):
@@ -225,7 +235,8 @@ class TestRevocationEvents(_Base):
         demo_auth.remove_user("local:alice", self.admin_row, self.ddb)
         demo_auth.add_user(
             {"user_type": "password", "username": "alice", "password": ALICE_PASSWORD},
-            self.admin_row, self.ddb,
+            self.admin_row,
+            self.ddb,
         )
         self.assertEqual(self._me(old), 401)
         self.assertEqual(self._me(self._login("alice", ALICE_PASSWORD)), 200)
@@ -235,7 +246,8 @@ class TestRevocationEvents(_Base):
         for _ in range(3):
             demo_auth.add_user(
                 {"user_type": "password", "username": "bob", "password": "bob-strong-pw"},
-                self.admin_row, self.ddb,
+                self.admin_row,
+                self.ddb,
             )
             row = self.users.get_item(Key={"cognito_sub": "local:bob"})["Item"]
             versions.add(int(row["token_version"]))
@@ -250,9 +262,14 @@ class TestAddUserIsAdminType(_Base):
             with self.subTest(value=value):
                 with self.assertRaises(HTTPException) as caught:
                     demo_auth.add_user(
-                        {"user_type": "password", "username": f"u{id(value)}",
-                         "password": "strong-enough", "is_admin": value},
-                        self.admin_row, self.ddb,
+                        {
+                            "user_type": "password",
+                            "username": f"u{id(value)}",
+                            "password": "strong-enough",
+                            "is_admin": value,
+                        },
+                        self.admin_row,
+                        self.ddb,
                     )
                 self.assertEqual(caught.exception.status_code, 400)
                 self.assertNotIn(
@@ -263,12 +280,14 @@ class TestAddUserIsAdminType(_Base):
     def test_boolean_and_absent_is_admin_still_work(self) -> None:
         made = demo_auth.add_user(
             {"user_type": "sso", "email": "e@example.com", "is_admin": True},
-            self.admin_row, self.ddb,
+            self.admin_row,
+            self.ddb,
         )
         self.assertTrue(made["is_admin"])
         made = demo_auth.add_user(
             {"user_type": "password", "username": "carol", "password": "carol-strong-pw"},
-            self.admin_row, self.ddb,
+            self.admin_row,
+            self.ddb,
         )
         self.assertFalse(made["is_admin"])
 

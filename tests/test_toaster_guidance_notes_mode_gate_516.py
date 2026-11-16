@@ -205,7 +205,9 @@ def test_default_argument_matches_external(failures: list[str]) -> None:
             "byte-identically to notes_mode='external'."
         )
     if default_block is not None and "say you did so" in default_block:
-        failures.append("[2b] The default (un-migrated-caller) block must not instruct narration either.")
+        failures.append(
+            "[2b] The default (un-migrated-caller) block must not instruct narration either."
+        )
 
 
 def test_internal_modes_keep_the_narration_instruction(failures: list[str]) -> None:
@@ -273,21 +275,31 @@ def test_only_the_narration_clause_varies_by_mode(failures: list[str]) -> None:
     both_block = pp.render_toaster_guidance_block(_CONFLICTING_GUIDANCE, notes_mode="both")
 
     if none_block != external_block:
-        failures.append("[4a] 'none' and 'external' (both internal-notes-off) must render byte-identically.")
+        failures.append(
+            "[4a] 'none' and 'external' (both internal-notes-off) must render byte-identically."
+        )
     if internal_block != both_block:
-        failures.append("[4b] 'internal' and 'both' (both internal-notes-on) must render byte-identically.")
+        failures.append(
+            "[4b] 'internal' and 'both' (both internal-notes-on) must render byte-identically."
+        )
     if external_block == internal_block:
-        failures.append("[4c] The gated and ungated groups must actually differ -- otherwise the gate is a no-op.")
+        failures.append(
+            "[4c] The gated and ungated groups must actually differ -- otherwise the gate is a no-op."
+        )
 
     for label, block in (("none", none_block), ("internal", internal_block)):
         if block is None:
             continue
         if "GOVERNS" not in block:
-            failures.append(f"[4d-{label}] Explicit precedence wording ('GOVERNS') must survive the gate.")
+            failures.append(
+                f"[4d-{label}] Explicit precedence wording ('GOVERNS') must survive the gate."
+            )
         if "MUST-NOT FLOOR" not in block or "Floor" not in block:
             failures.append(f"[4e-{label}] The Floor carve-out sentence must survive the gate.")
         if _CONFLICTING_GUIDANCE not in block:
-            failures.append(f"[4f-{label}] The guidance text itself must still be present regardless of mode.")
+            failures.append(
+                f"[4f-{label}] The guidance text itself must still be present regardless of mode."
+            )
 
 
 def _sent(call: dict) -> str:
@@ -298,7 +310,9 @@ def _sent(call: dict) -> str:
     return f"{call['system_prompt']}\n{call['user_prompt']}"
 
 
-def test_assemble_system_blocks_threads_notes_mode_to_the_guidance_block(failures: list[str]) -> None:
+def test_assemble_system_blocks_threads_notes_mode_to_the_guidance_block(
+    failures: list[str],
+) -> None:
     """Not just the pure render function -- the composed assembly caller
     must actually pass its own `notes_mode` argument through, since that is
     the seam both passes call. Since issue #148 that caller is
@@ -312,9 +326,13 @@ def test_assemble_system_blocks_threads_notes_mode_to_the_guidance_block(failure
     )
 
     if "say you did so" in external_text:
-        failures.append("[5a] render_request_control_text(notes_mode='external') must not carry the narration instruction.")
+        failures.append(
+            "[5a] render_request_control_text(notes_mode='external') must not carry the narration instruction."
+        )
     if "say you did so" not in internal_text:
-        failures.append("[5b] render_request_control_text(notes_mode='internal') must still carry the narration instruction.")
+        failures.append(
+            "[5b] render_request_control_text(notes_mode='internal') must still carry the narration instruction."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -343,7 +361,9 @@ def test_run_primary_pass_gates_narration_by_notes_mode(failures: list[str]) -> 
         notes_mode="external",
     )
     if len(external_client.calls) != 1:
-        failures.append(f"[6a] Expected exactly 1 model invocation; got {len(external_client.calls)}")
+        failures.append(
+            f"[6a] Expected exactly 1 model invocation; got {len(external_client.calls)}"
+        )
     elif "say you did so" in _sent(external_client.calls[0]):
         failures.append(
             "[6b] run_primary_pass(notes_mode='external') sent a system prompt that still "
@@ -365,7 +385,9 @@ def test_run_primary_pass_gates_narration_by_notes_mode(failures: list[str]) -> 
         notes_mode="internal",
     )
     if len(internal_client.calls) != 1:
-        failures.append(f"[6c] Expected exactly 1 model invocation; got {len(internal_client.calls)}")
+        failures.append(
+            f"[6c] Expected exactly 1 model invocation; got {len(internal_client.calls)}"
+        )
     elif "say you did so" not in _sent(internal_client.calls[0]):
         failures.append(
             "[6d] run_primary_pass(notes_mode='internal') should still carry the narration "
@@ -385,9 +407,7 @@ def test_run_critic_pass_gates_narration_by_notes_mode(failures: list[str]) -> N
         "verdict_summary": None,
     }
 
-    external_client = model_client.FakeBedrockClient(
-        {critic_id: [critic_keeps(primary_output)]}
-    )
+    external_client = model_client.FakeBedrockClient({critic_id: [critic_keeps(primary_output)]})
     cp.run_critic_pass(
         review_id="review-516-critic-external",
         primary_output=primary_output,

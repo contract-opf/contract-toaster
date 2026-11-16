@@ -69,7 +69,11 @@ import src.model_settings as model_settings  # noqa: E402
 ADMIN_SUB = "admin-1"
 ADMIN = {"cognito_sub": ADMIN_SUB, "email": f"{ADMIN_SUB}@example.com", "is_admin": True}
 NON_ADMIN_SUB = "reviewer-1"
-NON_ADMIN = {"cognito_sub": NON_ADMIN_SUB, "email": f"{NON_ADMIN_SUB}@example.com", "is_admin": False}
+NON_ADMIN = {
+    "cognito_sub": NON_ADMIN_SUB,
+    "email": f"{NON_ADMIN_SUB}@example.com",
+    "is_admin": False,
+}
 
 # A realistic-shaped OpenRouter key. Not a real credential.
 # Deliberately NON-HEX bodies: a hex body of the real length matches secret

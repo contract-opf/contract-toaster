@@ -234,10 +234,9 @@ class VanishStyles:
             based_on_el = style.find(_w("basedOn"))
             based_on = based_on_el.get(_w("val")) if based_on_el is not None else None
             self._styles[style_id] = (based_on, _vanish_value(style.find(_w("rPr"))))
-            if (
-                style.get(_w("type")) == "paragraph"
-                and (style.get(_w("default")) or "").lower() in ("1", "true", "on")
-            ):
+            if style.get(_w("type")) == "paragraph" and (
+                style.get(_w("default")) or ""
+            ).lower() in ("1", "true", "on"):
                 self.default_paragraph_style = style_id
 
     @classmethod
@@ -897,13 +896,19 @@ def _walk_content(
         if tag == _w("r"):
             _process_run(el, builder, mode, author, inside_field_code)
         elif tag in _TRANSPARENT_INLINE_TAGS:
-            _walk_content(list(el), builder, mode=mode, author=author, inside_field_code=inside_field_code)
+            _walk_content(
+                list(el), builder, mode=mode, author=author, inside_field_code=inside_field_code
+            )
         elif tag == _w("sdt"):
             if not sdt_is_placeholder(el):
                 content_el = el.find(_w("sdtContent"))
                 if content_el is not None:
                     _walk_content(
-                        list(content_el), builder, mode=mode, author=author, inside_field_code=inside_field_code
+                        list(content_el),
+                        builder,
+                        mode=mode,
+                        author=author,
+                        inside_field_code=inside_field_code,
                     )
             # A true placeholder (`w:sdtPr/w:showingPlcHdr`) is
             # display-only guidance text -- excluded, matching
@@ -911,10 +916,22 @@ def _walk_content(
             # nothing further to do; the loop moves to the next element.
         elif tag == _w("ins"):
             ins_author = el.get(_w("author")) or author
-            _walk_content(list(el), builder, mode="ins", author=ins_author, inside_field_code=inside_field_code)
+            _walk_content(
+                list(el),
+                builder,
+                mode="ins",
+                author=ins_author,
+                inside_field_code=inside_field_code,
+            )
         elif tag == _w("del"):
             del_author = el.get(_w("author")) or author
-            _walk_content(list(el), builder, mode="del", author=del_author, inside_field_code=inside_field_code)
+            _walk_content(
+                list(el),
+                builder,
+                mode="del",
+                author=del_author,
+                inside_field_code=inside_field_code,
+            )
         elif tag == _w("moveFrom"):
             # EXPLICIT (issue #686), not left to the generic skip below: the
             # move's old location is excluded from BOTH streams, exactly as
@@ -1173,9 +1190,7 @@ OMITTED_FIELD_RESULT_CODES = frozenset({"TOC", "INDEX"})
 #: agreement is what makes "this paragraph's visible text is entirely field
 #: result" mean the same thing here as "this paragraph's operative text"
 #: means there.
-_FIELD_EVENT_TRANSPARENT_TAGS = _TRANSPARENT_INLINE_TAGS | frozenset(
-    {_w("ins"), _w("fldSimple")}
-)
+_FIELD_EVENT_TRANSPARENT_TAGS = _TRANSPARENT_INLINE_TAGS | frozenset({_w("ins"), _w("fldSimple")})
 
 
 def _field_code_name(instr: str) -> str:
@@ -1494,7 +1509,9 @@ def _partition_field_result_paragraphs(
                 p_el, "".join(visible_text), has_anchor=bool(anchors), has_pageref=has_pageref
             )
             region_entry_shaped[key] = region_entry_shaped.get(key, True) and entry_shaped
-            region_has_heading[key] = region_has_heading.get(key, False) or _paragraph_is_real_heading(p_el)
+            region_has_heading[key] = region_has_heading.get(
+                key, False
+            ) or _paragraph_is_real_heading(p_el)
             region_anchors.setdefault(key, set()).update(anchors)
             region_bookmarks.setdefault(key, set()).update(bookmarks)
             decisions.append((p_el, str(text_inside["code"]), key))
@@ -1716,7 +1733,9 @@ def scan_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
         for p_el in root.iter(_w("p")):
             builder = _ParaBuilder()
             with _paragraph_style_scope(p_el):
-                _walk_content(list(p_el), builder, mode="plain", author=None, inside_field_code=False)
+                _walk_content(
+                    list(p_el), builder, mode="plain", author=None, inside_field_code=False
+                )
             out.append({"element": p_el, "runs": builder.scan_runs})
     return out
 
@@ -2251,9 +2270,7 @@ def accepted_revision_disclosure(report: dict[str, Any]) -> str | None:
         if name not in ("ins", "del") and name not in _PARAGRAPH_MARK_DISCLOSURE_NAMES
     }
     paragraph_marks = {
-        name: count
-        for name, count in raw_accepted
-        if name in _PARAGRAPH_MARK_DISCLOSURE_NAMES
+        name: count for name, count in raw_accepted if name in _PARAGRAPH_MARK_DISCLOSURE_NAMES
     }
     unapplied = report.get("unapplied") or {}
     sentences: list[str] = []
@@ -2378,9 +2395,7 @@ def materialize_accept_all_with_report(docx_bytes: bytes) -> tuple[bytes, dict[s
         originals = {info.filename: zf.read(info.filename) for info in infos}
 
     if ALLOWED_DOCUMENT_PART not in originals:
-        raise ValueError(
-            f"Not a valid WordprocessingML .docx: {ALLOWED_DOCUMENT_PART} is missing."
-        )
+        raise ValueError(f"Not a valid WordprocessingML .docx: {ALLOWED_DOCUMENT_PART} is missing.")
 
     original_document_xml = originals[ALLOWED_DOCUMENT_PART].decode("utf-8")
     original_root_open_tag = ooxml_util.root_open_tag(original_document_xml)
@@ -2415,9 +2430,7 @@ def materialize_accept_all_with_report(docx_bytes: bytes) -> tuple[bytes, dict[s
     serialized = ET.tostring(root, encoding="unicode")
     auto_root_open_tag = ooxml_util.root_open_tag(serialized)
     body_and_close = serialized[len(auto_root_open_tag) :]
-    root_open_tag = ooxml_util.merge_hoisted_namespaces(
-        original_root_open_tag, auto_root_open_tag
-    )
+    root_open_tag = ooxml_util.merge_hoisted_namespaces(original_root_open_tag, auto_root_open_tag)
     new_document_xml = (
         b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
         + root_open_tag.encode("utf-8")
@@ -2887,7 +2900,13 @@ def run_stage(
 
 def main() -> None:  # pragma: no cover - manual/CLI smoke entry point
     """CLI smoke test over the module's own source-tree fixture, if present."""
-    fixture = SCRIPTS_DIR.parent / "tests" / "fixtures" / "extraction_normalization_80" / "clean-standard-form.SYNTHETIC.docx"
+    fixture = (
+        SCRIPTS_DIR.parent
+        / "tests"
+        / "fixtures"
+        / "extraction_normalization_80"
+        / "clean-standard-form.SYNTHETIC.docx"
+    )
     if not fixture.exists():
         print(f"No smoke fixture at {fixture}; nothing to do.")
         return

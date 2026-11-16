@@ -62,6 +62,7 @@ def read_text(path: Path) -> str:
 # GATE 1 — step 22 includes retrieved clause_ids
 # ---------------------------------------------------------------------------
 
+
 def gate_1_step22_clause_ids() -> list[str]:
     """Data-flow step 22 must record retrieved clause_ids (polarity/channel)."""
     failures: list[str] = []
@@ -76,16 +77,20 @@ def gate_1_step22_clause_ids() -> list[str]:
     m = step22_pattern.search(arch)
     step22_text = m.group(0) if m else ""
 
-    has_clause_ids = bool(re.search(
-        r"clause[_\s]ids?|clauseIds?",
-        step22_text,
-        re.IGNORECASE,
-    ))
-    has_polarity_or_channel = bool(re.search(
-        r"polarity|channel",
-        step22_text,
-        re.IGNORECASE,
-    ))
+    has_clause_ids = bool(
+        re.search(
+            r"clause[_\s]ids?|clauseIds?",
+            step22_text,
+            re.IGNORECASE,
+        )
+    )
+    has_polarity_or_channel = bool(
+        re.search(
+            r"polarity|channel",
+            step22_text,
+            re.IGNORECASE,
+        )
+    )
 
     if not has_clause_ids:
         failures.append(
@@ -109,6 +114,7 @@ def gate_1_step22_clause_ids() -> list[str]:
 # ---------------------------------------------------------------------------
 # GATE 2 — Audit posture paragraph includes clause_ids
 # ---------------------------------------------------------------------------
+
 
 def gate_2_audit_posture_clause_ids() -> list[str]:
     """Audit posture 'rows include ...' paragraph must mention retrieved clause_ids."""
@@ -182,6 +188,7 @@ def gate_3_reproducibility_claim() -> list[str]:
 # GATE 4 — docs/data-handling.md whitelist includes retrieved_clause_ids
 # ---------------------------------------------------------------------------
 
+
 def gate_4_data_handling_whitelist() -> list[str]:
     """data-handling.md canonical whitelist must include retrieved_clause_ids."""
     failures: list[str] = []
@@ -202,6 +209,7 @@ def gate_4_data_handling_whitelist() -> list[str]:
 # GATE 5 — docs/audit-queries.md has "which clauses informed review X" query
 # ---------------------------------------------------------------------------
 
+
 def gate_5_audit_queries_clause_query() -> list[str]:
     """audit-queries.md must have a query for 'which clauses informed review X'."""
     failures: list[str] = []
@@ -209,11 +217,13 @@ def gate_5_audit_queries_clause_query() -> list[str]:
 
     # Accept any phrasing that mentions clauses AND a review lookup (review_id /
     # review X / informed / retrieved / clause_ids).
-    has_clause_query = bool(re.search(
-        r"claus.*(?:inform|retriev|review)|(?:inform|retriev|review).*claus",
-        aq,
-        re.IGNORECASE | re.DOTALL,
-    ))
+    has_clause_query = bool(
+        re.search(
+            r"claus.*(?:inform|retriev|review)|(?:inform|retriev|review).*claus",
+            aq,
+            re.IGNORECASE | re.DOTALL,
+        )
+    )
 
     if not has_clause_query:
         failures.append(
@@ -229,6 +239,7 @@ def gate_5_audit_queries_clause_query() -> list[str]:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> int:
     print("Audit clause_ids gate (issue #27)")

@@ -47,7 +47,9 @@ import corpus  # noqa: E402
 # The synthetic-generic fixture (issue #410) is a structural clone of the
 # real eiaa playbook -- this gate's composite/keyword section_ref splitting
 # fixtures below are matched against that same shape.
-_EIAA_PLAYBOOK_PATH = REPO_ROOT / "tests" / "fixtures" / "playbooks" / "synthetic-generic-v1.0.0.json"
+_EIAA_PLAYBOOK_PATH = (
+    REPO_ROOT / "tests" / "fixtures" / "playbooks" / "synthetic-generic-v1.0.0.json"
+)
 
 
 def _load_real_playbook() -> dict:
@@ -68,7 +70,8 @@ class TestCompositeSectionRefSplitsPerRealSection(unittest.TestCase):
             paragraphs = [{"heading": heading, "text": f"Clause body for {heading}."}]
             clauses = corpus.extract_clauses(paragraphs, self.playbook)
             self.assertEqual(
-                len(clauses), 1,
+                len(clauses),
+                1,
                 f"Heading {heading!r} (a real composite segment, not the jammed display "
                 f"label) should not be silently dropped.",
             )
@@ -98,7 +101,8 @@ class TestNotInStandardTopicsUseKeywordMatching(unittest.TestCase):
             paragraphs = [{"heading": heading, "text": f"Body text for {heading}."}]
             clauses = corpus.extract_clauses(paragraphs, self.playbook)
             self.assertEqual(
-                len(clauses), 1,
+                len(clauses),
+                1,
                 f"Heading {heading!r} should keyword-match the indemnification topic, "
                 f"not silently drop.",
             )
@@ -140,13 +144,18 @@ class TestSection10SubClausesDisambiguateByContent(unittest.TestCase):
         cases = [
             ("10 Miscellaneous", "Any notice under this Agreement shall be in writing.", "notices"),
             ("10 Miscellaneous", "This Agreement is non-exclusive.", "exclusivity"),
-            ("10 Miscellaneous", "This constitutes the entire agreement and may be amended only in writing.", "entire-agreement-and-amendment"),
+            (
+                "10 Miscellaneous",
+                "This constitutes the entire agreement and may be amended only in writing.",
+                "entire-agreement-and-amendment",
+            ),
         ]
         for heading, text, expected_topic_id in cases:
             paragraphs = [{"heading": heading, "text": text}]
             clauses = corpus.extract_clauses(paragraphs, self.playbook)
             self.assertEqual(
-                len(clauses), 1,
+                len(clauses),
+                1,
                 f"Bare {heading!r} heading with body {text!r} should resolve by content, "
                 f"not silently drop.",
             )
@@ -199,7 +208,8 @@ class TestRealPlaybookAllTopicsReachableThroughRealisticHeadings(unittest.TestCa
         }
         topic_ids = {t["id"] for t in playbook["topics"]}
         self.assertEqual(
-            set(realistic_headings), topic_ids,
+            set(realistic_headings),
+            topic_ids,
             "Test fixture must cover every topic id in the real playbook.",
         )
         for topic_id, heading in realistic_headings.items():
@@ -207,7 +217,8 @@ class TestRealPlaybookAllTopicsReachableThroughRealisticHeadings(unittest.TestCa
             paragraphs = [{"heading": heading, "text": text}]
             clauses = corpus.extract_clauses(paragraphs, playbook)
             self.assertEqual(
-                len(clauses), 1,
+                len(clauses),
+                1,
                 f"Topic {topic_id!r} with realistic heading {heading!r} silently dropped.",
             )
             self.assertEqual(clauses[0]["playbook_topic_id"], topic_id)

@@ -127,11 +127,40 @@ import src.main as _backend_main  # noqa: E402
 # tests/test_user_update_reserved_keyword.py.
 _DDB_RESERVED_WORDS = frozenset(
     {
-        "ACTION", "BETWEEN", "BY", "DATE", "DEFAULT", "DESC", "EXISTS",
-        "GROUP", "HASH", "KEY", "KEYS", "LANGUAGE", "NAME", "ORDER",
-        "OWNER", "PARTITION", "PUBLIC", "RANGE", "ROLE", "SCAN", "SIZE",
-        "SOURCE", "STATUS", "SYSTEM", "TABLE", "TIMESTAMP", "TOKEN", "TTL",
-        "TYPE", "UPDATE", "USER", "VALUE", "VIEW", "YEAR",
+        "ACTION",
+        "BETWEEN",
+        "BY",
+        "DATE",
+        "DEFAULT",
+        "DESC",
+        "EXISTS",
+        "GROUP",
+        "HASH",
+        "KEY",
+        "KEYS",
+        "LANGUAGE",
+        "NAME",
+        "ORDER",
+        "OWNER",
+        "PARTITION",
+        "PUBLIC",
+        "RANGE",
+        "ROLE",
+        "SCAN",
+        "SIZE",
+        "SOURCE",
+        "STATUS",
+        "SYSTEM",
+        "TABLE",
+        "TIMESTAMP",
+        "TOKEN",
+        "TTL",
+        "TYPE",
+        "UPDATE",
+        "USER",
+        "VALUE",
+        "VIEW",
+        "YEAR",
     }
 )
 
@@ -213,8 +242,14 @@ class FakeDynamoDBResource:
         return self._tables[name]
 
 
-def _seed_user(table: FakeTable, sub: str, email: str, status_: str = "active",
-                is_admin: bool = False, last_auth_at: int = 1000) -> None:
+def _seed_user(
+    table: FakeTable,
+    sub: str,
+    email: str,
+    status_: str = "active",
+    is_admin: bool = False,
+    last_auth_at: int = 1000,
+) -> None:
     table.items[sub] = {
         "cognito_sub": sub,
         "email": email,
@@ -236,6 +271,7 @@ def _new_ddb() -> tuple[FakeDynamoDBResource, FakeTable, FakeTable, FakeTable]:
 # ---------------------------------------------------------------------------
 # require_active_user — the backend-side per-request re-check
 # ---------------------------------------------------------------------------
+
 
 class TestRequireActiveUser(unittest.TestCase):
     def test_active_user_is_allowed_and_row_returned(self):
@@ -302,6 +338,7 @@ class TestRequireActiveUser(unittest.TestCase):
 # list_users — GET /api/users
 # ---------------------------------------------------------------------------
 
+
 class TestListUsers(unittest.TestCase):
     def test_non_admin_403(self):
         ddb, users, _, _ = _new_ddb()
@@ -315,7 +352,9 @@ class TestListUsers(unittest.TestCase):
         ddb, users, _, _ = _new_ddb()
         _seed_user(users, "admin-1", "admin@example.com", is_admin=True, last_auth_at=5000)
         _seed_user(users, "sub-jit", "newreviewer@example.com", is_admin=False, last_auth_at=4000)
-        _seed_user(users, "sub-gone", "left@example.com", status_="deprovisioned", last_auth_at=3000)
+        _seed_user(
+            users, "sub-gone", "left@example.com", status_="deprovisioned", last_auth_at=3000
+        )
         caller = _users_module.require_active_user("admin-1", ddb)
 
         result = _users_module.list_users(caller, ddb)
@@ -380,6 +419,7 @@ class TestListUsers(unittest.TestCase):
 # update_user — PATCH /api/users/{sub}
 # ---------------------------------------------------------------------------
 
+
 class TestUpdateUser(unittest.TestCase):
     def setUp(self):
         self.ddb, self.users, self.audit, self.sync_status = _new_ddb()
@@ -399,7 +439,9 @@ class TestUpdateUser(unittest.TestCase):
         self.assertEqual(self.users.items["sub-1"]["status"], "suspended")
 
     def test_admin_can_deprovision_a_user(self):
-        result = _users_module.update_user("sub-1", {"status": "deprovisioned"}, self.admin, self.ddb)
+        result = _users_module.update_user(
+            "sub-1", {"status": "deprovisioned"}, self.admin, self.ddb
+        )
         self.assertEqual(result["status"], "deprovisioned")
 
     def test_admin_can_grant_admin_flag(self):
@@ -490,7 +532,9 @@ class TestUpdateUser(unittest.TestCase):
     def test_two_admins_self_deprovision_allowed(self):
         _seed_user(self.users, "admin-2", "admin2@example.com", is_admin=True)
 
-        result = _users_module.update_user("admin-1", {"status": "deprovisioned"}, self.admin, self.ddb)
+        result = _users_module.update_user(
+            "admin-1", {"status": "deprovisioned"}, self.admin, self.ddb
+        )
 
         self.assertEqual(result["status"], "deprovisioned")
 
@@ -538,6 +582,7 @@ class TestUpdateUser(unittest.TestCase):
 # not the fake HTTPException class this file otherwise stubs in.
 # ---------------------------------------------------------------------------
 
+
 class TestPatchUserRouteReturns409OnWire(unittest.TestCase):
     """Acceptance criterion 1 ('route test asserts 409'): the sole active
     admin's self-suspend/self-deprovision/self-revoke-admin PATCH comes back
@@ -548,12 +593,14 @@ class TestPatchUserRouteReturns409OnWire(unittest.TestCase):
         self.ddb, self.users, self.audit, self.sync_status = _new_ddb()
         _seed_user(self.users, "admin-1", "admin@example.com", is_admin=True)
         self.client = TestClient(_backend_main.app)
-        _backend_main.app.dependency_overrides[_backend_main.get_dynamodb_resource] = (
-            lambda: self.ddb
+        _backend_main.app.dependency_overrides[_backend_main.get_dynamodb_resource] = lambda: (
+            self.ddb
         )
-        _backend_main.app.dependency_overrides[_backend_main.get_current_user] = (
-            lambda: {"sub": "admin-1", "email": "admin@example.com", "token_use": "access"}
-        )
+        _backend_main.app.dependency_overrides[_backend_main.get_current_user] = lambda: {
+            "sub": "admin-1",
+            "email": "admin@example.com",
+            "token_use": "access",
+        }
 
     def tearDown(self):
         _backend_main.app.dependency_overrides.clear()
@@ -594,6 +641,7 @@ class TestPatchUserRouteReturns409OnWire(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # get_sync_status — sync-job visibility panel
 # ---------------------------------------------------------------------------
+
 
 class TestSyncStatus(unittest.TestCase):
     def setUp(self):
@@ -672,7 +720,8 @@ class TestSyncStatus(unittest.TestCase):
         back to 'active' other than the audited admin update_user path
         (which requires an explicit admin action, not an automatic re-admit)."""
         module_functions = {
-            name for name in dir(_users_module)
+            name
+            for name in dir(_users_module)
             if callable(getattr(_users_module, name)) and not name.startswith("_")
         }
         self.assertNotIn("jit_create_user", module_functions)
@@ -683,6 +732,7 @@ class TestSyncStatus(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # get_user — single-row fetch (admin), used by the PATCH form / detail view
 # ---------------------------------------------------------------------------
+
 
 class TestGetUser(unittest.TestCase):
     def test_non_admin_403(self):

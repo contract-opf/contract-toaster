@@ -158,9 +158,7 @@ export function consoleErrorGuardIsActive(): boolean {
 
 /** Take the messages this test has not declared expected, and clear the record. */
 export function drainUnexpectedConsoleErrors(): string[] {
-  const taken = recorded.filter(
-    (message) => !allowedHere.some((pattern) => pattern.test(message))
-  );
+  const taken = recorded.filter((message) => !allowedHere.some((pattern) => pattern.test(message)));
   recorded = [];
   return taken;
 }
@@ -187,6 +185,6 @@ export function assertNoUnexpectedConsoleErrors(): void {
       found.map((message) => `  - ${message}`).join('\n') +
       '\n\nFix the cause, or — if this test provokes it on purpose — declare ' +
       'it with allowConsoleErrorsInThisTest(/…/) from ' +
-      'src/__tests__/support/consoleErrorGuard.ts.'
+      'src/__tests__/support/consoleErrorGuard.ts.',
   );
 }

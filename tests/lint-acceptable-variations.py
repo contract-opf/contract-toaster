@@ -62,9 +62,11 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import playbook_registry  # noqa: E402, I001
+import playbook_registry  # noqa: E402
 from detector_common import check_on_insert_rule_fires as _check_on_insert_rule_fires  # noqa: E402
-from detector_common import check_on_remove_or_alter_rule_fires as _check_on_remove_or_alter_rule_fires  # noqa: E402
+from detector_common import (  # noqa: E402
+    check_on_remove_or_alter_rule_fires as _check_on_remove_or_alter_rule_fires,
+)
 
 
 def load_playbook(path: Path) -> dict:
@@ -161,11 +163,13 @@ def lint_playbook(playbook_path: Path, playbook_id: str) -> tuple[list[dict], li
             if remove_or_alter_fires and not requires_override:
                 all_fires.extend(remove_or_alter_fires)
             elif requires_override and not remove_or_alter_fires:
-                stale_overrides.append({
-                    "playbook_id": playbook_id,
-                    "topic_id": topic_id,
-                    "variation_text": to_text[:120],
-                })
+                stale_overrides.append(
+                    {
+                        "playbook_id": playbook_id,
+                        "topic_id": topic_id,
+                        "variation_text": to_text[:120],
+                    }
+                )
 
     return all_fires, stale_overrides
 
@@ -193,16 +197,24 @@ def main() -> int:
         print("FAIL: acceptable_variations produce hard-rejection detector fires.\n")
         print("The following acceptable variations fire hard-rejection rules:")
         for fire in all_fires:
-            print(f"  playbook={fire['playbook_id']!r}  topic={fire['topic_id']!r}  field={fire['variation_field']!r}")
+            print(
+                f"  playbook={fire['playbook_id']!r}  topic={fire['topic_id']!r}  field={fire['variation_field']!r}"
+            )
             print(f"  rule={fire['rule_id']!r}  trigger={fire['trigger_term']!r}")
             print(f"  text: {fire['variation_text']!r}")
             print()
         print(f"Total fires: {len(all_fires)}")
         print()
-        print("Fix (on_insert fires): narrow trigger_terms or add exempt_terms to the firing rules.")
-        print("Fix (on_remove_or_alter fires): if the fire is a genuine, unavoidable consequence of")
+        print(
+            "Fix (on_insert fires): narrow trigger_terms or add exempt_terms to the firing rules."
+        )
+        print(
+            "Fix (on_remove_or_alter fires): if the fire is a genuine, unavoidable consequence of"
+        )
         print("implementing the variation (e.g. a numeric figure the Floor protects), mark the")
-        print("acceptable_variations[] entry 'requires_attorney_override': true (schema.json, issue")
+        print(
+            "acceptable_variations[] entry 'requires_attorney_override': true (schema.json, issue"
+        )
         print("#213) instead of silently letting the contradiction pass CI.")
         print("See: https://github.com/exos-legal/contract-toaster/issues/2")
         print("See: https://github.com/exos-legal/contract-toaster/issues/213")
@@ -220,7 +232,9 @@ def main() -> int:
         print("See: https://github.com/exos-legal/contract-toaster/issues/213")
         return 1
 
-    print("PASS: zero acceptable-variation detector fires (all requires_attorney_override markers are live).")
+    print(
+        "PASS: zero acceptable-variation detector fires (all requires_attorney_override markers are live)."
+    )
     return 0
 
 

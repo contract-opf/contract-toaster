@@ -117,9 +117,7 @@ class _World:
         self.block_map = ens.build_block_map(self.paragraphs)
         self.doc_text = review_spine.document_text_for_review(self.paragraphs)
         self.sec8_block = block_id_for_text(self.docx, _SEC8_DRAFT_TEXT)
-        self.primary = json.loads(
-            _primary_request_change_response_with_transcript(self.docx)
-        )
+        self.primary = json.loads(_primary_request_change_response_with_transcript(self.docx))
         self.accept_primary = json.loads(_primary_accept_response())
 
 
@@ -201,11 +199,7 @@ def _run(
     block_map: Any = "world",
 ) -> tuple[dict[str, Any], model_client.FakeBedrockClient, list[Any]]:
     client = model_client.FakeBedrockClient(
-        {
-            world.critic_id: [
-                body if isinstance(body, str) else json.dumps(body) for body in bodies
-            ]
-        }
+        {world.critic_id: [body if isinstance(body, str) else json.dumps(body) for body in bodies]}
     )
     ledger: list[Any] = []
     result = cp.run_critic_pass(
@@ -244,7 +238,9 @@ def test_full_critic_result_validates_and_comes_back_intact(
         json.dumps(body), issue_provenance="critic-added"
     )
     if not ok:
-        failures.append(f"[1a] the extended critic response was rejected by the schema: {parsed_or_error}")
+        failures.append(
+            f"[1a] the extended critic response was rejected by the schema: {parsed_or_error}"
+        )
         return
 
     result, client, ledger = _run(world, [body])
@@ -268,7 +264,9 @@ def test_full_critic_result_validates_and_comes_back_intact(
     if client.calls and len(client.calls) != 1:
         failures.append(f"[1f] a valid result must cost exactly one call; saw {len(client.calls)}")
     if len(ledger) != 1 or ledger[0].outcome != "success":
-        failures.append(f"[1g] expected one successful ledger row, saw {[r.outcome for r in ledger]}")
+        failures.append(
+            f"[1g] expected one successful ledger row, saw {[r.outcome for r in ledger]}"
+        )
 
 
 def test_a_flag_only_critic_result_needs_no_edits(failures: list[str], world: _World) -> None:
@@ -320,9 +318,13 @@ def test_overrides_entry_missing_reason_is_rejected(failures: list[str], world: 
             "[2a] an `overrides` entry with no `reason` must be rejected naming `reason`; "
             f"the artifact said {message!r}"
         )
-    ok, error = pp.validate_model_response(json.dumps(_without_reason(body)), issue_provenance="critic-added")
+    ok, error = pp.validate_model_response(
+        json.dumps(_without_reason(body)), issue_provenance="critic-added"
+    )
     if ok or "schema_invalid" not in str(error):
-        failures.append(f"[2b] the pipeline's validator must refuse it as schema_invalid; got {error!r}")
+        failures.append(
+            f"[2b] the pipeline's validator must refuse it as schema_invalid; got {error!r}"
+        )
 
 
 def _without_reason(body: dict[str, Any]) -> dict[str, Any]:
@@ -336,26 +338,29 @@ def test_other_malformed_shapes_are_rejected(failures: list[str], world: _World)
     # Read off the artifact, never restated: the class it is in (the #674
     # free-prose bound) is pinned by tests/test_length_budgets_674.py.
     reason_cap = pp.schema_max_length(
-        pp.load_output_schema(), "/definitions/CriticDelta/properties/dispositions/items/properties/reason"
+        pp.load_output_schema(),
+        "/definitions/CriticDelta/properties/dispositions/items/properties/reason",
     )
     assert isinstance(reason_cap, int)
     cases: dict[str, Any] = {
-        "[2c] a disposition outside KEEP/REVISE/DROP": lambda d: d["critic_delta"]["dispositions"][0].update(
-            disposition="MAYBE"
+        "[2c] a disposition outside KEEP/REVISE/DROP": lambda d: d["critic_delta"]["dispositions"][
+            0
+        ].update(disposition="MAYBE"),
+        "[2d] an override `field` the ADR does not name": lambda d: d["critic_delta"]["overrides"][
+            0
+        ].update(field="section_ref"),
+        "[2e] a disposition with no reason": lambda d: d["critic_delta"]["dispositions"][0].pop(
+            "reason"
         ),
-        "[2d] an override `field` the ADR does not name": lambda d: d["critic_delta"]["overrides"][0].update(
-            field="section_ref"
-        ),
-        "[2e] a disposition with no reason": lambda d: d["critic_delta"]["dispositions"][0].pop("reason"),
-        "[2f] a disposition with an empty reason": lambda d: d["critic_delta"]["dispositions"][0].update(
-            reason=""
-        ),
+        "[2f] a disposition with an empty reason": lambda d: d["critic_delta"]["dispositions"][
+            0
+        ].update(reason=""),
         "[2g] an override carrying a stray key": lambda d: d["critic_delta"]["overrides"][0].update(
             note="x"
         ),
-        "[2h] an `issue_id` that is not an issue key": lambda d: d["critic_delta"]["dispositions"][0].update(
-            issue_id="first"
-        ),
+        "[2h] an `issue_id` that is not an issue key": lambda d: d["critic_delta"]["dispositions"][
+            0
+        ].update(issue_id="first"),
         "[2i] an over-long reason": lambda d: d["critic_delta"]["dispositions"][0].update(
             reason="x" * (reason_cap + 1)
         ),
@@ -375,7 +380,9 @@ def test_other_malformed_shapes_are_rejected(failures: list[str], world: _World)
 # ---------------------------------------------------------------------------
 
 
-def test_deprecated_arrays_still_validate_and_are_marked(failures: list[str], world: _World) -> None:
+def test_deprecated_arrays_still_validate_and_are_marked(
+    failures: list[str], world: _World
+) -> None:
     body = _full_critic_response(
         world,
         contested_replacements=[
@@ -391,14 +398,18 @@ def test_deprecated_arrays_still_validate_and_are_marked(failures: list[str], wo
     )
     ok, parsed = pp.validate_model_response(json.dumps(body), issue_provenance="critic-added")
     if not ok:
-        failures.append(f"[3a] the deprecated critic_delta arrays must still validate for one release: {parsed}")
+        failures.append(
+            f"[3a] the deprecated critic_delta arrays must still validate for one release: {parsed}"
+        )
     props = pp.load_output_schema()["definitions"]["CriticDelta"]["properties"]
     for name in ("added_issues", "contested_replacements", "rationale_objections"):
         if "DEPRECATED" not in props[name].get("description", ""):
             failures.append(f"[3b] CriticDelta.{name} must be marked DEPRECATED in the artifact")
     for name in ("overrides", "dispositions"):
         if "DEPRECATED" in props[name].get("description", ""):
-            failures.append(f"[3c] CriticDelta.{name} is the new contract and must not be deprecated")
+            failures.append(
+                f"[3c] CriticDelta.{name} is the new contract and must not be deprecated"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -498,9 +509,13 @@ def _expect_terminal_then_ok(
             f"got {result.get('reason')!r}"
         )
     if needle not in str(result.get("last_error")):
-        failures.append(f"{label}c: the failure should name {needle!r}; last_error={result.get('last_error')!r}")
+        failures.append(
+            f"{label}c: the failure should name {needle!r}; last_error={result.get('last_error')!r}"
+        )
     if len(ledger) != 2 or [r.outcome for r in ledger] != ["retry", "failure"]:
-        failures.append(f"{label}d: one retry then a failure expected; ledger={[r.outcome for r in ledger]}")
+        failures.append(
+            f"{label}d: one retry then a failure expected; ledger={[r.outcome for r in ledger]}"
+        )
     # The retry carries the correction; no document text is in it.
     retry_prompt = client.calls[1]["user_prompt"] if len(client.calls) > 1 else ""
     if "PREVIOUS ATTEMPT REJECTED" not in retry_prompt or needle not in retry_prompt:
@@ -585,7 +600,10 @@ def test_a_multi_issue_primary_needs_every_disposition(failures: list[str], worl
     primary["issues"].append(second)
     body = _full_critic_response(world)  # disposes of I1 only
     result, _client, _ledger = _run(world, [body, body], primary_output=primary)
-    if "I2" not in str(result.get("last_error")) or "I1" in str(result.get("last_error")).split("issue(s)")[-1].split(" --")[0]:
+    if (
+        "I2" not in str(result.get("last_error"))
+        or "I1" in str(result.get("last_error")).split("issue(s)")[-1].split(" --")[0]
+    ):
         failures.append(
             "[5g] with two first-reviewer issues and a disposition for one, the failure must name "
             f"exactly the missing one (I2); last_error={result.get('last_error')!r}"
@@ -598,7 +616,9 @@ def test_old_artifact_has_no_disposition_contract(failures: list[str], world: _W
     untouched."""
     v2 = pp.load_output_schema(pp.OUTPUT_SCHEMA_V2_PATH)
     if cp.critic_delta_rejection(world.primary, {"critic_delta": None}, v2) is not None:
-        failures.append("[5h] critic_delta_rejection must be a no-op on an artifact with no dispositions")
+        failures.append(
+            "[5h] critic_delta_rejection must be a no-op on an artifact with no dispositions"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -610,14 +630,22 @@ def test_critic_transcript_that_does_not_prove_is_retried_then_fails(
     failures: list[str], world: _World
 ) -> None:
     bad = _full_critic_response(world)
-    bad["block_patches"][0]["segments"][0]["text"] = "Each party's liability is capped."  # not the block's text
+    bad["block_patches"][0]["segments"][0]["text"] = (
+        "Each party's liability is capped."  # not the block's text
+    )
     result, client, ledger = _run(world, [bad, bad])
     if result.get("status") != "ERROR":
-        failures.append(f"[6a] an unproven critic transcript must fail closed; got {result.get('status')!r}")
+        failures.append(
+            f"[6a] an unproven critic transcript must fail closed; got {result.get('status')!r}"
+        )
     if not str(result.get("last_error", "")).startswith(pp.BLOCK_TRANSCRIPT_ERROR_TOKEN):
-        failures.append(f"[6b] last_error should be the transcript rejection; got {result.get('last_error')!r}")
+        failures.append(
+            f"[6b] last_error should be the transcript rejection; got {result.get('last_error')!r}"
+        )
     if len(client.calls) != 2 or [r.outcome for r in ledger] != ["retry", "failure"]:
-        failures.append(f"[6c] one informed retry expected; calls={len(client.calls)} ledger={[r.outcome for r in ledger]}")
+        failures.append(
+            f"[6c] one informed retry expected; calls={len(client.calls)} ledger={[r.outcome for r in ledger]}"
+        )
     if result.get("reason") not in (cp.REASON_CRITIC_RETRY_EXHAUSTED,):
         failures.append(
             "[6d] the failure classification is unchanged: an unproven transcript is the residual "
@@ -630,7 +658,9 @@ def test_critic_transcript_that_does_not_prove_is_retried_then_fails(
     # And with no block map (the caller supplied none) the pre-check is skipped, as in the primary.
     result, _client, _ledger = _run(world, [bad], block_map=None)
     if result.get("status") != "OK":
-        failures.append("[6f] with no block_map the transcript pre-check must be skipped, as in the primary pass")
+        failures.append(
+            "[6f] with no block_map the transcript pre-check must be skipped, as in the primary pass"
+        )
 
 
 def test_unknown_block_id_is_rejected(failures: list[str], world: _World) -> None:
@@ -638,7 +668,9 @@ def test_unknown_block_id_is_rejected(failures: list[str], world: _World) -> Non
     bad["block_patches"][0]["block_id"] = "p9999"
     result, _client, _ledger = _run(world, [bad, bad])
     if result.get("status") != "ERROR":
-        failures.append(f"[6g] a block id the document does not have must fail closed; got {result.get('status')!r}")
+        failures.append(
+            f"[6g] a block id the document does not have must fail closed; got {result.get('status')!r}"
+        )
 
 
 def test_review_spine_gives_the_critic_the_primary_block_map(
@@ -662,7 +694,9 @@ def test_review_spine_gives_the_critic_the_primary_block_map(
             f"should cost one retry (2 critic calls), saw {len(critic_calls)}; status={result.get('status')}"
         )
     elif result.get("status") != "OK":
-        failures.append(f"[6i] the corrected critic result should complete the review; got {result.get('status')!r}")
+        failures.append(
+            f"[6i] the corrected critic result should complete the review; got {result.get('status')!r}"
+        )
 
 
 # ---------------------------------------------------------------------------

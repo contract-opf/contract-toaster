@@ -86,6 +86,7 @@ def _check(condition: bool, message: str) -> None:
 
 # ── Check 1: harness module has the runner + comparator/scorer API ──────────
 
+
 def check_harness_api_present() -> list[str]:
     failures = []
     required = ["GoldCase", "load_gold_cases", "score_case", "score_all", "main", "build_document"]
@@ -96,6 +97,7 @@ def check_harness_api_present() -> list[str]:
 
 
 # ── Check 2: no detector / standard-form-diff imports (acceptance criteria) ─
+
 
 def check_no_detector_or_diff_imports() -> list[str]:
     failures = []
@@ -154,18 +156,22 @@ def check_ported_fixtures_pass_and_detector_fixtures_skip() -> list[str]:
             failures.append(
                 f"  {case_id}: expected to be SCORED under the llm-native-v1 "
                 f"contract but was skipped instead (reasons={result.reasons!r}) "
-                f"-- check its \"schema\" field."
+                f'-- check its "schema" field.'
             )
 
     # Every OTHER fixture in the directory (the detector-era corpus) must be
     # a trivial skip-PASS, not scored under the llm-native-v1 contract.
     detector_case_ids = set(results) - EXPECTED_PORTED_CASE_IDS
     if not detector_case_ids:
-        failures.append("  expected at least one detector-era fixture alongside the ported ones (none found).")
+        failures.append(
+            "  expected at least one detector-era fixture alongside the ported ones (none found)."
+        )
     for case_id in sorted(detector_case_ids):
         result = results[case_id]
         if not result.passed:
-            failures.append(f"  detector-era fixture {case_id!r} unexpectedly scored FAIL: {result.reasons!r}")
+            failures.append(
+                f"  detector-era fixture {case_id!r} unexpectedly scored FAIL: {result.reasons!r}"
+            )
         if not any("skipped" in r for r in result.reasons):
             failures.append(
                 f"  detector-era fixture {case_id!r} was not skipped as a non-eval_harness "
@@ -176,6 +182,7 @@ def check_ported_fixtures_pass_and_detector_fixtures_skip() -> list[str]:
 
 
 # ── Check 4: a deliberately-broken fixture is actually caught ───────────────
+
 
 def _load_synthetic_generic_playbook() -> dict:
     return eval_harness.load_playbook(PLAYBOOK_PATH)
@@ -196,7 +203,11 @@ def check_deliberately_broken_fixture_fails_decision_mismatch() -> list[str]:
     broken = {
         "case_id": "inline-broken-decision-mismatch",
         "schema": "llm-native-v1",
-        "document": {"clauses": [{"heading": "8. Limitation on Liability", "text": "Liability is unlimited."}]},
+        "document": {
+            "clauses": [
+                {"heading": "8. Limitation on Liability", "text": "Liability is unlimited."}
+            ]
+        },
         "model_responses": {
             "primary": [
                 {
@@ -331,7 +342,11 @@ def check_deliberately_broken_fixture_fails_quote_locate() -> list[str]:
         return {
             "case_id": f"inline-broken-edit-not-applied-{issue_key}",
             "schema": "llm-native-v1",
-            "document": {"clauses": [{"heading": "8. Limitation on Liability", "text": "Liability is unlimited."}]},
+            "document": {
+                "clauses": [
+                    {"heading": "8. Limitation on Liability", "text": "Liability is unlimited."}
+                ]
+            },
             "model_responses": {"primary": [primary], "critic": [critic]},
             "expected": expected,
         }
@@ -372,6 +387,7 @@ def check_deliberately_broken_fixture_fails_quote_locate() -> list[str]:
 
 # ── Check 4c: clause text with XML metacharacters (&, <, >) is escaped,
 #    not interpolated raw into <w:t> ─────────────────────────────────────
+
 
 def check_clause_text_with_xml_metacharacters_does_not_raise() -> list[str]:
     """Routine contract prose contains '&' ("R&D costs") and can contain
@@ -440,6 +456,7 @@ def check_clause_text_with_xml_metacharacters_does_not_raise() -> list[str]:
 #    RETRY that exhausts the seeded FakeBedrockClient queue is caught as a
 #    FAIL for that case, not propagated as an uncaught exception ──────────
 
+
 def check_run_review_exception_is_caught_as_a_fail() -> list[str]:
     """A canned primary response with an invalid `decision` value fails
     schema validation and drives primary_review_pass into its bounded
@@ -454,7 +471,11 @@ def check_run_review_exception_is_caught_as_a_fail() -> list[str]:
     broken = {
         "case_id": "inline-run-review-raises",
         "schema": "llm-native-v1",
-        "document": {"clauses": [{"heading": "8. Limitation on Liability", "text": "Liability is unlimited."}]},
+        "document": {
+            "clauses": [
+                {"heading": "8. Limitation on Liability", "text": "Liability is unlimited."}
+            ]
+        },
         "model_responses": {
             "primary": [
                 {
@@ -493,6 +514,7 @@ def check_run_review_exception_is_caught_as_a_fail() -> list[str]:
 # ── Check 4e: expected.reason pins the SPECIFIC cause of a terminal status,
 #    not just the status itself ─────────────────────────────────────────
 
+
 def check_expected_reason_mismatch_is_caught() -> list[str]:
     """`status` alone cannot distinguish review_spine.run_review's leakage
     gate from any other fail-closed path that lands on the same terminal
@@ -507,7 +529,11 @@ def check_expected_reason_mismatch_is_caught() -> list[str]:
     case_raw = {
         "case_id": "inline-reason-mismatch",
         "schema": "llm-native-v1",
-        "document": {"clauses": [{"heading": "8. Limitation on Liability", "text": "Liability is unlimited."}]},
+        "document": {
+            "clauses": [
+                {"heading": "8. Limitation on Liability", "text": "Liability is unlimited."}
+            ]
+        },
         "model_responses": {"primary": [], "critic": []},
         "expected": {"status": "ERROR", "reason": "leakage_detected"},
     }
@@ -545,6 +571,7 @@ def check_expected_reason_mismatch_is_caught() -> list[str]:
 # ── Check 5: a non-eval_harness fixture (no schema marker) is a trivial
 #    skip-PASS, never interpreted under the llm-native-v1 schema ───────────
 
+
 def check_non_eval_harness_fixture_is_skipped() -> list[str]:
     failures = []
     playbook = _load_synthetic_generic_playbook()
@@ -555,13 +582,18 @@ def check_non_eval_harness_fixture_is_skipped() -> list[str]:
     }
     result = eval_harness.score_case(_make_case(detector_shaped), playbook)
     if not result.passed:
-        failures.append(f"  a non-eval_harness-schema fixture scored FAIL instead of skip-PASS: {result.reasons!r}")
+        failures.append(
+            f"  a non-eval_harness-schema fixture scored FAIL instead of skip-PASS: {result.reasons!r}"
+        )
     if not any("skipped" in r for r in result.reasons):
-        failures.append(f"  expected a 'skipped' reason for a non-eval_harness-schema fixture, got: {result.reasons!r}")
+        failures.append(
+            f"  expected a 'skipped' reason for a non-eval_harness-schema fixture, got: {result.reasons!r}"
+        )
     return failures
 
 
 # ── Check 6: the profile-conditional main() CLI runs green end-to-end ───────
+
 
 def check_main_cli_runs_green() -> list[str]:
     failures = []
@@ -584,6 +616,7 @@ def check_main_cli_runs_green() -> list[str]:
 
 # ── Check 7a: the generator tautology is broken by a hand-authored fixture
 #    (ported unchanged from tests/test_eval_harness_quality_204.py) ────────
+
 
 def check_generator_tautology_is_broken_by_a_hand_authored_fixture() -> list[str]:
     """scripts/generate_gold_fixtures.py builds its planted hunk FROM the
@@ -631,6 +664,7 @@ def check_generator_tautology_is_broken_by_a_hand_authored_fixture() -> list[str
 #    projection, never silently relabeled "Recorded baseline" (ported
 #    unchanged from tests/test_eval_harness_quality_204.py) ───────────────
 
+
 def check_recorded_baseline_relabeled_as_projection() -> list[str]:
     """Pins that docs/evaluation.md never re-labels the v1 critic-input-
     manifest baseline table as "Recorded baseline" / recorded evidence --
@@ -657,6 +691,7 @@ def check_recorded_baseline_relabeled_as_projection() -> list[str]:
 
 # ── Check 7c: script-generated fixtures are tagged provenance=synthetic
 #    (ported unchanged from tests/test_eval_harness_62.py) ────────────────
+
 
 def check_generated_fixtures_are_synthetic() -> list[str]:
     """Every fixture mechanically generated by scripts/generate_gold_
@@ -685,21 +720,74 @@ def check_generated_fixtures_are_synthetic() -> list[str]:
 
 # ── main ──────────────────────────────────────────────────────────────────
 
+
 def main() -> int:
     checks = [
-        ("1", "eval_harness.py exposes the runner + comparator/scorer API", check_harness_api_present),
-        ("2", "eval_harness.py imports no detector / standard-form-diff module", check_no_detector_or_diff_imports),
-        ("3", "ported llm-native-v1 fixtures PASS; detector-era fixtures skip", check_ported_fixtures_pass_and_detector_fixtures_skip),
-        ("4a", "a decision-mismatch fixture is caught (FAILs)", check_deliberately_broken_fixture_fails_decision_mismatch),
-        ("4b", "an edit that never reached the document is caught (FAILs)", check_deliberately_broken_fixture_fails_quote_locate),
-        ("4c", "clause text with '&'/'<'/'>' is escaped, not a ParseError", check_clause_text_with_xml_metacharacters_does_not_raise),
-        ("4d", "run_review exceptions are caught as a per-case FAIL, not propagated", check_run_review_exception_is_caught_as_a_fail),
-        ("4e", "expected.reason mismatch is caught (status alone is not enough)", check_expected_reason_mismatch_is_caught),
-        ("5", "a non-eval_harness-schema fixture is a trivial skip-PASS", check_non_eval_harness_fixture_is_skipped),
-        ("6", "the profile-conditional main() CLI runs green end-to-end", check_main_cli_runs_green),
-        ("7a", "the generator tautology is broken by a hand-authored fixture", check_generator_tautology_is_broken_by_a_hand_authored_fixture),
-        ("7b", "docs/evaluation.md's v1 baseline table stays a projection", check_recorded_baseline_relabeled_as_projection),
-        ("7c", "script-generated fixtures are tagged provenance=synthetic", check_generated_fixtures_are_synthetic),
+        (
+            "1",
+            "eval_harness.py exposes the runner + comparator/scorer API",
+            check_harness_api_present,
+        ),
+        (
+            "2",
+            "eval_harness.py imports no detector / standard-form-diff module",
+            check_no_detector_or_diff_imports,
+        ),
+        (
+            "3",
+            "ported llm-native-v1 fixtures PASS; detector-era fixtures skip",
+            check_ported_fixtures_pass_and_detector_fixtures_skip,
+        ),
+        (
+            "4a",
+            "a decision-mismatch fixture is caught (FAILs)",
+            check_deliberately_broken_fixture_fails_decision_mismatch,
+        ),
+        (
+            "4b",
+            "an edit that never reached the document is caught (FAILs)",
+            check_deliberately_broken_fixture_fails_quote_locate,
+        ),
+        (
+            "4c",
+            "clause text with '&'/'<'/'>' is escaped, not a ParseError",
+            check_clause_text_with_xml_metacharacters_does_not_raise,
+        ),
+        (
+            "4d",
+            "run_review exceptions are caught as a per-case FAIL, not propagated",
+            check_run_review_exception_is_caught_as_a_fail,
+        ),
+        (
+            "4e",
+            "expected.reason mismatch is caught (status alone is not enough)",
+            check_expected_reason_mismatch_is_caught,
+        ),
+        (
+            "5",
+            "a non-eval_harness-schema fixture is a trivial skip-PASS",
+            check_non_eval_harness_fixture_is_skipped,
+        ),
+        (
+            "6",
+            "the profile-conditional main() CLI runs green end-to-end",
+            check_main_cli_runs_green,
+        ),
+        (
+            "7a",
+            "the generator tautology is broken by a hand-authored fixture",
+            check_generator_tautology_is_broken_by_a_hand_authored_fixture,
+        ),
+        (
+            "7b",
+            "docs/evaluation.md's v1 baseline table stays a projection",
+            check_recorded_baseline_relabeled_as_projection,
+        ),
+        (
+            "7c",
+            "script-generated fixtures are tagged provenance=synthetic",
+            check_generated_fixtures_are_synthetic,
+        ),
     ]
 
     overall_pass = True

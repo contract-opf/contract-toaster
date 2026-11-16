@@ -283,9 +283,7 @@ class TestWriterReaderRoundTrip(SummaryAttributeTestBase):
         projection, and an ACCEPT review may legitimately carry no prose."""
         self._seed_bare_row("rid-nosummary")
 
-        pipeline_runner._write_terminal(
-            "rid-nosummary", {"decision": "ACCEPT"}, False, self.ddb
-        )
+        pipeline_runner._write_terminal("rid-nosummary", {"decision": "ACCEPT"}, False, self.ddb)
 
         detail = reviews_module.get_review_detail("rid-nosummary", OWNER, self.ddb)
         self.assertIsNone(detail["verdict_summary"])
@@ -511,9 +509,7 @@ class TestToasterGuidancePurge(SummaryAttributeTestBase):
 
         retention_module.run_purge_sweep_now(self.s3, self.ddb)
 
-        self.assertEqual(
-            self._row("rid-guidance-held").get("toaster_guidance"), GUIDANCE_TEXT
-        )
+        self.assertEqual(self._row("rid-guidance-held").get("toaster_guidance"), GUIDANCE_TEXT)
 
 
 # ---------------------------------------------------------------------------

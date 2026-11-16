@@ -125,27 +125,22 @@ describe('status', () => {
   });
 
   it('is SUBMITTING while an upload is outstanding', () => {
-    expect(toReviewModel(baseState({ file: docx(), submitting: true })).status).toBe(
-      'SUBMITTING',
-    );
+    expect(toReviewModel(baseState({ file: docx(), submitting: true })).status).toBe('SUBMITTING');
   });
 
   it('is PENDING between the accepted submit and the first poll', () => {
     expect(toReviewModel(baseState({ reviewId: 'r-1', detail: null })).status).toBe('PENDING');
   });
 
-  it.each<Status>([
-    'PENDING',
-    'RUNNING',
-    'DONE',
-    'ERROR',
-    'CANCELLED',
-  ])('preserves %s exactly', (status) => {
-    const model = toReviewModel(
-      baseState({ reviewId: 'r-1', detail: detailOf({ status, decision: null }) }),
-    );
-    expect(model.status).toBe(status);
-  });
+  it.each<Status>(['PENDING', 'RUNNING', 'DONE', 'ERROR', 'CANCELLED'])(
+    'preserves %s exactly',
+    (status) => {
+      const model = toReviewModel(
+        baseState({ reviewId: 'r-1', detail: detailOf({ status, decision: null }) }),
+      );
+      expect(model.status).toBe(status);
+    },
+  );
 
   it('issue #133: reads either retired manual spelling as the failure it was', () => {
     // No writer produces these any more; a row stored before the change still
@@ -158,9 +153,7 @@ describe('status', () => {
       );
       expect(model.status).toBe('ERROR');
       expect(model.result?.outcome).toBe('Failed');
-      expect((model.messages ?? []).map((message) => message.id)).not.toContain(
-        'outcome-overlay',
-      );
+      expect((model.messages ?? []).map((message) => message.id)).not.toContain('outcome-overlay');
     }
   });
 
@@ -399,9 +392,7 @@ const PREFLIGHT: PreflightResult = {
 
 describe('preflight', () => {
   it('renames the snake_case fields and keeps classification/match unchanged', () => {
-    const preflight = toReviewModel(
-      baseState({ file: docx(), preflight: PREFLIGHT }),
-    ).preflight;
+    const preflight = toReviewModel(baseState({ file: docx(), preflight: PREFLIGHT })).preflight;
     expect(preflight).toMatchObject({
       state: 'ready',
       wordCount: 4210,
@@ -414,9 +405,9 @@ describe('preflight', () => {
   });
 
   it('reports checking while the advisory request is still in flight', () => {
-    expect(
-      toReviewModel(baseState({ file: docx(), preflightPending: true })).preflight,
-    ).toEqual({ state: 'checking' });
+    expect(toReviewModel(baseState({ file: docx(), preflightPending: true })).preflight).toEqual({
+      state: 'checking',
+    });
   });
 
   it('is unavailable when the cheap pass could not classify', () => {
@@ -453,9 +444,7 @@ describe('preflight', () => {
   });
 
   it('carries injection ids and counts only', () => {
-    const preflight = toReviewModel(
-      baseState({ file: docx(), preflight: PREFLIGHT }),
-    ).preflight;
+    const preflight = toReviewModel(baseState({ file: docx(), preflight: PREFLIGHT })).preflight;
     expect(preflight?.injectionCount).toBe(2);
     expect(preflight?.injectionRuleIds).toEqual(['ignore_previous']);
     // Confidence is not turned into a new verdict, and no document text rides
@@ -563,15 +552,56 @@ describe('result', () => {
     });
 
     it.each([
-      ['a computed added issue', [{ source: 'computed', change: 'added', issue_id: null, field: 'decision' }], { criticAdded: 1 }],
-      ['a computed drop', [{ source: 'computed', change: 'dropped', issue_id: 'I4', field: 'decision', retained: false }], { criticDropped: 1 }],
-      ['a hard rejection put back', [{ source: 'computed', change: 'dropped', issue_id: 'I3', field: 'decision', retained: true }], { criticRetained: 1 }],
-      ['a computed replacement', [{ source: 'computed', change: 'replaced', issue_id: 'I2', field: 'replacement_text' }], { criticOverrides: 1 }],
-      ['a change the critic stated itself', [{ source: 'critic', issue_id: 'I1', field: 'rationale' }], { criticOverrides: 1 }],
+      [
+        'a computed added issue',
+        [{ source: 'computed', change: 'added', issue_id: null, field: 'decision' }],
+        { criticAdded: 1 },
+      ],
+      [
+        'a computed drop',
+        [
+          {
+            source: 'computed',
+            change: 'dropped',
+            issue_id: 'I4',
+            field: 'decision',
+            retained: false,
+          },
+        ],
+        { criticDropped: 1 },
+      ],
+      [
+        'a hard rejection put back',
+        [
+          {
+            source: 'computed',
+            change: 'dropped',
+            issue_id: 'I3',
+            field: 'decision',
+            retained: true,
+          },
+        ],
+        { criticRetained: 1 },
+      ],
+      [
+        'a computed replacement',
+        [{ source: 'computed', change: 'replaced', issue_id: 'I2', field: 'replacement_text' }],
+        { criticOverrides: 1 },
+      ],
+      [
+        'a change the critic stated itself',
+        [{ source: 'critic', issue_id: 'I1', field: 'rationale' }],
+        { criticOverrides: 1 },
+      ],
     ])('counts %s alone, and only that kind', (_label, overrides, expected) => {
       const result = resultFor({ overrides });
       expect(result).toMatchObject(expected);
-      for (const key of ['criticOverrides', 'criticAdded', 'criticDropped', 'criticRetained'] as const) {
+      for (const key of [
+        'criticOverrides',
+        'criticAdded',
+        'criticDropped',
+        'criticRetained',
+      ] as const) {
         if (!(key in expected)) {
           expect(result?.[key]).toBeUndefined();
         }
@@ -602,7 +632,10 @@ describe('result', () => {
     });
 
     it('counts nothing for a KEEP-only delta', () => {
-      const result = resultFor({ overrides: [], dispositions: [{ issue_id: 'I1', disposition: 'KEEP' }] });
+      const result = resultFor({
+        overrides: [],
+        dispositions: [{ issue_id: 'I1', disposition: 'KEEP' }],
+      });
       expect(result?.criticOverrides).toBeUndefined();
       expect(result?.criticAdded || result?.criticContested || result?.criticDetails).toBeFalsy();
     });
@@ -639,8 +672,7 @@ describe('result', () => {
 
   it('is absent while the review is still running', () => {
     expect(
-      toReviewModel(baseState({ reviewId: 'r-1', detail: detailOf({ status: 'RUNNING' }) }))
-        .result,
+      toReviewModel(baseState({ reviewId: 'r-1', detail: detailOf({ status: 'RUNNING' }) })).result,
     ).toBeUndefined();
   });
 });
@@ -649,9 +681,9 @@ describe('result', () => {
 
 describe('cover', () => {
   it('is idle on a terminal review with nothing buttered', () => {
-    expect(
-      toReviewModel(baseState({ reviewId: 'r-1', detail: DONE_DETAIL })).cover,
-    ).toEqual({ state: 'idle' });
+    expect(toReviewModel(baseState({ reviewId: 'r-1', detail: DONE_DETAIL })).cover).toEqual({
+      state: 'idle',
+    });
   });
 
   it('reports loading, then the exact draft and cached flag', () => {
@@ -696,9 +728,7 @@ describe('cover', () => {
   });
 
   it('keeps the cover-note cost separate from the review cost', () => {
-    const cost = toReviewModel(
-      baseState({ reviewCostUsdCents: 79, coverNoteCostCents: 4 }),
-    ).cost;
+    const cost = toReviewModel(baseState({ reviewCostUsdCents: 79, coverNoteCostCents: 4 })).cost;
     expect(cost.cents).toBe(79);
     expect(cost.coverCents).toBe(4);
   });
@@ -708,9 +738,9 @@ describe('cover', () => {
 
 describe('disposition', () => {
   it('reports the saving flag and the recorded outcome', () => {
-    expect(
-      toReviewModel(baseState({ reviewId: 'r-1', detail: DONE_DETAIL })).disposition,
-    ).toEqual({ saving: false });
+    expect(toReviewModel(baseState({ reviewId: 'r-1', detail: DONE_DETAIL })).disposition).toEqual({
+      saving: false,
+    });
     expect(
       toReviewModel(
         baseState({ reviewId: 'r-1', detail: DONE_DETAIL, dispositionSaving: 'EDITED' }),
@@ -789,19 +819,16 @@ describe('cost', () => {
     expect(cost.holdCents).toBeUndefined();
   });
 
-  it.each([null, undefined, 0])(
-    'is unavailable rather than an inferred $0.00 for %s',
-    (cents) => {
-      const cost = toReviewModel(
-        baseState({
-          reviewCostUsdCents: cents,
-          reviewId: 'r-1',
-          detail: detailOf({ status: 'CANCELLED', decision: null }),
-        }),
-      ).cost;
-      expect(cost).toEqual({ kind: 'unavailable' });
-    },
-  );
+  it.each([null, undefined, 0])('is unavailable rather than an inferred $0.00 for %s', (cents) => {
+    const cost = toReviewModel(
+      baseState({
+        reviewCostUsdCents: cents,
+        reviewId: 'r-1',
+        detail: detailOf({ status: 'CANCELLED', decision: null }),
+      }),
+    ).cost;
+    expect(cost).toEqual({ kind: 'unavailable' });
+  });
 
   // Owner decision H2 (#735). `GET /api/review-cost-estimate` answers for the
   // NEXT review, so once one has been submitted the figure on screen has to be
@@ -850,9 +877,8 @@ describe('cost', () => {
       toReviewModel(baseState({ reviewCostUsdCents: 79, adminDaily: aggregate })).cost.adminDaily,
     ).toBeUndefined();
     expect(
-      toReviewModel(
-        baseState({ reviewCostUsdCents: 79, isAdmin: true, adminDaily: aggregate }),
-      ).cost.adminDaily,
+      toReviewModel(baseState({ reviewCostUsdCents: 79, isAdmin: true, adminDaily: aggregate }))
+        .cost.adminDaily,
     ).toEqual(aggregate);
   });
 });
@@ -974,9 +1000,9 @@ describe('messages', () => {
       'receipt-saved',
       'review-id-copied',
     ]);
-    expect(successes.filter((m) => m.id.startsWith('receipt-')).every((m) => m.scope === 'receipt')).toBe(
-      true,
-    );
+    expect(
+      successes.filter((m) => m.id.startsWith('receipt-')).every((m) => m.scope === 'receipt'),
+    ).toBe(true);
   });
 
   it('puts an error ahead of an informational note in the register line', () => {

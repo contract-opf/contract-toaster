@@ -9,11 +9,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
-import {
-  DEFAULT_PLAYBOOKS,
-  findReviewResult,
-  pressSubmit,
-} from './support/consoleSurface';
+import { DEFAULT_PLAYBOOKS, findReviewResult, pressSubmit } from './support/consoleSurface';
 import ReviewHistory, { type HistoryRow } from '../ReviewHistory';
 import { allowConsoleErrorsInThisTest } from './support/consoleErrorGuard';
 
@@ -48,7 +44,11 @@ function stubFetch(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
       // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }
-    if (entry && typeof entry === 'object' && '__httpStatus' in (entry as Record<string, unknown>)) {
+    if (
+      entry &&
+      typeof entry === 'object' &&
+      '__httpStatus' in (entry as Record<string, unknown>)
+    ) {
       const { __httpStatus, body } = entry as { __httpStatus: number; body: unknown };
       return {
         ok: __httpStatus >= 200 && __httpStatus < 300,
@@ -96,8 +96,7 @@ const ACCEPT_DETAIL = {
 };
 
 const DRAFT_TEXT =
-  'Attached is our markup of the agreement. We restored the liability cap. ' +
-  'Happy to discuss.';
+  'Attached is our markup of the agreement. We restored the liability cap. ' + 'Happy to discuss.';
 
 describe('ReviewSubmission — "Butter it" cover-note draft (issue #499)', () => {
   it('does not offer the control for an ACCEPT review (nothing to describe)', async () => {
@@ -141,13 +140,16 @@ describe('ReviewSubmission — "Butter it" cover-note draft (issue #499)', () =>
     expect(
       (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
         ([input, init]) =>
-          new URL(String(input), 'http://localhost').pathname ===
-            '/api/reviews/rev-1/cover-note' &&
-          (init as RequestInit | undefined)?.method === 'POST'
-      )
+          new URL(String(input), 'http://localhost').pathname === '/api/reviews/rev-1/cover-note' &&
+          (init as RequestInit | undefined)?.method === 'POST',
+      ),
     ).toHaveLength(1);
 
-    const call = fetchCallFor(fetch as unknown as ReturnType<typeof vi.fn>, 'POST', '/api/reviews/rev-1/cover-note');
+    const call = fetchCallFor(
+      fetch as unknown as ReturnType<typeof vi.fn>,
+      'POST',
+      '/api/reviews/rev-1/cover-note',
+    );
     expect(JSON.parse((call![1] as RequestInit).body as string)).toEqual({ regenerate: false });
   });
 
@@ -234,8 +236,12 @@ describe('ReviewSubmission — "Butter it" cover-note draft (issue #499)', () =>
           return { ok: true, status: 200, json: async () => DEFAULT_PLAYBOOKS } as Response;
         }
         if (pathname === '/api/reviews' && method === 'POST') {
-          // eslint-disable-next-line @typescript-eslint/require-await
-          return { ok: true, status: 200, json: async () => ({ review_id: 'rev-1', resumed: false }) } as Response;
+          return {
+            ok: true,
+            status: 200,
+            // eslint-disable-next-line @typescript-eslint/require-await
+            json: async () => ({ review_id: 'rev-1', resumed: false }),
+          } as Response;
         }
         if (pathname === '/api/reviews/rev-1' && method === 'GET') {
           // eslint-disable-next-line @typescript-eslint/require-await
@@ -325,7 +331,7 @@ describe('ReviewSubmission — "Butter it" cover-note draft (issue #499)', () =>
   // every other cover-note state field but not coverNoteErrorMessage, so a
   // stale real-error banner from a PREVIOUS review survived onto a newly
   // submitted one before the reviewer had even clicked "Butter it" for it.
-  it('a resubmit clears a previous review\'s real-error banner', async () => {
+  it("a resubmit clears a previous review's real-error banner", async () => {
     allowConsoleErrorsInThisTest(/past its retention window/);
     let coverNoteCall = 0;
     let submitCall = 0;
@@ -492,8 +498,12 @@ describe('ReviewHistory — "Butter it" in the expanded row (issue #499)', () =>
       const pathname = new URL(String(input), 'http://localhost').pathname;
       const method = (init?.method ?? 'GET').toUpperCase();
       if (pathname === '/api/reviews' && method === 'GET') {
-        // eslint-disable-next-line @typescript-eslint/require-await
-        return { ok: true, status: 200, json: async () => ({ reviews: [historyRow({})] }) } as Response;
+        return {
+          ok: true,
+          status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
+          json: async () => ({ reviews: [historyRow({})] }),
+        } as Response;
       }
       if (pathname === '/api/reviews/rev-h1/cover-note' && method === 'POST') {
         coverNoteCalls += 1;
@@ -568,16 +578,14 @@ describe('ReviewHistory — "Butter it" in the expanded row (issue #499)', () =>
     fireEvent.click(screen.getByTestId('history-cover-note-butter-rev-h1'));
     await screen.findByTestId('history-cover-note-card-rev-h1');
 
-    expect(screen.getByTestId('history-cover-note-cost-rev-h1').textContent).toMatch(
-      /no charge/i,
-    );
+    expect(screen.getByTestId('history-cover-note-cost-rev-h1').textContent).toMatch(/no charge/i);
     // Issue #499 fix round 1: a cached revisit (reload / History revisit,
     // never regenerated this session) must still show the real cost on
     // Regenerate, sourced from the backend's stored
     // `last_generation_cost_usd_cents` -- not left at "Regenerate" bare.
-    expect(
-      screen.getByTestId('history-cover-note-regenerate-rev-h1').textContent,
-    ).toContain('$0.03');
+    expect(screen.getByTestId('history-cover-note-regenerate-rev-h1').textContent).toContain(
+      '$0.03',
+    );
   });
 
   // Issue #499 fix round 3 (review finding): same real-vs-quiet distinction

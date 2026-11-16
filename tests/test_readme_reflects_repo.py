@@ -92,6 +92,7 @@ def _parse_layout_paths(block: str) -> list[tuple[str, bool, str]]:
 # Check A / B — repository-layout block matches the real tree
 # ---------------------------------------------------------------------------
 
+
 def check_ab_layout_matches_tree() -> list[str]:
     print("\nCheck A/B: README repository-layout block matches the real tree …")
     failures = []
@@ -133,6 +134,7 @@ def check_ab_layout_matches_tree() -> list[str]:
 # Check C — redline writer described as owned, not vendored
 # ---------------------------------------------------------------------------
 
+
 def check_c_redline_writer_owned() -> list[str]:
     print("\nCheck C: README describes the redline writer as owned stdlib code …")
     text = _read(README)
@@ -152,6 +154,7 @@ def check_c_redline_writer_owned() -> list[str]:
 # Check D — prompts described as code-assembled, not a prompts/ directory
 # ---------------------------------------------------------------------------
 
+
 def check_d_prompts_code_assembled() -> list[str]:
     print("\nCheck D: README describes prompts as code-assembled …")
     text = _read(README)
@@ -166,6 +169,7 @@ def check_d_prompts_code_assembled() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check E — Docker Compose quickstart is primary, before the AWS CDK flow
 # ---------------------------------------------------------------------------
+
 
 def check_e_dts_quickstart_primary() -> list[str]:
     print("\nCheck E: Docker Compose quickstart precedes the AWS CDK deploy flow …")
@@ -202,6 +206,7 @@ def check_e_dts_quickstart_primary() -> list[str]:
 # Check F — LICENSE third-party attribution reconciled with reality
 # ---------------------------------------------------------------------------
 
+
 def check_f_license_attribution() -> list[str]:
     print("\nCheck F: LICENSE third-party attribution matches reality …")
     text = _read(LICENSE)
@@ -218,6 +223,7 @@ def check_f_license_attribution() -> list[str]:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> int:
     print("README/LICENSE-reflects-repo structural gate (issue #275)")
     print("=" * 60)
@@ -231,10 +237,7 @@ def main() -> int:
 
     print("\n" + "=" * 60)
     if all_failures:
-        print(
-            f"\nFAIL: {len(all_failures)} check(s) failed.\n"
-            "See output above for details."
-        )
+        print(f"\nFAIL: {len(all_failures)} check(s) failed.\nSee output above for details.")
         return 1
 
     print("\nPASS: README and LICENSE reflect the real tree.")

@@ -572,6 +572,7 @@ def get_active_user_row(
 # FastAPI application
 # ---------------------------------------------------------------------------
 
+
 @contextlib.asynccontextmanager
 async def _lifespan(_app: FastAPI):
     """Verify the environment, then start and stop the DTS retention purge
@@ -647,9 +648,7 @@ async def _lifespan(_app: FastAPI):
                 get_dynamodb_resource(), process_started_at=process_started_at
             )
         except Exception:  # noqa: BLE001 - never let recovery stop the API booting
-            logger.warning(
-                "RUNNER_RECOVERY: orphaned-review recovery could not run; API continues"
-            )
+            logger.warning("RUNNER_RECOVERY: orphaned-review recovery could not run; API continues")
     handle = None
     try:
         handle = purge_scheduler.start_purge_scheduler(
@@ -862,9 +861,7 @@ async def post_me_password(
         response = JSONResponse(content=result)
         set_demo_session_cookie(response, token)
         return response
-    result = change_own_password(
-        current_password, new_password, caller_row, dynamodb_resource
-    )
+    result = change_own_password(current_password, new_password, caller_row, dynamodb_resource)
     return JSONResponse(content=result)
 
 
@@ -1393,9 +1390,7 @@ async def post_admin_retention_preview(
     here (different sub-path, "preview" vs "holds"), but kept adjacent to
     the settings routes above for readability.
     """
-    preview = preview_purge_sweep(
-        int(body["proposed_window_days"]), caller_row, dynamodb_resource
-    )
+    preview = preview_purge_sweep(int(body["proposed_window_days"]), caller_row, dynamodb_resource)
     return JSONResponse(content=preview)
 
 
@@ -1723,10 +1718,7 @@ async def post_admin_playbook_create(
     if len(contents) > MAX_UPLOAD_SIZE_BYTES:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=(
-                f"Upload exceeds the maximum allowed size of "
-                f"{MAX_UPLOAD_SIZE_BYTES} bytes."
-            ),
+            detail=(f"Upload exceeds the maximum allowed size of {MAX_UPLOAD_SIZE_BYTES} bytes."),
         )
     computed_hash = "sha256:" + hashlib.sha256(contents).hexdigest()
 
@@ -1773,9 +1765,7 @@ async def post_admin_playbook_create(
         # unhandled 500 instead of the actionable 4xx the admin needs -- the
         # `_finish_opf` call further down already catches the same exception
         # type for the same reason.
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except UnicodeDecodeError as exc:
         error_id = uuid.uuid4().hex
         # NOT `%r` here, unlike the other #124 log sites. UnicodeDecodeError's
@@ -1788,8 +1778,7 @@ async def post_admin_playbook_create(
         # payload-free fields that say where and why the decode failed instead;
         # tests/test_playbook_upload_log_redaction_124.py holds this.
         logger.error(
-            "PLAYBOOK_UPLOAD_UTF8_DECODE_FAILED error_id=%s "
-            "encoding=%s reason=%s start=%s end=%s",
+            "PLAYBOOK_UPLOAD_UTF8_DECODE_FAILED error_id=%s encoding=%s reason=%s start=%s end=%s",
             error_id,
             exc.encoding,
             exc.reason,
@@ -2122,10 +2111,7 @@ async def post_admin_playbook_version_upload(
     if len(contents) > MAX_UPLOAD_SIZE_BYTES:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=(
-                f"Upload exceeds the maximum allowed size of "
-                f"{MAX_UPLOAD_SIZE_BYTES} bytes."
-            ),
+            detail=(f"Upload exceeds the maximum allowed size of {MAX_UPLOAD_SIZE_BYTES} bytes."),
         )
     # Server-computed hash is authoritative; a client-supplied hash is only
     # ever validated against it, never trusted as the value we record.
@@ -2197,9 +2183,7 @@ async def post_admin_playbook_version_upload(
     original_hash_hex = hashlib.sha256(contents).hexdigest()
     s3_client.put_object(
         Bucket=uploads_bucket,
-        Key=original_artifact_key(
-            playbook_id, original_hash_hex, filename=file.filename or ""
-        ),
+        Key=original_artifact_key(playbook_id, original_hash_hex, filename=file.filename or ""),
         Body=contents,
         ChecksumSHA256=checksum_sha256_b64(original_hash_hex),
     )
@@ -2483,9 +2467,7 @@ async def post_admin_playbook_pen_rules_validate(
     return JSONResponse(content=result)
 
 
-def _require_registered_playbook(
-    playbook_id: str, dynamodb_resource: Any = None
-) -> None:
+def _require_registered_playbook(playbook_id: str, dynamodb_resource: Any = None) -> None:
     """404 for a playbook_id neither registered nor created in the DB.
     The catalog's source of truth (see `src.review_routes._load_playbook_catalog`)
     is the union of registered playbooks and DB-created playbooks with versions.

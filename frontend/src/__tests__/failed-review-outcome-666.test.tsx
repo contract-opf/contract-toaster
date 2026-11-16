@@ -212,9 +212,9 @@ describe('#666 — surface 3: the retention hold picker', () => {
       expect(within(select).getAllByRole('option').length).toBeGreaterThan(1);
     });
     const optionFor = (id: string): HTMLOptionElement => {
-      const found = within(select).getAllByRole('option').find(
-        (option) => (option as HTMLOptionElement).value === id,
-      );
+      const found = within(select)
+        .getAllByRole('option')
+        .find((option) => (option as HTMLOptionElement).value === id);
       if (!found) {
         throw new Error(`no <option> was rendered for ${id}`);
       }

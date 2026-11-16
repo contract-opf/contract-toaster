@@ -92,7 +92,9 @@ class TestLegitimateReplacementTextNotFalsePositive(unittest.TestCase):
             "no-capital-expenditure obligations under Section 9."
         )
 
-        result = scanner.scan(text, field_name="proposed_replacement_text", is_replacement_text=True)
+        result = scanner.scan(
+            text, field_name="proposed_replacement_text", is_replacement_text=True
+        )
 
         self.assertFalse(result.blocked)
 
@@ -151,7 +153,9 @@ class TestGenuineLeakageStillBlocked(unittest.TestCase):
         scanner = ls.LeakageScanner(corpus)
         text = "This restores the no-cap position for indemnification purposes."
 
-        result = scanner.scan(text, field_name="proposed_replacement_text", is_replacement_text=True)
+        result = scanner.scan(
+            text, field_name="proposed_replacement_text", is_replacement_text=True
+        )
 
         self.assertTrue(result.blocked)
         self.assertEqual(result.category, ls.CATEGORY_PLAYBOOK)
@@ -196,7 +200,9 @@ class TestFromPlaybookCorpusWordBoundary(unittest.TestCase):
         scanner = ls.LeakageScanner(corpus)
         text = "The counterparty's no-capital-expenditure obligations remain unchanged."
 
-        result = scanner.scan(text, field_name="proposed_replacement_text", is_replacement_text=True)
+        result = scanner.scan(
+            text, field_name="proposed_replacement_text", is_replacement_text=True
+        )
 
         self.assertFalse(result.blocked)
 

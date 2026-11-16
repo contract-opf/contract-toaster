@@ -257,10 +257,7 @@ def _check_size(file_bytes: bytes) -> None:
     if len(file_bytes) > MAX_UPLOAD_SIZE_BYTES:
         raise HostileFileError(
             reason_code="file_too_large",
-            detail=(
-                f"Upload exceeds the maximum allowed size of "
-                f"{MAX_UPLOAD_SIZE_BYTES} bytes."
-            ),
+            detail=(f"Upload exceeds the maximum allowed size of {MAX_UPLOAD_SIZE_BYTES} bytes."),
             http_status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
         )
 
@@ -564,6 +561,7 @@ def _parse_xml_hardened(
     # though StartDoctypeDeclHandler already aborts parsing on a DOCTYPE).
     parser.ExternalEntityRefHandler = lambda *a, **k: 0  # 0 == fail per expat API
     if start_element is not None:
+
         def _on_start(name: str, attrs: dict[str, str]) -> None:
             if saw_doctype_or_entity["flag"]:
                 return
@@ -1092,9 +1090,7 @@ def run_upload_gauntlet(
         # Only reopens the archive (from the sanitized bytes) when a
         # sanitization record was actually produced — the no-op path never
         # pays for a second zip open.
-        file_bytes, sanitization_records = _sanitize_attached_template_relationships(
-            file_bytes, zf
-        )
+        file_bytes, sanitization_records = _sanitize_attached_template_relationships(file_bytes, zf)
         if sanitization_records:
             zf = _open_zip_or_reject(file_bytes)
 

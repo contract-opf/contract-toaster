@@ -69,7 +69,10 @@ const PREFERENCES = { preferences: { notes_mode: 'external' }, notes_mode_availa
  * for — a screen that renders the wrong payload's fields.
  */
 function stubRoutes(
-  responses: Record<string, { status: number; body: unknown } | { status: number; body: unknown }[]>,
+  responses: Record<
+    string,
+    { status: number; body: unknown } | { status: number; body: unknown }[]
+  >,
 ): ReturnType<typeof vi.fn> {
   const counts: Record<string, number> = {};
   // eslint-disable-next-line @typescript-eslint/require-await
@@ -286,9 +289,9 @@ describe('the Settings panel renders the inventory (#651)', () => {
 
     const row = await screen.findByTestId('secret-rotation-session-signing-secret');
     expect(row).toHaveTextContent(/signed out/i);
-    expect(await screen.findByTestId('secret-fingerprint-session-signing-secret')).toHaveTextContent(
-      '—',
-    );
+    expect(
+      await screen.findByTestId('secret-fingerprint-session-signing-secret'),
+    ).toHaveTextContent('—');
   });
 
   it('offers NO control — the inventory reads, it never rotates', async () => {
@@ -325,7 +328,10 @@ describe('the Settings panel renders the inventory (#651)', () => {
       '/api/me/preferences': { status: 200, body: PREFERENCES },
       '/api/admin/model-key': [
         { status: 500, body: { detail: 'boom' } },
-        { status: 200, body: keySettings({ key_set: true, key_source: 'admin', key_fingerprint: 'a1b2c3d4' }) },
+        {
+          status: 200,
+          body: keySettings({ key_set: true, key_source: 'admin', key_fingerprint: 'a1b2c3d4' }),
+        },
       ],
     });
 

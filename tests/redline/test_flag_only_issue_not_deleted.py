@@ -62,16 +62,11 @@ def _import_redline_generate():
 
         return rg, None
     except ImportError as exc:
-        return None, (
-            f"MISSING: scripts/redline_generate.py does not import ({exc})."
-        )
+        return None, (f"MISSING: scripts/redline_generate.py does not import ({exc}).")
 
 
 _SEC4_TEXT = "Counterparty may assign this Agreement without prior written consent."
-_SEC8_TEXT = (
-    "Each party's aggregate liability under this Agreement shall not "
-    "exceed $150,000."
-)
+_SEC8_TEXT = "Each party's aggregate liability under this Agreement shall not exceed $150,000."
 
 
 def _make_issue(
@@ -264,8 +259,7 @@ def main() -> int:
                 doc_root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
 
                 del_texts = {
-                    (el.text or "")
-                    for el in doc_root.findall(f".//{_qn('del')}//{_qn('delText')}")
+                    (el.text or "") for el in doc_root.findall(f".//{_qn('del')}//{_qn('delText')}")
                 }
                 if _SEC4_TEXT in del_texts:
                     failures.append(
@@ -279,7 +273,11 @@ def main() -> int:
                 # <w:r><w:t> run structure with no del/ins sibling.
                 paragraphs = [p for p in doc_root.find(_qn("body")) if p.tag == _qn("p")]
                 sec4_paragraph = next(
-                    (p for p in paragraphs if _SEC4_TEXT in "".join(t.text or "" for t in p.findall(f".//{_qn('t')}"))),
+                    (
+                        p
+                        for p in paragraphs
+                        if _SEC4_TEXT in "".join(t.text or "" for t in p.findall(f".//{_qn('t')}"))
+                    ),
                     None,
                 )
                 if sec4_paragraph is None:
@@ -295,9 +293,7 @@ def main() -> int:
                 # still lands as a normal <w:ins>/<w:del> pair.
                 all_text = "".join(
                     (t.text or "") for t in doc_root.findall(f".//{_qn('t')}")
-                ) + "".join(
-                    (t.text or "") for t in doc_root.findall(f".//{_qn('delText')}")
-                )
+                ) + "".join((t.text or "") for t in doc_root.findall(f".//{_qn('delText')}"))
                 if "is uncapped" not in all_text:
                     failures.append(
                         "[6] The ordinary replacement-bearing issue (sec-8) "

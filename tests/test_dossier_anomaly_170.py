@@ -130,9 +130,7 @@ from test_hard_ledger import (  # noqa: E402
 from test_review_spine import _body_p, _build_docx_bytes, _heading_p, _load_bundle  # noqa: E402
 
 REVIEW_ID = "00000000-0000-4000-a000-000000000170"
-VECTOR_008 = (
-    opf_load.OPF_CONFORMANCE_VECTORS_DIR / "008-hard-rules-and-dossiers.json"
-)
+VECTOR_008 = opf_load.OPF_CONFORMANCE_VECTORS_DIR / "008-hard-rules-and-dossiers.json"
 
 CONFIDENTIALITY_CLAUSE = "clause.confidentiality"
 #: A non-presence rule with a numeric bound the fixture's Confidentiality
@@ -146,7 +144,12 @@ LEDGER_CLAUSE_RULE = "indemnity-cap-phrase"
 
 
 def _bound_condition(maximum: int) -> dict[str, Any]:
-    return {"type": "numeric_bound", "pattern": r"\(([0-9]+)\) years", "max": maximum, "unit": "years"}
+    return {
+        "type": "numeric_bound",
+        "pattern": r"\(([0-9]+)\) years",
+        "max": maximum,
+        "unit": "years",
+    }
 
 
 def _rule(
@@ -306,7 +309,9 @@ def _vector_block_map(term_text: str) -> dict[str, Any]:
 def test_the_engines_term_cap_fires_and_selects_in_the_stable_order() -> None:
     doc = _vector_doc()
     (term_cap,) = [r for r in doc["manifest"]["hard_rules"] if r["rule_id"] == "term-cap"]
-    assert term_cap["required_presence"] is False and term_cap["condition"]["type"] == "numeric_bound"
+    assert (
+        term_cap["required_presence"] is False and term_cap["condition"]["type"] == "numeric_bound"
+    )
 
     over = _vector_block_map("This Agreement continues for 7 years.")
     within = _vector_block_map("This Agreement continues for 3 years.")
@@ -384,7 +389,9 @@ def test_only_a_present_clause_whose_predicate_fails_fires() -> None:
     long_clause = "The receiving party keeps its records of disclosure. " * 400
     assert len(CONFIDENTIALITY) + len(long_clause) > hl.MAX_CLAUSE_CHARS
     too_long = _block_map(_docx(with_indemnity=True, extra=(("Confidentiality", long_clause),)))
-    assert ANOMALY_RULE not in hl.anomaly_rule_ids(doc, too_long), hl.anomaly_rule_ids(doc, too_long)
+    assert ANOMALY_RULE not in hl.anomaly_rule_ids(doc, too_long), hl.anomaly_rule_ids(
+        doc, too_long
+    )
     assert "governing-law-delaware" in hl.anomaly_rule_ids(doc, too_long)
     # No manifest, or no block map: nothing to check, nothing fires.
     no_manifest = copy.deepcopy(doc)
@@ -439,7 +446,9 @@ def test_a_clause_the_ledger_and_an_anomaly_both_name_is_the_ledgers_end_to_end(
     fired = hl.anomaly_rule_ids(doc, _block_map(docx_bytes))
     assert fired == [ANOMALY_RULE, LEDGER_CLAUSE_RULE], fired
     assert RULE_ID not in fired, "the presence rule is the ledger's, never an anomaly"
-    assert [(e["rule_id"], e["clause_id"]) for e in hl.build_ledger(doc)] == [(RULE_ID, RULE_B_CLAUSE)]
+    assert [(e["rule_id"], e["clause_id"]) for e in hl.build_ledger(doc)] == [
+        (RULE_ID, RULE_B_CLAUSE)
+    ]
 
     result, client, model_calls_at_check = _run(
         [_governing_law_issue()],
@@ -452,7 +461,9 @@ def test_a_clause_the_ledger_and_an_anomaly_both_name_is_the_ledgers_end_to_end(
 
     lines = _dossier_lines(_critic_call(client)["user_prompt"])
     sent = [json.loads(line)["clause_id"] for line in lines]
-    assert sent == [RULE_B_CLAUSE, CONFIDENTIALITY_CLAUSE, RULE_A_CLAUSE], sent  # ledger, anomaly, reviewer
+    assert sent == [RULE_B_CLAUSE, CONFIDENTIALITY_CLAUSE, RULE_A_CLAUSE], (
+        sent
+    )  # ledger, anomaly, reviewer
     assert sent.count(RULE_B_CLAUSE) == 1, sent
     for line, clause_id in zip(lines, sent, strict=True):
         assert line == opf_canonicalize.canonicalize(doc["dossiers"][clause_id]), clause_id
@@ -480,7 +491,10 @@ def test_the_order_is_ledger_then_anomaly_then_reviewer() -> None:
     # A clause the ledger already selected stays the ledger's, once.
     both = cd.select_dossiers(doc, json.loads(_reviewer([])), ledger, anomaly_rule_ids=fired)
     assert both.clause_ids == (RULE_B_CLAUSE, CONFIDENTIALITY_CLAUSE), both.clause_ids
-    assert both.sources == {RULE_B_CLAUSE: cd.SOURCE_LEDGER, CONFIDENTIALITY_CLAUSE: cd.SOURCE_ANOMALY}
+    assert both.sources == {
+        RULE_B_CLAUSE: cd.SOURCE_LEDGER,
+        CONFIDENTIALITY_CLAUSE: cd.SOURCE_ANOMALY,
+    }
 
     # A clause both an anomaly and the reviewer name is the anomaly's.
     shared = cd.select_dossiers(

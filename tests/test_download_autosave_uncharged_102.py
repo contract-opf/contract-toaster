@@ -15,6 +15,7 @@ the uncharged, unaudited path, and is usable at most ONCE per review
 (`autosave_presigned_at` conditional write on the review row), so it cannot
 become a free unlimited download.
 """
+
 from __future__ import annotations
 
 import os
@@ -112,9 +113,7 @@ class TestAutosaveIsNotAFreeUnlimitedDownload(AutosaveBase):
     def test_non_owner_cannot_use_autosave(self) -> None:
         self._seed("rev-idor")
         self._authenticate_as("someone-else")
-        self.assertEqual(
-            self.client.get(ROUTE.format("rev-idor") + "?autosave=1").status_code, 403
-        )
+        self.assertEqual(self.client.get(ROUTE.format("rev-idor") + "?autosave=1").status_code, 403)
         row = self._reviews_table().get_item(Key={"review_id": "rev-idor"})["Item"]
         self.assertNotIn("autosave_presigned_at", row)
 

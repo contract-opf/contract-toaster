@@ -368,7 +368,9 @@ def _splice_reject_all(el: ET.Element, owned_ids: Optional[set]) -> None:  # noq
 
 
 def materialize_reject_all(
-    docx_bytes: bytes, *, revision_ids: Optional[Iterable[int]] = None  # noqa: UP045
+    docx_bytes: bytes,
+    *,
+    revision_ids: Optional[Iterable[int]] = None,  # noqa: UP045
 ) -> bytes:
     """Physically REJECT the tracked changes named by `revision_ids` (or every
     one of them, when `revision_ids is None`) in `word/document.xml`.
@@ -405,9 +407,7 @@ def materialize_reject_all(
     serialized = ET.tostring(root, encoding="unicode")
     auto_root_open_tag = ooxml_util.root_open_tag(serialized)
     body_and_close = serialized[len(auto_root_open_tag) :]
-    root_open_tag = ooxml_util.merge_hoisted_namespaces(
-        original_root_open_tag, auto_root_open_tag
-    )
+    root_open_tag = ooxml_util.merge_hoisted_namespaces(original_root_open_tag, auto_root_open_tag)
     new_document_xml = (
         b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
         + root_open_tag.encode("utf-8")
@@ -417,11 +417,7 @@ def materialize_reject_all(
     out_buf = io.BytesIO()
     with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as zf_out:
         for info in infos:
-            data = (
-                new_document_xml
-                if info.filename == DOCUMENT_PART
-                else originals[info.filename]
-            )
+            data = new_document_xml if info.filename == DOCUMENT_PART else originals[info.filename]
             zf_out.writestr(info, data)
     return out_buf.getvalue()
 
@@ -448,8 +444,7 @@ def _block_texts(norm: dict[str, Any]) -> list[tuple[str, str]]:
     use `_block_headings_and_texts` instead.
     """
     return [
-        (paragraph["block_id"], paragraph.get("text", "") or "")
-        for paragraph in norm["paragraphs"]
+        (paragraph["block_id"], paragraph.get("text", "") or "") for paragraph in norm["paragraphs"]
     ]
 
 
@@ -518,8 +513,8 @@ def _first_divergence(expected: str, actual: str) -> str:
     start = max(0, offset - _CONTEXT_CHARS // 2)
     return (
         f"first divergence at character {offset}: "
-        f"expected ...{expected[start:offset + _CONTEXT_CHARS]!r}... "
-        f"but the projection reads ...{actual[start:offset + _CONTEXT_CHARS]!r}..."
+        f"expected ...{expected[start : offset + _CONTEXT_CHARS]!r}... "
+        f"but the projection reads ...{actual[start : offset + _CONTEXT_CHARS]!r}..."
     )
 
 
@@ -534,15 +529,12 @@ def _verify_reject_all(
     revision_ids: Optional[Iterable[int]],  # noqa: UP045
 ) -> list[dict[str, Any]]:
     try:
-        projected_bytes = materialize_reject_all(
-            output_docx_bytes, revision_ids=revision_ids
-        )
+        projected_bytes = materialize_reject_all(output_docx_bytes, revision_ids=revision_ids)
     except Exception as exc:  # noqa: BLE001 - any failure here is fail-closed
         return [
             _failure(
                 PROOF_REJECT_ALL,
-                f"the reject-all projection could not be built: "
-                f"{type(exc).__name__}: {exc}",
+                f"the reject-all projection could not be built: {type(exc).__name__}: {exc}",
             )
         ]
 
@@ -579,8 +571,7 @@ def _verify_reject_all(
             failures.append(
                 _failure(
                     PROOF_REJECT_ALL,
-                    f"... and further mismatches after block {expected_block_id!r} "
-                    "(truncated)",
+                    f"... and further mismatches after block {expected_block_id!r} (truncated)",
                 )
             )
             break
@@ -783,9 +774,7 @@ def _expected_accept_all_texts(
             live = block_map.get(block_id)
             if live is None:  # pragma: no cover - defensive
                 continue
-            final_text_by_block[block_id] = _apply_edit_tuples(
-                live.get("text", "") or "", tuples
-            )
+            final_text_by_block[block_id] = _apply_edit_tuples(live.get("text", "") or "", tuples)
 
     expected: list[str] = []
     expected.extend(inserts_by_anchor.get(ANCHOR_START, []))
@@ -818,15 +807,12 @@ def _verify_accept_all(
     applied_edits: Optional[list[dict[str, Any]]],  # noqa: UP045
 ) -> list[dict[str, Any]]:
     try:
-        projected_bytes = extraction_normalization_stage.materialize_accept_all(
-            output_docx_bytes
-        )
+        projected_bytes = extraction_normalization_stage.materialize_accept_all(output_docx_bytes)
     except Exception as exc:  # noqa: BLE001 - any failure here is fail-closed
         return [
             _failure(
                 PROOF_ACCEPT_ALL,
-                f"the accept-all projection could not be built: "
-                f"{type(exc).__name__}: {exc}",
+                f"the accept-all projection could not be built: {type(exc).__name__}: {exc}",
             )
         ]
 
@@ -935,9 +921,7 @@ def _canonical_header_footer_part(data: bytes) -> Any:
     except Exception:  # noqa: BLE001 - not XML (or not decodable): fall back
         return _canonical_part(data)
     _fold_attribute_whitespace(root)
-    return ET.canonicalize(
-        xml_data=ET.tostring(root, encoding="unicode"), strip_text=True
-    )
+    return ET.canonicalize(xml_data=ET.tostring(root, encoding="unicode"), strip_text=True)
 
 
 def _settings_without_rsids(data: bytes) -> tuple[str, list[str]]:
@@ -957,15 +941,11 @@ def _settings_without_rsids(data: bytes) -> tuple[str, list[str]]:
                 continue
             values.append(child.get(_VAL_ATTR) or "")
             rsids.remove(child)
-    remainder = ET.canonicalize(
-        xml_data=ET.tostring(root, encoding="unicode"), strip_text=True
-    )
+    remainder = ET.canonicalize(xml_data=ET.tostring(root, encoding="unicode"), strip_text=True)
     return remainder, values
 
 
-def _verify_settings_rsids_only(
-    source: bytes, output: bytes
-) -> list[dict[str, Any]]:
+def _verify_settings_rsids_only(source: bytes, output: bytes) -> list[dict[str, Any]]:
     """Proof 3's narrower rule for `word/settings.xml` (see the allowlist
     comment): the ONLY difference permitted is one or more appended
     `<w:rsid>`; everything else in the part must be canonically identical.
@@ -1036,9 +1016,7 @@ def _styles_split(data: Optional[bytes]) -> tuple[str, dict[str, str]]:  # noqa:
             xml_data=ET.tostring(style, encoding="unicode"), strip_text=True
         )
         root.remove(style)
-    remainder = ET.canonicalize(
-        xml_data=ET.tostring(root, encoding="unicode"), strip_text=True
-    )
+    remainder = ET.canonicalize(xml_data=ET.tostring(root, encoding="unicode"), strip_text=True)
     return remainder, styles
 
 
@@ -1054,7 +1032,8 @@ def _canonical_footnote_styles() -> dict[str, str]:
 
 
 def _verify_styles_footnote_additions_only(
-    source: Optional[bytes], output: bytes  # noqa: UP045
+    source: Optional[bytes],  # noqa: UP045
+    output: bytes,
 ) -> list[dict[str, Any]]:
     """Proof 3's narrower rule for `word/styles.xml` (see the allowlist
     comment): the ONLY difference permitted is the APPEARANCE of the two
@@ -1075,8 +1054,7 @@ def _verify_styles_footnote_additions_only(
         return [
             _failure(
                 PROOF_PART_ALLOWLIST,
-                f"package part {STYLES_PART!r} could not be compared: "
-                f"{type(exc).__name__}: {exc}",
+                f"package part {STYLES_PART!r} could not be compared: {type(exc).__name__}: {exc}",
                 part=STYLES_PART,
             )
         ]
@@ -1158,16 +1136,13 @@ def _verify_part_allowlist(
         if name == STYLES_PART:
             # Created for a package that carried none: held to the same
             # content rule as an appended-to one, against an empty source.
-            failures.extend(
-                _verify_styles_footnote_additions_only(None, output_parts[name])
-            )
+            failures.extend(_verify_styles_footnote_additions_only(None, output_parts[name]))
             continue
         if name not in ALLOWED_CHANGED_PARTS:
             failures.append(
                 _failure(
                     PROOF_PART_ALLOWLIST,
-                    f"the redline added package part {name!r}, which no redline may "
-                    "write",
+                    f"the redline added package part {name!r}, which no redline may write",
                     part=name,
                 )
             )
@@ -1176,22 +1151,17 @@ def _verify_part_allowlist(
             failures.append(
                 _failure(
                     PROOF_PART_ALLOWLIST,
-                    f"the redline dropped package part {name!r}, which no redline may "
-                    "remove",
+                    f"the redline dropped package part {name!r}, which no redline may remove",
                     part=name,
                 )
             )
     for name in sorted(set(source_parts) & set(output_parts)):
         if name == SETTINGS_PART:
-            failures.extend(
-                _verify_settings_rsids_only(source_parts[name], output_parts[name])
-            )
+            failures.extend(_verify_settings_rsids_only(source_parts[name], output_parts[name]))
             continue
         if name == STYLES_PART:
             failures.extend(
-                _verify_styles_footnote_additions_only(
-                    source_parts[name], output_parts[name]
-                )
+                _verify_styles_footnote_additions_only(source_parts[name], output_parts[name])
             )
             continue
         if name in ALLOWED_CHANGED_PARTS:
@@ -1199,9 +1169,9 @@ def _verify_part_allowlist(
         if source_parts[name] == output_parts[name]:
             continue
         if _OTHER_HEADER_FOOTER_PART_RE.match(name):
-            if _canonical_header_footer_part(
-                source_parts[name]
-            ) == _canonical_header_footer_part(output_parts[name]):
+            if _canonical_header_footer_part(source_parts[name]) == _canonical_header_footer_part(
+                output_parts[name]
+            ):
                 continue
             failures.append(
                 _failure(
@@ -1218,8 +1188,7 @@ def _verify_part_allowlist(
         failures.append(
             _failure(
                 PROOF_PART_ALLOWLIST,
-                f"package part {name!r} changed, and it is not a part a redline may "
-                "touch",
+                f"package part {name!r} changed, and it is not a part a redline may touch",
                 part=name,
             )
         )
@@ -1279,9 +1248,7 @@ def verify_projections(
 
     failures.extend(_verify_reject_all(source_norm, output_docx_bytes, revision_ids))
     failures.extend(
-        _verify_accept_all(
-            input_docx_bytes, source_norm, output_docx_bytes, proven, applied_edits
-        )
+        _verify_accept_all(input_docx_bytes, source_norm, output_docx_bytes, proven, applied_edits)
     )
 
     return {

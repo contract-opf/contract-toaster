@@ -82,7 +82,9 @@ def check_1_empty_posture_never_composes_an_empty_block() -> list[str]:
     failures = []
     doc = _load(REAL_SHAPE_FIXTURE)
     if doc.get("posture") != {}:
-        failures.append("  [1] fixture precondition broken: real-shape fixture must ship posture == {}")
+        failures.append(
+            "  [1] fixture precondition broken: real-shape fixture must ship posture == {}"
+        )
         return failures
 
     blocks = opf_prompt.compose_opf_system_blocks(doc, policy=_policy())
@@ -273,11 +275,27 @@ def check_5_content_hash_covers_composed_blocks() -> list[str]:
 
 def main() -> int:
     checks = [
-        ("1", "empty posture composes no empty-string block", check_1_empty_posture_never_composes_an_empty_block),
-        ("2", "posture AND policy both empty -> refuse unless accepted", check_2_empty_posture_with_no_policy_refuses_unless_accepted),
-        ("3", "empty posture + policy -> refuse unless accepted", check_3_refuses_empty_posture_with_policy_unless_accepted),
+        (
+            "1",
+            "empty posture composes no empty-string block",
+            check_1_empty_posture_never_composes_an_empty_block,
+        ),
+        (
+            "2",
+            "posture AND policy both empty -> refuse unless accepted",
+            check_2_empty_posture_with_no_policy_refuses_unless_accepted,
+        ),
+        (
+            "3",
+            "empty posture + policy -> refuse unless accepted",
+            check_3_refuses_empty_posture_with_policy_unless_accepted,
+        ),
         ("4", "every escape writes a positive record", check_4_every_escape_writes_a_record),
-        ("5", "content_hash covers the composed blocks", check_5_content_hash_covers_composed_blocks),
+        (
+            "5",
+            "content_hash covers the composed blocks",
+            check_5_content_hash_covers_composed_blocks,
+        ),
     ]
 
     overall_pass = True

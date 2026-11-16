@@ -111,12 +111,8 @@ describe('ESLint gate (issue #65)', () => {
 
   it('ignores the vendored Orbit Diner drop and lints our compiled copy', async () => {
     const eslint = makeESLint();
-    await expect(
-      eslint.isPathIgnored('vendor/orbit-diner/src/OrbitDiner.tsx'),
-    ).resolves.toBe(true);
-    await expect(eslint.isPathIgnored('src/orbit-diner/OrbitDiner.tsx')).resolves.toBe(
-      false,
-    );
+    await expect(eslint.isPathIgnored('vendor/orbit-diner/src/OrbitDiner.tsx')).resolves.toBe(true);
+    await expect(eslint.isPathIgnored('src/orbit-diner/OrbitDiner.tsx')).resolves.toBe(false);
   });
 
   it('turns red on a newly introduced unused variable', async () => {
@@ -138,9 +134,7 @@ describe('ESLint gate (issue #65)', () => {
       fs.writeFileSync(probe, dirty, 'utf8');
       const after = await makeESLint().lintFiles([probe]);
       expect(after[0].errorCount).toBeGreaterThan(0);
-      expect(after[0].messages.map((m) => m.ruleId)).toContain(
-        '@typescript-eslint/no-unused-vars',
-      );
+      expect(after[0].messages.map((m) => m.ruleId)).toContain('@typescript-eslint/no-unused-vars');
       // A parse error would also raise errorCount; make sure it was the rule.
       expect(after[0].fatalErrorCount).toBe(0);
     } finally {
@@ -149,9 +143,10 @@ describe('ESLint gate (issue #65)', () => {
   });
 
   it('has a lint script, the required dev dependencies, and no stray probe file', () => {
-    const pkg = JSON.parse(
-      fs.readFileSync(path.join(FRONTEND_ROOT, 'package.json'), 'utf8'),
-    ) as { scripts: Record<string, string>; devDependencies: Record<string, string> };
+    const pkg = JSON.parse(fs.readFileSync(path.join(FRONTEND_ROOT, 'package.json'), 'utf8')) as {
+      scripts: Record<string, string>;
+      devDependencies: Record<string, string>;
+    };
 
     expect(pkg.scripts.lint).toContain('eslint');
     expect(pkg.scripts.typecheck).toBeTruthy();
@@ -167,9 +162,7 @@ describe('ESLint gate (issue #65)', () => {
 
     // The probe above removes itself in `finally`; a leftover would fail
     // `npm run typecheck` for a reason nobody could place.
-    expect(fs.existsSync(path.join(FRONTEND_ROOT, 'src', 'eslintRatchetProbe65.ts'))).toBe(
-      false,
-    );
+    expect(fs.existsSync(path.join(FRONTEND_ROOT, 'src', 'eslintRatchetProbe65.ts'))).toBe(false);
   });
 
   it('carries a real eslint-disable baseline, and gates on errors not warnings', () => {
@@ -200,9 +193,9 @@ describe('ESLint gate (issue #65)', () => {
     // raise nothing here, delete annotations instead.
     expect(annotated.length).toBeGreaterThan(50);
 
-    const pkg = JSON.parse(
-      fs.readFileSync(path.join(FRONTEND_ROOT, 'package.json'), 'utf8'),
-    ) as { scripts: Record<string, string> };
+    const pkg = JSON.parse(fs.readFileSync(path.join(FRONTEND_ROOT, 'package.json'), 'utf8')) as {
+      scripts: Record<string, string>;
+    };
     // `eslint .`, with no `--max-warnings`: errors gate, warnings stay visible.
     // See this file's header for why that trade-off is the one wanted.
     expect(pkg.scripts.lint).not.toContain('--max-warnings');

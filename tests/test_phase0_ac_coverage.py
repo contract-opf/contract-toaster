@@ -148,10 +148,7 @@ def main() -> int:
     print()
 
     if failures:
-        print(
-            f"FAIL: {len(failures)} sentinel(s) not found in "
-            f"docs/phase-0-issues.md.\n"
-        )
+        print(f"FAIL: {len(failures)} sentinel(s) not found in docs/phase-0-issues.md.\n")
         for sentinel, description, hint in failures:
             print(f"  Missing: {description!r}")
             print(f"  Hint   : {hint}")

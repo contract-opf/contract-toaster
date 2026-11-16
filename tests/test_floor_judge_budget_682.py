@@ -85,6 +85,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import sys
 import zipfile
 from pathlib import Path
@@ -238,9 +239,7 @@ def test_default_budget_is_sized_from_the_response_contract(failures: list[str])
 
     # [1a] The largest verdict this module's OWN validator will accept has to
     # fit, with room to spare -- that is the content half of the budget.
-    largest_verdict = _verdict(
-        "i" * 120, True, "q" * floor_judge._EVIDENCE_QUOTE_MAX_CHARS
-    )
+    largest_verdict = _verdict("i" * 120, True, "q" * floor_judge._EVIDENCE_QUOTE_MAX_CHARS)
     is_valid, _parsed = floor_judge._validate_judge_response(
         largest_verdict, expected_invariant_id="i" * 120
     )
@@ -507,8 +506,7 @@ def test_the_caller_can_still_override_the_budget(failures: list[str]) -> None:
     )
     if client.budgets != [7777]:
         failures.append(
-            f"[6a] the caller's explicit budget did not reach the client: "
-            f"{client.budgets!r}"
+            f"[6a] the caller's explicit budget did not reach the client: {client.budgets!r}"
         )
 
 
@@ -699,25 +697,18 @@ def _reason_explanations() -> dict[str, tuple[str, str]]:
     if len(parts) != 2:
         raise AssertionError(f"REASON_EXPLANATIONS not found in {FRONTEND_REVIEW_SUBMISSION}")
     block = parts[1].split("const STAGE_EXPLANATIONS", 1)[0]
+    # Layout-independent on purpose (issue #90): Prettier is enforced now, and it
+    # moves a long string value onto the line after its key, so reading this
+    # source line by line broke on a pure re-layout. Match each
+    # `token: { cause: '...', fix: '...',` across whitespace instead; a comment
+    # line starts with `//`, so it cannot match.
     entries: dict[str, tuple[str, str]] = {}
-    current: str | None = None
-    cause: str | None = None
-    for line in block.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("//"):
-            continue
-        if stripped.endswith(": {"):
-            current = stripped[: -len(": {")]
-            cause = None
-            continue
-        if current is None:
-            continue
-        if stripped.startswith("cause: '"):
-            cause = stripped[len("cause: '") :].rstrip(",").rstrip("'")
-        elif stripped.startswith("fix: '") and cause is not None:
-            entries[current] = (cause, stripped[len("fix: '") :].rstrip(",").rstrip("'"))
-            current = None
-            cause = None
+    pattern = (
+        r"^[ \t]*(\w+):\s*\{\s*cause:\s*'((?:[^'\\\n]|\\.)*)',"
+        r"\s*fix:\s*'((?:[^'\\\n]|\\.)*)',"
+    )
+    for match in re.finditer(pattern, block, re.M):
+        entries[match.group(1)] = (match.group(2), match.group(3))
     return entries
 
 
@@ -766,8 +757,7 @@ def test_a_truncated_floor_judge_reaches_the_operator(failures: list[str]) -> No
     # fail-closed coverage gate.
     if floor_judgment.get("unjudged") != [_FIXTURE_INVARIANT_ID]:
         failures.append(
-            f"[7c] the truncated invariant left `unjudged`: "
-            f"{floor_judgment.get('unjudged')!r}"
+            f"[7c] the truncated invariant left `unjudged`: {floor_judgment.get('unjudged')!r}"
         )
     if result.get("status") != "ERROR" or result.get("decision") is not None:
         failures.append(
@@ -827,8 +817,10 @@ def test_a_truncated_floor_judge_reaches_the_operator(failures: list[str]) -> No
             )
     truncated_copy = explanations.get(review_spine.REASON_FLOOR_INVARIANT_TRUNCATED)
     unjudged_copy = explanations.get(review_spine.REASON_FLOOR_INVARIANT_UNJUDGED)
-    if truncated_copy is not None and unjudged_copy is not None and (
-        truncated_copy[1] == unjudged_copy[1]
+    if (
+        truncated_copy is not None
+        and unjudged_copy is not None
+        and (truncated_copy[1] == unjudged_copy[1])
     ):
         failures.append(
             "[7f] both floor terminals render the SAME fix text, so the "

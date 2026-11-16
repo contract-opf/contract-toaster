@@ -152,18 +152,14 @@ class TestDdbFixturesCdkParity(unittest.TestCase):
             with self.subTest(table=marker):
                 cdk_resource = self.cdk_tables[marker]
                 cdk_gsis = _normalize(
-                    cdk_resource.get("Properties", {}).get(
-                        "GlobalSecondaryIndexes", []
-                    )
+                    cdk_resource.get("Properties", {}).get("GlobalSecondaryIndexes", [])
                 )
 
                 table = builder(self.ddb, table_name=f"parity{marker}test")
                 # Round-trip through DescribeTable: this is what the table
                 # really has, not what the fixture asked for.
                 described = table.meta.client.describe_table(TableName=table.name)
-                fixture_gsis = _normalize(
-                    described["Table"].get("GlobalSecondaryIndexes", [])
-                )
+                fixture_gsis = _normalize(described["Table"].get("GlobalSecondaryIndexes", []))
 
                 self.assertEqual(
                     fixture_gsis,
@@ -182,9 +178,7 @@ class TestDdbFixturesCdkParity(unittest.TestCase):
             with self.subTest(table=marker):
                 cdk_keys = [
                     {"AttributeName": k["AttributeName"], "KeyType": k["KeyType"]}
-                    for k in self.cdk_tables[marker]
-                    .get("Properties", {})
-                    .get("KeySchema", [])
+                    for k in self.cdk_tables[marker].get("Properties", {}).get("KeySchema", [])
                 ]
                 table = builder(self.ddb, table_name=f"paritykeys{marker}test")
                 described = table.meta.client.describe_table(TableName=table.name)

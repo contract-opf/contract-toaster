@@ -188,9 +188,7 @@ class FakeTable:
     def put_item(self, Item, ConditionExpression=None):
         key = Item[self.key_name]
         if ConditionExpression == "attribute_not_exists(idempotency_key)" and key in self.items:
-            raise ClientError(
-                {"Error": {"Code": "ConditionalCheckFailedException"}}, "PutItem"
-            )
+            raise ClientError({"Error": {"Code": "ConditionalCheckFailedException"}}, "PutItem")
         self.items[key] = dict(Item)
 
     def scan(self, Limit=None, ExclusiveStartKey=None):  # noqa: N803 - boto3 kwarg names
@@ -332,7 +330,9 @@ class FakeSfnClient:
         if name in self.started_names:
             raise self.exceptions.ExecutionAlreadyExists()
         self.started_names.add(name)
-        return {"executionArn": f"{stateMachineArn.replace(':stateMachine:', ':execution:')}:{name}"}
+        return {
+            "executionArn": f"{stateMachineArn.replace(':stateMachine:', ':execution:')}:{name}"
+        }
 
 
 class FakeUsersDynamoDBClient:
@@ -418,12 +418,12 @@ class ReviewApiTestBase(unittest.TestCase):
         self.app.dependency_overrides[review_routes.get_dynamodb_resource] = lambda: self.ddb
         self.app.dependency_overrides[review_routes.get_s3_client] = lambda: self.s3
         self.app.dependency_overrides[review_routes.get_sfn_client] = lambda: self.sfn
-        self.app.dependency_overrides[review_routes.get_dynamodb_client] = (
-            lambda: self.users_ddb_client
+        self.app.dependency_overrides[review_routes.get_dynamodb_client] = lambda: (
+            self.users_ddb_client
         )
         self.app.dependency_overrides[review_routes.get_env_name] = lambda: "dev"
-        self.app.dependency_overrides[review_routes.get_av_client] = (
-            lambda: review_routes.NullAvClient()
+        self.app.dependency_overrides[review_routes.get_av_client] = lambda: (
+            review_routes.NullAvClient()
         )
         self.client = TestClient(self.app)
 
@@ -456,8 +456,14 @@ class ReviewApiTestBase(unittest.TestCase):
         self.app.dependency_overrides[review_routes.get_active_user_row] = lambda: row
         return row
 
-    def _submit(self, owner_sub: str, *, body_text: str = "Hello", playbook_id: str = PLAYBOOK_ID,
-                idempotency_key: str | None = None):
+    def _submit(
+        self,
+        owner_sub: str,
+        *,
+        body_text: str = "Hello",
+        playbook_id: str = PLAYBOOK_ID,
+        idempotency_key: str | None = None,
+    ):
         self._authenticate_as(owner_sub)
         data = {"playbook_id": playbook_id}
         if idempotency_key is not None:
@@ -692,9 +698,7 @@ class TestResultPayloadSchema(ReviewApiTestBase):
         self.s3.put_object(
             Bucket=os.environ["OUTPUTS_BUCKET"],
             Key=analysis_key,
-            Body=json.dumps({"findings": findings, "critic_delta": critic_delta}).encode(
-                "utf-8"
-            ),
+            Body=json.dumps({"findings": findings, "critic_delta": critic_delta}).encode("utf-8"),
             ContentType="application/json",
         )
         self._reviews_table().items[review_id] = {
@@ -814,19 +818,19 @@ class TestDownloadAudit(ReviewApiTestBase):
         self.assertEqual(body["expires_in"], download_module.PRESIGNED_URL_TTL_SECONDS)
         self.assertGreater(download_module.PRESIGNED_URL_TTL_SECONDS, 0)
         self.assertLessEqual(
-            download_module.PRESIGNED_URL_TTL_SECONDS, 300,
+            download_module.PRESIGNED_URL_TTL_SECONDS,
+            300,
             "Presigned URL TTL must be short-lived so a leaked/expired URL fails quickly.",
         )
         self.assertEqual(resp.headers.get("cache-control"), "no-store")
 
         audit_items = list(self._audit_table().items.values())
         matching = [
-            i for i in audit_items
+            i
+            for i in audit_items
             if i.get("action") == "review_output_downloaded" and i.get("target") == review_id
         ]
-        self.assertEqual(
-            len(matching), 1, "Exactly one audit row for this successful download."
-        )
+        self.assertEqual(len(matching), 1, "Exactly one audit row for this successful download.")
         self.assertEqual(matching[0]["actor"], "owner-dl")
 
     def test_no_output_yet_is_404(self):
@@ -905,8 +909,9 @@ class TestRejectedUploadAuditHasNoFilename(ReviewApiTestBase):
         )
 
     def _assert_no_filename(self):
-        rows = [r for r in self._audit_table().items.values()
-                if r.get("action") == "upload_rejected"]
+        rows = [
+            r for r in self._audit_table().items.values() if r.get("action") == "upload_rejected"
+        ]
         self.assertEqual(len(rows), 1, rows)
         row = rows[0]
         flat = repr(row)
@@ -949,14 +954,22 @@ class TestListReviews(ReviewApiTestBase):
         table = self._reviews_table()
         table.put_item(
             Item={
-                "review_id": "r1", "owner_sub": "owner-list-a", "status": "DONE",
-                "playbook_id": PLAYBOOK_ID, "created_at": "1", "updated_at": "1",
+                "review_id": "r1",
+                "owner_sub": "owner-list-a",
+                "status": "DONE",
+                "playbook_id": PLAYBOOK_ID,
+                "created_at": "1",
+                "updated_at": "1",
             }
         )
         table.put_item(
             Item={
-                "review_id": "r2", "owner_sub": "owner-list-b", "status": "DONE",
-                "playbook_id": PLAYBOOK_ID, "created_at": "2", "updated_at": "2",
+                "review_id": "r2",
+                "owner_sub": "owner-list-b",
+                "status": "DONE",
+                "playbook_id": PLAYBOOK_ID,
+                "created_at": "2",
+                "updated_at": "2",
             }
         )
 

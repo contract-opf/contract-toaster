@@ -109,15 +109,13 @@ describe('#62 — the token resolves to its own explanation', () => {
     );
     // And still wins when a stage IS present — the reason is the specific
     // fact, the stage only says where the pipeline stopped (#442's order).
-    expect(
-      explainFailure({ reason: 'runner_restarted', failing_stage: 'run_review' }),
-    ).toEqual(REASON_EXPLANATIONS.runner_restarted);
+    expect(explainFailure({ reason: 'runner_restarted', failing_stage: 'run_review' })).toEqual(
+      REASON_EXPLANATIONS.runner_restarted,
+    );
     // Not a duplicate of a neighbouring token: "try again" is the right
     // advice for several of these, and a copy-paste would make the screen
     // useless for telling them apart.
-    expect(REASON_EXPLANATIONS.runner_restarted).not.toEqual(
-      REASON_EXPLANATIONS.model_timeout,
-    );
+    expect(REASON_EXPLANATIONS.runner_restarted).not.toEqual(REASON_EXPLANATIONS.model_timeout);
   });
 });
 

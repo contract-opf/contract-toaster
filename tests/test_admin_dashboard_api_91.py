@@ -103,9 +103,7 @@ os.environ.setdefault("AUDIT_TABLE", "contract-toaster-audit-dash252-test")
 os.environ.setdefault("REVIEWS_TABLE", "contract-toaster-reviews-dash252-test")
 os.environ.setdefault("DAILY_SPEND_TABLE", "contract-toaster-daily-spend-dash252-test")
 os.environ.setdefault("PLAYBOOKS_TABLE", "contract-toaster-playbooks-dash252-test")
-os.environ.setdefault(
-    "PLAYBOOK_VERSIONS_TABLE", "contract-toaster-playbook-versions-dash252-test"
-)
+os.environ.setdefault("PLAYBOOK_VERSIONS_TABLE", "contract-toaster-playbook-versions-dash252-test")
 os.environ.setdefault("DAILY_SPEND_CAP_USD_CENTS", "2000")
 os.environ.setdefault("PIPELINE_MAX_CONCURRENCY", "5")
 # The model-invocation ledger (#414) is OPTIONAL and is deliberately left
@@ -274,9 +272,7 @@ class AdminDashboardTestBase(unittest.TestCase):
         _put_user(self.users_table, TARGET_SUB, is_admin=False)
 
         self.client = TestClient(backend_main.app)
-        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = (
-            lambda: self.ddb
-        )
+        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = lambda: self.ddb
         self._authenticate_as(ADMIN_SUB)
 
     def tearDown(self) -> None:
@@ -409,9 +405,7 @@ class SpendLedgerTests(AdminDashboardTestBase):
         self.assertEqual(today["reserved_usd_cents"], 0)
         self.assertEqual(today["settled_usd_cents"], 0)
         self.assertEqual(today["outstanding_reservation_usd_cents"], 0)
-        self.assertEqual(
-            today["daily_cap_usd_cents"], int(os.environ["DAILY_SPEND_CAP_USD_CENTS"])
-        )
+        self.assertEqual(today["daily_cap_usd_cents"], int(os.environ["DAILY_SPEND_CAP_USD_CENTS"]))
 
     def test_preflight_only_day_never_reports_negative_outstanding(self) -> None:
         """Preflight (#491) / cover-note (#499) spend settles with no
@@ -521,13 +515,21 @@ class PipelineHealthTests(AdminDashboardTestBase):
             "r-fresh", status="RUNNING", created_at=str(now - 60), updated_at=str(now - 60)
         )
         self._put_review(
-            "r-stuck", status="PENDING", created_at=str(now - 5 * HOUR), updated_at=str(now - 5 * HOUR)
+            "r-stuck",
+            status="PENDING",
+            created_at=str(now - 5 * HOUR),
+            updated_at=str(now - 5 * HOUR),
         )
         self._put_review(
-            "r-stuck-2", status="RUNNING", created_at=str(now - 3 * HOUR), updated_at=str(now - 3 * HOUR)
+            "r-stuck-2",
+            status="RUNNING",
+            created_at=str(now - 3 * HOUR),
+            updated_at=str(now - 3 * HOUR),
         )
         body = self.client.get(HEALTH_ROUTE).json()
-        self.assertEqual(body["stale"]["threshold_seconds"], admin_dashboard.STALE_IN_FLIGHT_SECONDS_DEFAULT)
+        self.assertEqual(
+            body["stale"]["threshold_seconds"], admin_dashboard.STALE_IN_FLIGHT_SECONDS_DEFAULT
+        )
         self.assertEqual(body["stale"]["total"], 2)
         self.assertEqual(body["stale"]["pending"], 1)
         self.assertEqual(body["stale"]["running"], 1)
@@ -817,7 +819,9 @@ class ManualReviewQueueTests(AdminDashboardTestBase):
             self._put_review(
                 f"r-q-{i:03d}", status="ERROR", reason="document_too_large", created_at=str(now - i)
             )
-        self.assertEqual(len(self.client.get(MANUAL_REVIEW_ROUTE, params={"limit": 3}).json()["reviews"]), 3)
+        self.assertEqual(
+            len(self.client.get(MANUAL_REVIEW_ROUTE, params={"limit": 3}).json()["reviews"]), 3
+        )
         hostile = self.client.get(MANUAL_REVIEW_ROUTE, params={"limit": 100000}).json()
         self.assertEqual(len(hostile["reviews"]), admin_dashboard.MANUAL_REVIEW_MAX_LIMIT)
         # The count is still exact even when the list is truncated.
@@ -911,7 +915,9 @@ class ReleaseActivityTests(AdminDashboardTestBase):
             clone["timestamp"] = f"{epoch - i}#clone-{i:03d}"
             self.audit_table.put_item(Item=clone)
 
-        self.assertEqual(len(self.client.get(RELEASES_ROUTE, params={"limit": 1}).json()["releases"]), 1)
+        self.assertEqual(
+            len(self.client.get(RELEASES_ROUTE, params={"limit": 1}).json()["releases"]), 1
+        )
         hostile = self.client.get(RELEASES_ROUTE, params={"limit": 100000}).json()
         self.assertEqual(len(hostile["releases"]), admin_dashboard.RELEASE_ACTIVITY_MAX_LIMIT)
 
@@ -1089,9 +1095,9 @@ class ReleaseActivityTests(AdminDashboardTestBase):
             self._ledger_pass(ledger, f"r-capped-{i:02d}", "primary", 10_000, 1_000)
         admin_row = self.users_table.get_item(Key={"cognito_sub": ADMIN_SUB})["Item"]
 
-        capped = admin_dashboard.get_release_activity(
-            admin_row, self.ddb, outlier_sample_rows=4
-        )["cost_outliers"]
+        capped = admin_dashboard.get_release_activity(admin_row, self.ddb, outlier_sample_rows=4)[
+            "cost_outliers"
+        ]
         self.assertTrue(capped["available"])
         self.assertEqual(capped["sample_row_cap"], 4)
         self.assertIs(capped["truncated"], True)
@@ -1102,9 +1108,7 @@ class ReleaseActivityTests(AdminDashboardTestBase):
 
         # Same ledger under the default cap: nothing is cut, everything priced.
         whole = self.client.get(RELEASES_ROUTE).json()["cost_outliers"]
-        self.assertEqual(
-            whole["sample_row_cap"], admin_dashboard.COST_OUTLIER_LEDGER_ROWS_DEFAULT
-        )
+        self.assertEqual(whole["sample_row_cap"], admin_dashboard.COST_OUTLIER_LEDGER_ROWS_DEFAULT)
         self.assertIs(whole["truncated"], False)
         self.assertEqual(whole["sample_size"], 10)
 
@@ -1112,9 +1116,7 @@ class ReleaseActivityTests(AdminDashboardTestBase):
         hostile = admin_dashboard.get_release_activity(
             admin_row, self.ddb, outlier_sample_rows=10_000_000
         )["cost_outliers"]
-        self.assertEqual(
-            hostile["sample_row_cap"], admin_dashboard.COST_OUTLIER_LEDGER_ROWS_MAX
-        )
+        self.assertEqual(hostile["sample_row_cap"], admin_dashboard.COST_OUTLIER_LEDGER_ROWS_MAX)
 
     def test_nothing_is_flagged_below_the_minimum_sample(self) -> None:
         """With one review the median IS that review; a lone expensive

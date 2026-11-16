@@ -36,6 +36,7 @@ GC_TEAM = "@exos-legal/gc"
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
@@ -56,6 +57,7 @@ def _assert(condition: bool, label: str, detail: str = "") -> list[str]:
 # Check A — required root files
 # ---------------------------------------------------------------------------
 
+
 def check_a_root_files() -> list[str]:
     print("\nCheck A: required root files …")
     failures = []
@@ -72,6 +74,7 @@ def check_a_root_files() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check B — .github/ structure
 # ---------------------------------------------------------------------------
+
 
 def check_b_github_structure() -> list[str]:
     print("\nCheck B: .github/ structure …")
@@ -139,6 +142,7 @@ def check_c_gitignore() -> list[str]:
 # Check D — playbooks/ artefacts
 # ---------------------------------------------------------------------------
 
+
 def check_d_playbooks() -> list[str]:
     print("\nCheck D: playbooks/ artefacts …")
     failures = []
@@ -160,6 +164,7 @@ def check_d_playbooks() -> list[str]:
 # Check E — labels.yml declares legal-review-required
 # ---------------------------------------------------------------------------
 
+
 def check_e_labels_yml() -> list[str]:
     print("\nCheck E: labels.yml declares legal-review-required …")
     path = REPO_ROOT / ".github" / "labels.yml"
@@ -178,6 +183,7 @@ def check_e_labels_yml() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check F — PR template references legal-review-required
 # ---------------------------------------------------------------------------
+
 
 def check_f_pr_template() -> list[str]:
     print("\nCheck F: PR template references legal-review-required …")
@@ -203,6 +209,7 @@ def check_f_pr_template() -> list[str]:
 # must exist before any content lands there so engineering cannot approve an
 # eval-fixture change without GC sign-off.
 # ---------------------------------------------------------------------------
+
 
 def _parse_gc_patterns(codeowners_text: str) -> list[str]:
     """Return path-patterns from CODEOWNERS lines that list @exos-legal/gc."""
@@ -250,6 +257,7 @@ def check_g_codeowners_eval() -> list[str]:
 # "Repo layout must include standard-forms/ for the content-addressed canonical .docx"
 # ---------------------------------------------------------------------------
 
+
 def check_h_standard_forms() -> list[str]:
     print("\nCheck H: standard-forms/ directory exists …")
     path = REPO_ROOT / "standard-forms"
@@ -264,6 +272,7 @@ def check_h_standard_forms() -> list[str]:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> int:
     print("Repo bootstrap structural gate (issue #49)")
@@ -281,10 +290,7 @@ def main() -> int:
 
     print("\n" + "=" * 60)
     if all_failures:
-        print(
-            f"\nFAIL: {len(all_failures)} check(s) failed.\n"
-            "See output above for details."
-        )
+        print(f"\nFAIL: {len(all_failures)} check(s) failed.\nSee output above for details.")
         return 1
 
     print(

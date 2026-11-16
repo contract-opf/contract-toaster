@@ -83,8 +83,7 @@ def _docx_naming(party: str | None) -> bytes:
     """An NDA-shaped document whose preamble names `party` (or names no
     entity of ours at all when `party` is None)."""
     preamble = (
-        f"This Agreement is entered into between {party} and the "
-        "counterparty named below."
+        f"This Agreement is entered into between {party} and the counterparty named below."
         if party
         else "This Agreement is entered into between the parties named below."
     )
@@ -187,9 +186,7 @@ class TestPartyRecognisedTriState(PartySignalTestBase):
         """F6's own example: the roster says `GmbH`, the document says
         `G.m.b.H.`, and the old case-and-whitespace fold saw two entities."""
         self._seed_roster([ROSTER_ENTITY])
-        self.assertEqual(
-            entity_roster.resolve_entity_roster(self.ddb), (ROSTER_ENTITY,)
-        )
+        self.assertEqual(entity_roster.resolve_entity_roster(self.ddb), (ROSTER_ENTITY,))
 
         resp = self._preflight("owner-party-true", _docx_naming(DOCUMENT_SPELLING))
 
@@ -210,9 +207,7 @@ class TestPartyRecognisedTriState(PartySignalTestBase):
         is a different answer from "looked and found none"."""
         self.assertEqual(entity_roster.resolve_entity_roster(self.ddb), ())
         self.assertEqual(
-            review_routes._resolve_playbook_party(
-                pf491.NDA_PLAYBOOK_ID, self.ddb, self.s3
-            ),
+            review_routes._resolve_playbook_party(pf491.NDA_PLAYBOOK_ID, self.ddb, self.s3),
             [],
         )
 
@@ -364,9 +359,7 @@ class TestComputePartyRecognised(unittest.TestCase):
         self.assertIsNone(review_routes.compute_party_recognised("anything", ["", "  "]))
 
     def test_an_empty_document_is_false_not_null_when_names_exist(self):
-        self.assertIs(
-            review_routes.compute_party_recognised("", [ROSTER_ENTITY]), False
-        )
+        self.assertIs(review_routes.compute_party_recognised("", [ROSTER_ENTITY]), False)
 
     def test_the_playbook_party_alone_can_answer_true(self):
         self.assertIs(

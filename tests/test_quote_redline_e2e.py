@@ -72,11 +72,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 BACKEND_SRC_DIR = REPO_ROOT / "backend" / "src"
 FIXTURE_PATH = (
-    REPO_ROOT
-    / "tests"
-    / "fixtures"
-    / "quote_redline_e2e"
-    / "reformatted-contract.SYNTHETIC.docx"
+    REPO_ROOT / "tests" / "fixtures" / "quote_redline_e2e" / "reformatted-contract.SYNTHETIC.docx"
 )
 
 for _dir in (SCRIPTS_DIR, BACKEND_SRC_DIR, REPO_ROOT / "tests"):
@@ -102,17 +98,13 @@ def _import_modules():
 
         review_spine = _review_spine
     except ImportError as exc:
-        missing.append(
-            f"MISSING: scripts/review_spine.py does not import ({exc})."
-        )
+        missing.append(f"MISSING: scripts/review_spine.py does not import ({exc}).")
     try:
         import redline_generate as _redline_generate  # type: ignore
 
         redline_generate = _redline_generate
     except ImportError as exc:
-        missing.append(
-            f"MISSING: scripts/redline_generate.py does not import ({exc})."
-        )
+        missing.append(f"MISSING: scripts/redline_generate.py does not import ({exc}).")
     try:
         import model_client as _model_client  # type: ignore
 
@@ -162,8 +154,7 @@ ARTICLE_II_SECTION_TITLE = "Duration and Renewal"
 # whitespace variant, so the retired locator's whitespace-tolerant (but
 # not fuzzy/semantic) matcher legitimately fails to locate it.
 NOT_LOCATABLE_SOURCE_QUOTE = (
-    "either party may terminate this Agreement without cause upon ten (10) "
-    "days' written notice"
+    "either party may terminate this Agreement without cause upon ten (10) days' written notice"
 )
 NOT_LOCATABLE_REPLACEMENT_TEXT = (
     "either party delivers written notice of non-renewal at least sixty "
@@ -200,7 +191,7 @@ def _article_iv_transcript(docx_bytes: bytes) -> dict[str, Any]:
                     {"op": "keep", "text": text[:at]},
                     {"op": "delete", "text": LOCATABLE_SOURCE_QUOTE, "issue_key": "I1"},
                     {"op": "insert", "text": LOCATABLE_REPLACEMENT_TEXT, "issue_key": "I1"},
-                    {"op": "keep", "text": text[at + len(LOCATABLE_SOURCE_QUOTE):]},
+                    {"op": "keep", "text": text[at + len(LOCATABLE_SOURCE_QUOTE) :]},
                 ],
             }
     raise AssertionError("the reformatted fixture no longer carries Article IV's clause")
@@ -406,7 +397,9 @@ def _part_2_docx_round_trip_and_tracked_changes(
         ins_elements = doc_root.findall(f".//{_qn('ins')}")
         del_elements = doc_root.findall(f".//{_qn('del')}")
         if not ins_elements or not del_elements:
-            failures.append("[2f] Expected at least one <w:ins> and <w:del> pair in the delivered docx.")
+            failures.append(
+                "[2f] Expected at least one <w:ins> and <w:del> pair in the delivered docx."
+            )
 
         ins_text = "".join(
             (t.text or "") for ins in ins_elements for t in ins.findall(f".//{_qn('t')}")
@@ -430,10 +423,14 @@ def _part_2_docx_round_trip_and_tracked_changes(
         all_text = "".join((t.text or "") for t in doc_root.findall(f".//{_qn('t')}")) + del_text
         surrounding = "Notwithstanding anything to the contrary elsewhere in this Agreement"
         if surrounding not in all_text:
-            failures.append("[2i] Text outside the quoted span (Article IV's lead-in) was not preserved.")
+            failures.append(
+                "[2i] Text outside the quoted span (Article IV's lead-in) was not preserved."
+            )
         trailing = "regardless of the degree of fault of any party."
         if trailing not in all_text:
-            failures.append("[2i2] Text outside the quoted span (Article IV's trailing clause) was not preserved.")
+            failures.append(
+                "[2i2] Text outside the quoted span (Article IV's trailing clause) was not preserved."
+            )
 
         # -- Rationale footnote -----------------------------------------
         if "word/footnotes.xml" not in names:
@@ -479,7 +476,9 @@ def _part_3_not_locatable_is_flag_only(result: dict[str, Any], failures: list[st
     if analysis_report.get("report_type") not in ("analysis_report", "flag_only_report"):
         failures.append(f"[3b] Unexpected analysis_report shape: {analysis_report}")
     if "decision" in analysis_report:
-        failures.append("[3c] analysis_report must never carry a decision field (system artifact, not a legal one).")
+        failures.append(
+            "[3c] analysis_report must never carry a decision field (system artifact, not a legal one)."
+        )
 
     changes_not_applied = analysis_report.get("changes_not_applied") or []
     if len(changes_not_applied) != 1:
@@ -491,7 +490,9 @@ def _part_3_not_locatable_is_flag_only(result: dict[str, Any], failures: list[st
         return
     entry = changes_not_applied[0]
     if entry.get("section_ref") != ARTICLE_II_SECTION_REF:
-        failures.append(f"[3e] Expected the flag-only entry anchored at Article II, got {entry.get('section_ref')!r}")
+        failures.append(
+            f"[3e] Expected the flag-only entry anchored at Article II, got {entry.get('section_ref')!r}"
+        )
     # Issue #627: the entry is reported by the issue #585 flag-only
     # labelling rather than by the quote patcher's `not_found`, because
     # under the block-transcript contract this issue proposes no edit at all

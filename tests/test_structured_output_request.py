@@ -439,12 +439,8 @@ class TestProjectOutputSchemaForProvider(unittest.TestCase):
         # TestAdditionalPropertiesForcedFalse below, since nothing in the
         # real file currently omits it.
         self.assertEqual(self.schema["additionalProperties"], False)
-        self.assertEqual(
-            self.schema["definitions"]["Issue"]["additionalProperties"], False
-        )
-        self.assertEqual(
-            self.schema["definitions"]["CriticDelta"]["additionalProperties"], False
-        )
+        self.assertEqual(self.schema["definitions"]["Issue"]["additionalProperties"], False)
+        self.assertEqual(self.schema["definitions"]["CriticDelta"]["additionalProperties"], False)
 
     def test_source_schema_on_disk_is_untouched(self) -> None:
         second = mos.project_output_schema_for_provider()
@@ -461,9 +457,7 @@ class TestProjectOutputSchemaForProvider(unittest.TestCase):
         mos.project_output_schema_for_provider()
         base_after = mos.model_facing_output_schema()
         self.assertEqual(base_before, base_after)
-        self.assertIn(
-            "minLength", base_after["definitions"]["Issue"]["properties"]["section_ref"]
-        )
+        self.assertIn("minLength", base_after["definitions"]["Issue"]["properties"]["section_ref"])
 
     def test_every_valid_fixture_accepted_once_unstamped(self) -> None:
         valid_fixtures = sorted(MODEL_RESPONSES_DIR.glob("*_valid.json"))
@@ -653,9 +647,7 @@ class TestStripDoesNotTreatPropertiesMapAsASchemaNode(unittest.TestCase):
             },
         }
         projected = mos.project_output_schema_for_provider(schema=schema)
-        self.assertEqual(
-            set(projected["properties"].keys()), {"format", "pattern", "decision"}
-        )
+        self.assertEqual(set(projected["properties"].keys()), {"format", "pattern", "decision"})
         self.assertEqual(set(projected["required"]), {"format", "pattern", "decision"})
         # Not just "the keys survived" -- prove the schema is actually
         # SATISFIABLE (additionalProperties: false + every required name
@@ -1007,7 +999,9 @@ class LegacyShapedFakeClient:
         self._response_text = response_text
         self.calls: list[dict[str, Any]] = []
 
-    def invoke(self, *, model_id: str, system_prompt: str, user_prompt: str, max_output_tokens: int) -> str:
+    def invoke(
+        self, *, model_id: str, system_prompt: str, user_prompt: str, max_output_tokens: int
+    ) -> str:
         self.calls.append({"model_id": model_id, "max_output_tokens": max_output_tokens})
         return self._response_text
 
@@ -1081,9 +1075,7 @@ class TestRunPrimaryPassThreading(unittest.TestCase):
             doc_text="Section 8 text.",
         )
         self.assertEqual(result["status"], "OK")
-        self.assertEqual(
-            client.calls[0]["output_schema"], mos.project_output_schema_for_provider()
-        )
+        self.assertEqual(client.calls[0]["output_schema"], mos.project_output_schema_for_provider())
         self.assertTrue(result["schema_enforcement_requested"])
         self.assertTrue(records[-1].schema_enforcement_requested)
 
@@ -1106,7 +1098,9 @@ class TestRunPrimaryPassThreading(unittest.TestCase):
 
 class TestRunCriticPassThreading(unittest.TestCase):
     def test_capability_false_never_sends_output_schema_even_to_a_legacy_client(self) -> None:
-        legacy = LegacyShapedFakeClient(json.dumps(_load_fixture("critic_drop_i1_accept_valid.json")))
+        legacy = LegacyShapedFakeClient(
+            json.dumps(_load_fixture("critic_drop_i1_accept_valid.json"))
+        )
         primary_output = _load_fixture(_PRIMARY_VALID_FIXTURE)
         records: list[Any] = []
         # Pinned OFF for the same reason as the primary-pass twin above --
@@ -1143,9 +1137,7 @@ class TestRunCriticPassThreading(unittest.TestCase):
             ledger_write=records.append,
         )
         self.assertEqual(result["status"], "OK")
-        self.assertEqual(
-            client.calls[0]["output_schema"], mos.project_output_schema_for_provider()
-        )
+        self.assertEqual(client.calls[0]["output_schema"], mos.project_output_schema_for_provider())
         self.assertTrue(result["schema_enforcement_requested"])
         self.assertTrue(records[-1].schema_enforcement_requested)
 

@@ -80,9 +80,7 @@ os.environ.setdefault("REVIEWS_TABLE", "contract-toaster-reviews-artifact-test")
 os.environ.setdefault("AUDIT_TABLE", "contract-toaster-audit-artifact-test")
 os.environ.setdefault("UPLOADS_BUCKET", "contract-toaster-uploads-artifact-test")
 os.environ.setdefault("OUTPUTS_BUCKET", "contract-toaster-outputs-artifact-test")
-os.environ.setdefault(
-    "RETENTION_SETTINGS_TABLE", "contract-toaster-retention-artifact-test"
-)
+os.environ.setdefault("RETENTION_SETTINGS_TABLE", "contract-toaster-retention-artifact-test")
 
 import boto3  # noqa: E402, I001
 from moto import mock_aws  # noqa: E402
@@ -233,9 +231,7 @@ class TestArtifactReachesGetReviewDetail(AnalysisArtifactTestBase):
         self._seed_bare_row("rid-issues")
         self._run_real_pipeline_writers("rid-issues")
 
-        detail = reviews_module.get_review_detail(
-            "rid-issues", OWNER, self.ddb, self.s3
-        )
+        detail = reviews_module.get_review_detail("rid-issues", OWNER, self.ddb, self.s3)
 
         self.assertIsNotNone(
             detail["issues"],
@@ -253,9 +249,7 @@ class TestArtifactReachesGetReviewDetail(AnalysisArtifactTestBase):
         self._seed_bare_row("rid-critic")
         self._run_real_pipeline_writers("rid-critic")
 
-        detail = reviews_module.get_review_detail(
-            "rid-critic", OWNER, self.ddb, self.s3
-        )
+        detail = reviews_module.get_review_detail("rid-critic", OWNER, self.ddb, self.s3)
 
         self.assertIsNotNone(detail["critic_delta"])
         self.assertEqual(len(detail["critic_delta"]["contested_replacements"]), 1)
@@ -313,9 +307,7 @@ class TestArtifactReadDegradesQuietly(AnalysisArtifactTestBase):
     def test_malformed_json_body_reads_back_none(self):
         self._seed_bare_row("rid-badjson")
         key = self._run_real_pipeline_writers("rid-badjson")
-        self.s3.put_object(
-            Bucket=os.environ["OUTPUTS_BUCKET"], Key=key, Body=b"{not json at all"
-        )
+        self.s3.put_object(Bucket=os.environ["OUTPUTS_BUCKET"], Key=key, Body=b"{not json at all")
 
         self.assertIsNone(self._detail("rid-badjson", self.s3)["issues"])
 
@@ -326,9 +318,7 @@ class TestArtifactReadDegradesQuietly(AnalysisArtifactTestBase):
         never to cause."""
         self._seed_bare_row("rid-jsonlist")
         key = self._run_real_pipeline_writers("rid-jsonlist")
-        self.s3.put_object(
-            Bucket=os.environ["OUTPUTS_BUCKET"], Key=key, Body=b"[1, 2, 3]"
-        )
+        self.s3.put_object(Bucket=os.environ["OUTPUTS_BUCKET"], Key=key, Body=b"[1, 2, 3]")
 
         self.assertIsNone(self._detail("rid-jsonlist", self.s3)["issues"])
 
@@ -346,9 +336,7 @@ class TestCoverNoteGateSeesRealFindings(AnalysisArtifactTestBase):
         self._seed_bare_row("rid-butter")
         self._run_real_pipeline_writers("rid-butter")
 
-        analysis = reviews_module.load_analysis_artifact(
-            self._row("rid-butter"), self.s3
-        )
+        analysis = reviews_module.load_analysis_artifact(self._row("rid-butter"), self.s3)
         issues = (analysis.get("findings") if analysis is not None else None) or []
 
         self.assertTrue(
@@ -366,9 +354,9 @@ class TestCoverNoteGateSeesRealFindings(AnalysisArtifactTestBase):
         row = self._row("rid-same")
 
         gate_issues = reviews_module.load_analysis_artifact(row, self.s3)["findings"]
-        detail_issues = reviews_module.get_review_detail(
-            "rid-same", OWNER, self.ddb, self.s3
-        )["issues"]
+        detail_issues = reviews_module.get_review_detail("rid-same", OWNER, self.ddb, self.s3)[
+            "issues"
+        ]
 
         self.assertEqual(gate_issues, detail_issues)
 
@@ -407,7 +395,8 @@ class TestPurgeDestroysTheArtifact(AnalysisArtifactTestBase):
         self.assertIn("rid-purge", summary["deleted_reviews"])
 
         listed = self.s3.list_objects_v2(
-            Bucket=os.environ["OUTPUTS_BUCKET"], Prefix=f"outputs/rid-purge/"  # noqa: F541
+            Bucket=os.environ["OUTPUTS_BUCKET"],
+            Prefix=f"outputs/rid-purge/",  # noqa: F541
         )
         self.assertEqual(
             listed.get("KeyCount", 0),

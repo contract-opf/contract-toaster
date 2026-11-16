@@ -169,9 +169,21 @@ def check_4_clean_doc_records_the_honest_negative() -> list[str]:
 def main() -> int:
     checks = [
         ("1", "stub_basis_present=True refuses by default", check_1_stub_basis_refuses_by_default),
-        ("2", "accept_stub_basis=True resolves AND records", check_2_accept_stub_basis_resolves_and_records),
-        ("3", "the flag is not a corpus-less escape hatch", check_3_flag_is_not_a_corpus_less_escape_hatch),
-        ("4", "a clean doc records the honest negative", check_4_clean_doc_records_the_honest_negative),
+        (
+            "2",
+            "accept_stub_basis=True resolves AND records",
+            check_2_accept_stub_basis_resolves_and_records,
+        ),
+        (
+            "3",
+            "the flag is not a corpus-less escape hatch",
+            check_3_flag_is_not_a_corpus_less_escape_hatch,
+        ),
+        (
+            "4",
+            "a clean doc records the honest negative",
+            check_4_clean_doc_records_the_honest_negative,
+        ),
     ]
 
     overall_pass = True

@@ -423,9 +423,7 @@ class TestOutputWithheldIsNamedNotInferred(unittest.TestCase):
             return result
 
         with patch.object(redline_generate, "generate_redline_from_blocks", spy):
-            _spine(
-                dts._canonical_planted_draft(), [_primary_leaky_response()], "retired-133-spy"
-            )
+            _spine(dts._canonical_planted_draft(), [_primary_leaky_response()], "retired-133-spy")
         self.assertEqual(len(captured), 1)
         self.assertEqual(captured[0]["status"], "ERROR")
         self.assertEqual(captured[0]["reason"], "leakage_detected")

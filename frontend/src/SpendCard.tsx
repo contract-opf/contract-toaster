@@ -17,15 +17,7 @@ import {
   type SpendCapSetting,
   type SpendLedger,
 } from './AdminSettings';
-import {
-  CtBanner,
-  CtButton,
-  CtCard,
-  CtField,
-  CtProgress,
-  CtTable,
-  CtToolbar,
-} from './ui/react';
+import { CtBanner, CtButton, CtCard, CtField, CtProgress, CtTable, CtToolbar } from './ui/react';
 
 export interface SpendCardProps {
   credentialsRefreshKey?: number;
@@ -34,7 +26,10 @@ export interface SpendCardProps {
   title?: string;
 }
 
-function formatSetAt(updatedAt: string | null | undefined, updatedBy: string | null | undefined): string {
+function formatSetAt(
+  updatedAt: string | null | undefined,
+  updatedBy: string | null | undefined,
+): string {
   if (!updatedAt && !updatedBy) {
     return '';
   }
@@ -109,9 +104,7 @@ export default function SpendCard({
       setSpendLoad({ status: 'ready', data: ledger });
       setCapDraft((ledger.daily_cap_usd_cents / 100).toFixed(2));
     } catch (err) {
-      setSpendLoad(
-        failedLoad(err, "We couldn't load this deployment's spend. Please try again."),
-      );
+      setSpendLoad(failedLoad(err, "We couldn't load this deployment's spend. Please try again."));
     }
   }, [onForbidden]);
 
@@ -192,16 +185,16 @@ export default function SpendCard({
       {title && <CtToolbar title={title} />}
       <div className="ct-stack">
         <p data-testid={`${testIdPrefix}-spend-explainer`}>
-          Every review reserves its worst-case cost before it starts, and a submission is
-          refused once the day’s reservations reach the cap. The cap resets at midnight UTC.
-          Lowering it never claws back spend already made — it stops the next review.
+          Every review reserves its worst-case cost before it starts, and a submission is refused
+          once the day’s reservations reach the cap. The cap resets at midnight UTC. Lowering it
+          never claws back spend already made — it stops the next review.
         </p>
 
         {!ledger.next_review_admissible && (
           <CtBanner variant="warn" data-testid={`${testIdPrefix}-spend-blocked`}>
-            The next review would be refused: what today has committed leaves less than one
-            review’s reservation under the cap. Raise the cap, choose cheaper models, or wait
-            for midnight UTC.
+            The next review would be refused: what today has committed leaves less than one review’s
+            reservation under the cap. Raise the cap, choose cheaper models, or wait for midnight
+            UTC.
           </CtBanner>
         )}
 
@@ -220,9 +213,7 @@ export default function SpendCard({
                 <td className="ct-table__mono" data-testid="spend-value-cap">
                   {formatUsdCents(ledger.daily_cap_usd_cents)}
                 </td>
-                <td data-testid="spend-meaning-cap">
-                  {capSourceNote(ledger.cap_setting)}
-                </td>
+                <td data-testid="spend-meaning-cap">{capSourceNote(ledger.cap_setting)}</td>
               </tr>
               <tr data-testid="spend-row-spent">
                 <td>Committed today</td>
@@ -230,8 +221,8 @@ export default function SpendCard({
                   {formatUsdCents(ledger.spent_today_usd_cents)}
                 </td>
                 <td data-testid="spend-meaning-spent">
-                  What today’s reviews hold against the cap. A review in flight holds its
-                  worst case; once it finishes, this falls to what it actually cost.
+                  What today’s reviews hold against the cap. A review in flight holds its worst
+                  case; once it finishes, this falls to what it actually cost.
                 </td>
               </tr>
               <tr data-testid="spend-row-settled">
@@ -240,9 +231,9 @@ export default function SpendCard({
                   {formatUsdCents(ledger.settled_today_usd_cents)}
                 </td>
                 <td data-testid="spend-meaning-settled">
-                  What finished work actually cost, including the cheap check that runs when
-                  a file is chosen and any cover notes drafted. Those two do not reserve, so
-                  they are billed but sit outside the ceiling above.
+                  What finished work actually cost, including the cheap check that runs when a file
+                  is chosen and any cover notes drafted. Those two do not reserve, so they are
+                  billed but sit outside the ceiling above.
                 </td>
               </tr>
               <tr data-testid="spend-row-remaining">
@@ -270,10 +261,9 @@ export default function SpendCard({
                     : formatUsdCents(ledger.estimated_review_usd_cents)}
                 </td>
                 <td data-testid="spend-meaning-next">
-                  What a document of ordinary size is expected to cost on the models
-                  currently selected. It reserves{' '}
-                  {formatUsdCents(ledger.worst_case_reservation_usd_cents)} while it
-                  runs — the worst case is what the cap is measured against, and the unused
+                  What a document of ordinary size is expected to cost on the models currently
+                  selected. It reserves {formatUsdCents(ledger.worst_case_reservation_usd_cents)}{' '}
+                  while it runs — the worst case is what the cap is measured against, and the unused
                   part is released when the review finishes.
                 </td>
               </tr>
@@ -319,13 +309,11 @@ export default function SpendCard({
             >
               <CtField
                 label="Daily cap (US dollars)"
-                hint={
-                  `Between ${formatUsdCents(
-                    ledger.cap_setting.min_daily_cap_usd_cents,
-                  )} and ${formatUsdCents(
-                    ledger.cap_setting.max_daily_cap_usd_cents,
-                  )}. Takes effect on the next review, with no redeploy.`
-                }
+                hint={`Between ${formatUsdCents(
+                  ledger.cap_setting.min_daily_cap_usd_cents,
+                )} and ${formatUsdCents(
+                  ledger.cap_setting.max_daily_cap_usd_cents,
+                )}. Takes effect on the next review, with no redeploy.`}
               >
                 <input
                   type="text"
@@ -344,7 +332,9 @@ export default function SpendCard({
                 style={{ marginBottom: '0.75rem' }}
                 data-testid={`${testIdPrefix}-cap-presets`}
               >
-                <span style={{ fontSize: 'var(--ct-text-sm)', color: 'var(--ct-text-muted)' }}>Quick presets:</span>
+                <span style={{ fontSize: 'var(--ct-text-sm)', color: 'var(--ct-text-muted)' }}>
+                  Quick presets:
+                </span>
                 {[25, 50, 100, 250].map((amount) => (
                   <button
                     key={amount}
@@ -398,10 +388,7 @@ export default function SpendCard({
             </form>
 
             <p className="ct-muted" data-testid={`${testIdPrefix}-cap-last-saved`}>
-              {formatSetAt(
-                ledger.cap_setting.updated_at,
-                ledger.cap_setting.updated_by,
-              )
+              {formatSetAt(ledger.cap_setting.updated_at, ledger.cap_setting.updated_by)
                 ? `Last changed ${formatSetAt(
                     ledger.cap_setting.updated_at,
                     ledger.cap_setting.updated_by,

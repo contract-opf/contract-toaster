@@ -275,9 +275,7 @@ def get_preflight_model_client(
     if not api_key:
         yield None
         return
-    client = model_client.OpenRouterModelClient(
-        api_key=api_key, timeout_seconds=8.0, max_retries=0
-    )
+    client = model_client.OpenRouterModelClient(api_key=api_key, timeout_seconds=8.0, max_retries=0)
     try:
         yield client
     finally:
@@ -400,9 +398,7 @@ def _default_cover_note_leakage_corpus(
     if not playbook_id:
         return leakage_scan.ConfidentialCorpus()
     try:
-        bundle = pipeline_runner._load_playbook_bundle(
-            playbook_id, dynamodb_resource, s3_client
-        )
+        bundle = pipeline_runner._load_playbook_bundle(playbook_id, dynamodb_resource, s3_client)
     except pipeline_runner.playbook_registry.PlaybookNotRegisteredError:
         # Registry miss -- the documented #479 fail-open case. Stays open.
         return leakage_scan.ConfidentialCorpus()
@@ -574,9 +570,7 @@ async def post_review(
     try:
         resolved_notes_mode = reviews.resolve_notes_mode(notes_mode)
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     # Issue #54: the markup-intensity dial (`light | medium | heavy`, absent
     # = `medium`), validated on the same terms and at the same point as
@@ -586,9 +580,7 @@ async def post_review(
     try:
         resolved_markup_intensity = reviews.resolve_markup_intensity(markup_intensity)
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     contents = await file.read()
 
@@ -760,8 +752,7 @@ def _submitted_word_count(contents: bytes) -> int | None:
 
 
 UPLOAD_NOT_STORED_INTACT_DETAIL = (
-    "The uploaded file could not be stored intact. Nothing was submitted; "
-    "please try again."
+    "The uploaded file could not be stored intact. Nothing was submitted; please try again."
 )
 
 
@@ -867,9 +858,7 @@ def _put_upload_object(s3_client: Any, key: str, contents: bytes, sha256_hex: st
 _AGREEMENT_TYPE_CACHE: dict[tuple[str, str], tuple[str | None, tuple[str, ...]]] = {}
 
 
-def _active_version_cache_key(
-    playbook_id: str, dynamodb_resource: Any
-) -> tuple[str, str] | None:
+def _active_version_cache_key(playbook_id: str, dynamodb_resource: Any) -> tuple[str, str] | None:
     """Cache identity for `playbook_id`'s currently-active version, or None
     when there is nothing worth caching.
 
@@ -937,9 +926,7 @@ def _agreement_type_from_bundle(bundle: dict[str, Any]) -> tuple[str | None, lis
     name = preflight_pass.normalize_agreement_type_label(raw_name)
     aliases = [
         alias
-        for alias in (
-            preflight_pass.normalize_agreement_type_label(a) for a in raw_aliases
-        )
+        for alias in (preflight_pass.normalize_agreement_type_label(a) for a in raw_aliases)
         if alias
     ]
     return name, aliases
@@ -985,9 +972,7 @@ def _resolve_playbook_agreement_type(
         if cached is not None:
             return cached[0], list(cached[1])
     try:
-        bundle = pipeline_runner._load_playbook_bundle(
-            playbook_id, dynamodb_resource, s3_client
-        )
+        bundle = pipeline_runner._load_playbook_bundle(playbook_id, dynamodb_resource, s3_client)
         name, aliases = _agreement_type_from_bundle(bundle)
     except Exception:  # noqa: BLE001 -- advisory lookup, never fail preflight over it
         return None, []
@@ -1024,9 +1009,7 @@ def _preflight_agreement_vocabulary(
         entries = []
     names: list[str] = []
     for playbook_id, _raw, _overrides in entries:
-        name, _aliases = _resolve_playbook_agreement_type(
-            playbook_id, dynamodb_resource, s3_client
-        )
+        name, _aliases = _resolve_playbook_agreement_type(playbook_id, dynamodb_resource, s3_client)
         if name:
             names.append(name)
     return preflight_pass.known_agreement_types(names)
@@ -1092,9 +1075,7 @@ def _resolve_playbook_party(
         if cached is not None:
             return list(cached)
     try:
-        bundle = pipeline_runner._load_playbook_bundle(
-            playbook_id, dynamodb_resource, s3_client
-        )
+        bundle = pipeline_runner._load_playbook_bundle(playbook_id, dynamodb_resource, s3_client)
         names = _party_names_from_bundle(bundle)
     except Exception:  # noqa: BLE001 -- advisory lookup, never fail preflight over it
         return []
@@ -1103,9 +1084,7 @@ def _resolve_playbook_party(
     return names
 
 
-def compute_party_recognised(
-    document_text: str, our_entity_names: list[str]
-) -> bool | None:
+def compute_party_recognised(document_text: str, our_entity_names: list[str]) -> bool | None:
     """Issue #55: does ANY variant of ANY entity that is US appear in this
     document?
 
@@ -1149,9 +1128,7 @@ def _vocabulary_has_installed_types(known_types: list[str]) -> bool:
     return any(t != preflight_pass.UNCLASSIFIED_AGREEMENT_TYPE for t in known_types)
 
 
-@router.post(
-    "/api/reviews/preflight", status_code=status.HTTP_200_OK, include_in_schema=True
-)
+@router.post("/api/reviews/preflight", status_code=status.HTTP_200_OK, include_in_schema=True)
 async def post_review_preflight(
     file: UploadFile = File(...),  # noqa: B008
     playbook_id: str = Form(DEFAULT_PLAYBOOK_ID),
@@ -1211,10 +1188,7 @@ async def post_review_preflight(
     except preflight_pass.DocumentStatsError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "Could not read this document. Please check the file and "
-                "try again."
-            ),
+            detail=("Could not read this document. Please check the file and try again."),
         ) from exc
 
     # Issue #506, run before the model call and folded into this same
@@ -1247,9 +1221,7 @@ async def post_review_preflight(
     # installed type all reach it as "nothing to classify against").
     known_types: list[str] = []
     if preflight_model_client is not None and stats["excerpt"]:
-        known_types = _preflight_agreement_vocabulary(
-            registry_path, dynamodb_resource, s3_client
-        )
+        known_types = _preflight_agreement_vocabulary(registry_path, dynamodb_resource, s3_client)
         if not _vocabulary_has_installed_types(known_types):
             # Nothing installed yields an agreement type, so there is
             # nothing to classify against and the only answer the enum
@@ -1282,9 +1254,7 @@ async def post_review_preflight(
             usage = getattr(preflight_model_client, "last_usage", None)
             served_model_id = getattr(preflight_model_client, "last_served_model", None)
         except Exception:  # noqa: BLE001 -- degrade to stats-only, never fail
-            logger.warning(
-                "PREFLIGHT: cheap-model classification failed; degrading to stats-only"
-            )
+            logger.warning("PREFLIGHT: cheap-model classification failed; degrading to stats-only")
 
     # Never blocks on ledger errors -- a DynamoDB blip must not turn into a
     # visible preflight failure over accounting. Cost is logged as a bare
@@ -1322,9 +1292,7 @@ async def post_review_preflight(
     # produces, never a 500 on an advisory field.
     try:
         our_entity_names = list(entity_roster.resolve_entity_roster(dynamodb_resource))
-        our_entity_names.extend(
-            _resolve_playbook_party(playbook_id, dynamodb_resource, s3_client)
-        )
+        our_entity_names.extend(_resolve_playbook_party(playbook_id, dynamodb_resource, s3_client))
         party_recognised = compute_party_recognised(stats["full_text"], our_entity_names)
     except Exception:  # noqa: BLE001 -- advisory: never fail preflight over the party signal
         logger.warning("PREFLIGHT: party signal failed; preflight continues unaffected")
@@ -1368,9 +1336,7 @@ async def post_review_preflight(
 # ---------------------------------------------------------------------------
 
 
-@router.post(
-    "/api/reviews/preflight/match", status_code=status.HTTP_200_OK, include_in_schema=True
-)
+@router.post("/api/reviews/preflight/match", status_code=status.HTTP_200_OK, include_in_schema=True)
 async def post_review_preflight_match(
     agreement_type_guess: str = Form(""),
     playbook_id: str = Form(DEFAULT_PLAYBOOK_ID),
@@ -1531,21 +1497,15 @@ def _load_playbook_catalog(
     unchanged, so the preflight classifier's agreement-type vocabulary is
     built over exactly this set of playbooks."""
     catalog: list[dict[str, Any]] = []
-    for playbook_id, raw, overrides in _catalog_playbook_entries(
-        registry_path, dynamodb_resource
-    ):
-        display_name = (
-            overrides["display_name"] or raw.get("display_name") or playbook_id.upper()
-        )
+    for playbook_id, raw, overrides in _catalog_playbook_entries(registry_path, dynamodb_resource):
+        display_name = overrides["display_name"] or raw.get("display_name") or playbook_id.upper()
         active_hash = reviews._read_active_release_bundle_hash(playbook_id, dynamodb_resource)
         catalog.append(
             {
                 "playbook_id": playbook_id,
                 "display_name": display_name,
                 "status": "active" if active_hash else "coming_soon",
-                "notes": playbook_versions.get_active_version_notes(
-                    playbook_id, dynamodb_resource
-                ),
+                "notes": playbook_versions.get_active_version_notes(playbook_id, dynamodb_resource),
             }
         )
     return catalog
@@ -1895,10 +1855,7 @@ async def post_review_disposition(
     if caller_sub != owner_sub and not caller_row.get("is_admin", False):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
-                "You are not the owner of this review and do not have admin "
-                "privileges."
-            ),
+            detail=("You are not the owner of this review and do not have admin privileges."),
         )
 
     reason_codes = _validate_disposition_code_list(body.get("reason_codes"), "reason_codes")
@@ -2261,9 +2218,9 @@ async def post_review_cover_note(
     dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
     cover_note_model_client: Any = Depends(get_cover_note_model_client),  # noqa: B008
     s3_client: Any = Depends(get_s3_client),  # noqa: B008
-    leakage_corpus_resolver: Callable[
-        [str | None], "leakage_scan.ConfidentialCorpus"
-    ] = Depends(get_cover_note_leakage_corpus_resolver),
+    leakage_corpus_resolver: Callable[[str | None], "leakage_scan.ConfidentialCorpus"] = Depends(
+        get_cover_note_leakage_corpus_resolver
+    ),
 ) -> JSONResponse:
     """Draft (or return the cached draft of) the counterparty cover email
     for a finished review. Body: `{"regenerate"?: bool}`, default False.
@@ -2294,10 +2251,7 @@ async def post_review_cover_note(
     if caller_sub != owner_sub and not caller_row.get("is_admin", False):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
-                "You are not the owner of this review and do not have admin "
-                "privileges."
-            ),
+            detail=("You are not the owner of this review and do not have admin privileges."),
         )
 
     if item.get("status") != reviews.REVIEW_STATUS_SUCCESS_TERMINAL:
@@ -2355,9 +2309,7 @@ async def post_review_cover_note(
             detail="This review is past its retention window; there is nothing left to butter.",
         )
     try:
-        past_retention = retention._is_past_retention(item) and not retention._is_legal_held(
-            item
-        )
+        past_retention = retention._is_past_retention(item) and not retention._is_legal_held(item)
     except (TypeError, ValueError):
         # `_is_past_retention` does `float(review.get("created_at", ...))` --
         # a corrupted row with a non-numeric `created_at` would otherwise
@@ -2442,7 +2394,8 @@ async def post_review_cover_note(
                 # review's narrative summary, so the "Overall: ..." line
                 # `cover_note_pass.render_cover_note_user_prompt` appends was
                 # silently absent from every real cover note.
-                issues, item.get("summary")
+                issues,
+                item.get("summary"),
             ),
             max_output_tokens=350,
         )
@@ -2488,9 +2441,7 @@ async def post_review_cover_note(
             )
 
         usage = getattr(cover_note_model_client, "last_usage", None)
-        served_model_id = (
-            getattr(cover_note_model_client, "last_served_model", None) or model_id
-        )
+        served_model_id = getattr(cover_note_model_client, "last_served_model", None) or model_id
     except leakage_scan.LeakageDetectedError as exc:
         # Same fail-closed posture as the pipeline's own
         # `leakage_scan.run_leakage_gate` callers: an audit row carrying
@@ -2567,7 +2518,11 @@ async def post_review_cover_note(
     # can succeed, it must be this one.
     try:
         reviews.record_cover_note_draft(
-            review_id, draft, cost_cents, served_model_id, dynamodb_resource,
+            review_id,
+            draft,
+            cost_cents,
+            served_model_id,
+            dynamodb_resource,
             generated_at=generated_at,
         )
     except Exception:  # noqa: BLE001

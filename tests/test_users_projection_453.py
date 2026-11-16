@@ -173,6 +173,7 @@ class UsersProjectionTestBase(unittest.TestCase):
 # assertion below is vacuous.
 # ---------------------------------------------------------------------------
 
+
 class TestStoredRowCarriesTheHash(UsersProjectionTestBase):
     def test_seeded_password_row_stores_a_password_hash(self):
         row = self._raw_seeded_row()
@@ -185,6 +186,7 @@ class TestStoredRowCarriesTheHash(UsersProjectionTestBase):
 # ---------------------------------------------------------------------------
 # list_users — the actively-leaking function (GET /api/users).
 # ---------------------------------------------------------------------------
+
 
 class TestListUsersProjection(UsersProjectionTestBase):
     def _seeded_from_list(self) -> dict:
@@ -236,6 +238,7 @@ class TestListUsersProjection(UsersProjectionTestBase):
 # get_user — the latent leak (unrouted today).
 # ---------------------------------------------------------------------------
 
+
 class TestGetUserProjection(UsersProjectionTestBase):
     def test_get_user_does_not_return_password_hash(self):
         result = users_module.get_user(self._seeded_sub(), ADMIN_ROW, self.ddb)
@@ -252,6 +255,7 @@ class TestGetUserProjection(UsersProjectionTestBase):
 # add_user — already defended before this ticket (asserted separately, on
 # purpose: this leg passes pre-fix and must not be allowed to mask the others).
 # ---------------------------------------------------------------------------
+
 
 class TestAddUserProjection(UsersProjectionTestBase):
     def test_add_password_user_does_not_return_password_hash(self):
@@ -300,6 +304,7 @@ class TestAddUserProjection(UsersProjectionTestBase):
 # FakeTable executes the expression itself and never sees it.
 # ---------------------------------------------------------------------------
 
+
 class TestUpdateUserProjection(UsersProjectionTestBase):
     def test_update_user_does_not_return_password_hash(self):
         result = users_module.update_user(
@@ -323,18 +328,19 @@ class TestUpdateUserProjection(UsersProjectionTestBase):
 # The routes themselves: what actually reaches the admin's browser.
 # ---------------------------------------------------------------------------
 
+
 class RoutedTestBase(UsersProjectionTestBase):
     """Shared TestClient wiring: a real admin caller against the moto tables."""
 
     def setUp(self):
         super().setUp()
         self.client = TestClient(backend_main.app)
-        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = (
-            lambda: self.ddb
-        )
-        backend_main.app.dependency_overrides[backend_main.get_current_user] = (
-            lambda: {"sub": ADMIN_SUB, "email": f"{ADMIN_SUB}@example.com", "token_use": "access"}
-        )
+        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = lambda: self.ddb
+        backend_main.app.dependency_overrides[backend_main.get_current_user] = lambda: {
+            "sub": ADMIN_SUB,
+            "email": f"{ADMIN_SUB}@example.com",
+            "token_use": "access",
+        }
 
 
 class TestGetUsersRoute(RoutedTestBase):
@@ -360,9 +366,7 @@ class TestPatchUserRoute(RoutedTestBase):
     def test_patch_user_route_body_contains_no_hash(self):
         stored_hash = self._raw_seeded_row()["password_hash"]
 
-        response = self.client.patch(
-            f"/api/users/{self._seeded_sub()}", json={"is_admin": False}
-        )
+        response = self.client.patch(f"/api/users/{self._seeded_sub()}", json={"is_admin": False})
         self.assertEqual(response.status_code, 200, response.text)
 
         self.assertNotIn(stored_hash, response.text)

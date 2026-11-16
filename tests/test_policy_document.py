@@ -70,8 +70,6 @@ class PolicySpec:
 SELF_TEST_SPEC = PolicySpec(playbook_id="nda", policy_path=POLICY_PATH)
 
 
-
-
 def _policy() -> dict:
     return policy_load.load_policy(POLICY_PATH)
 
@@ -185,7 +183,9 @@ def debranded_failures(spec: PolicySpec) -> list[str]:
     text = spec.policy_path.read_text(encoding="utf-8")
     failures: list[str] = []
     if "Exos" in text:
-        failures.append("  policy contains the tenant-name literal the tenant name (white-label release rule)")
+        failures.append(
+            "  policy contains the tenant-name literal the tenant name (white-label release rule)"
+        )
     if "teamexos" in text.lower():
         failures.append("  policy contains a 'teamexos' literal")
     return failures
@@ -234,7 +234,9 @@ def hashing_failures(spec: PolicySpec) -> list[str]:
     stamped["approval"]["approved_by"] = "A Lawyer, General Counsel"
     stamped["approval"]["approved_at"] = "2026-07-16T00:00:00Z"
     if policy_load.policy_content_hash(stamped) == h1:
-        failures.append("  policy hash unchanged after re-stamping approval (approval must be covered)")
+        failures.append(
+            "  policy hash unchanged after re-stamping approval (approval must be covered)"
+        )
     # Rule text changes must move the hash.
     edited = copy.deepcopy(doc)
     edited["rules"][0]["text"] = edited["rules"][0]["text"] + " Edited."
@@ -250,8 +252,16 @@ def check_7_hashing() -> list[str]:
 def main() -> int:
     checks = [
         ("1", "policy.schema.json valid; committed policy validates", check_1_schema),
-        ("2", "loader rejects dup ids / version mismatch / unsigned approval", check_2_loader_invariants),
-        ("3", "resolution is generic by playbook_id, highest version wins", check_3_generic_resolution),
+        (
+            "2",
+            "loader rejects dup ids / version mismatch / unsigned approval",
+            check_2_loader_invariants,
+        ),
+        (
+            "3",
+            "resolution is generic by playbook_id, highest version wins",
+            check_3_generic_resolution,
+        ),
         ("5", "policy is debranded (no tenant-name literal)", check_5_debranded),
         ("6", "policy is draft, not falsely stamped approved", check_6_not_falsely_approved),
         ("7", "policy_content_hash deterministic and covers approval", check_7_hashing),

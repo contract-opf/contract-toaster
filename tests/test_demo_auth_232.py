@@ -54,7 +54,11 @@ import src.main as backend_main  # noqa: E402
 ADMIN_SUB = "admin-1"
 ADMIN = {"cognito_sub": ADMIN_SUB, "email": f"{ADMIN_SUB}@example.com", "is_admin": True}
 NON_ADMIN_SUB = "reviewer-1"
-NON_ADMIN = {"cognito_sub": NON_ADMIN_SUB, "email": f"{NON_ADMIN_SUB}@example.com", "is_admin": False}
+NON_ADMIN = {
+    "cognito_sub": NON_ADMIN_SUB,
+    "email": f"{NON_ADMIN_SUB}@example.com",
+    "is_admin": False,
+}
 
 
 class DemoAuthTestBase(unittest.TestCase):
@@ -92,14 +96,22 @@ class DemoAuthTestBase(unittest.TestCase):
         self.users_table = self.ddb.Table(os.environ["USERS_TABLE"])
         # Seed a real SSO admin row for the admin-gated calls in these tests
         # (independent of demo_auth's OWN seeded admin/admin credentials).
-        self.users_table.put_item(Item={
-            "cognito_sub": ADMIN_SUB, "email": ADMIN["email"],
-            "status": "active", "is_admin": True,
-        })
-        self.users_table.put_item(Item={
-            "cognito_sub": NON_ADMIN_SUB, "email": NON_ADMIN["email"],
-            "status": "active", "is_admin": False,
-        })
+        self.users_table.put_item(
+            Item={
+                "cognito_sub": ADMIN_SUB,
+                "email": ADMIN["email"],
+                "status": "active",
+                "is_admin": True,
+            }
+        )
+        self.users_table.put_item(
+            Item={
+                "cognito_sub": NON_ADMIN_SUB,
+                "email": NON_ADMIN["email"],
+                "status": "active",
+                "is_admin": False,
+            }
+        )
 
     def tearDown(self):
         self._mock_aws.stop()
@@ -109,6 +121,7 @@ class DemoAuthTestBase(unittest.TestCase):
 # (1) Auth-mode logic: stored mode is served, and each mode gates the
 #     expected credential path.
 # ---------------------------------------------------------------------------
+
 
 class TestAuthModeLogic(DemoAuthTestBase):
     def test_default_mode_is_sso_when_no_row_exists(self):
@@ -174,6 +187,7 @@ class TestAuthModeLogic(DemoAuthTestBase):
 # (2) Seeded users: admin/admin (admin role) and user/user (user role) exist.
 # ---------------------------------------------------------------------------
 
+
 class TestSeededDemoUsers(DemoAuthTestBase):
     def test_seed_creates_admin_and_user_credentials(self):
         demo_auth.seed_demo_users(self.ddb)
@@ -187,9 +201,9 @@ class TestSeededDemoUsers(DemoAuthTestBase):
         self.assertEqual(admin_row["user_type"], demo_auth.USER_TYPE_PASSWORD)
         self.assertNotEqual(admin_row["password_hash"], "admin")  # never stored plaintext
 
-        user_row = self.users_table.get_item(
-            Key={"cognito_sub": demo_auth.local_user_sub("user")}
-        )["Item"]
+        user_row = self.users_table.get_item(Key={"cognito_sub": demo_auth.local_user_sub("user")})[
+            "Item"
+        ]
         self.assertEqual(user_row["username"], "user")
         self.assertFalse(user_row["is_admin"])
         self.assertEqual(user_row["role"], "user")
@@ -215,6 +229,7 @@ class TestSeededDemoUsers(DemoAuthTestBase):
 #     username/password user.
 # ---------------------------------------------------------------------------
 
+
 class TestUserCrudBothTypes(DemoAuthTestBase):
     def test_add_and_remove_sso_user(self):
         created = demo_auth.add_user(
@@ -232,7 +247,12 @@ class TestUserCrudBothTypes(DemoAuthTestBase):
 
     def test_add_and_remove_password_user(self):
         created = demo_auth.add_user(
-            {"user_type": "password", "username": "pilot", "password": "hunter2", "is_admin": False},
+            {
+                "user_type": "password",
+                "username": "pilot",
+                "password": "hunter2",
+                "is_admin": False,
+            },
             ADMIN,
             self.ddb,
         )
@@ -280,6 +300,7 @@ class TestUserCrudBothTypes(DemoAuthTestBase):
 # (4) De-brand: rendered/served UI text + logs contain no tenant-brand strings.
 # ---------------------------------------------------------------------------
 
+
 class TestDeBrand(DemoAuthTestBase):
     def test_auth_mode_options_labels_are_unbranded(self):
         settings = demo_auth.get_auth_mode_settings(ADMIN, self.ddb)
@@ -325,22 +346,23 @@ class TestDeBrand(DemoAuthTestBase):
 #     /api/auth/login -- through backend/src/main.py.
 # ---------------------------------------------------------------------------
 
+
 class TestHttpSurface(DemoAuthTestBase):
     def setUp(self):
         super().setUp()
         self.client = TestClient(backend_main.app)
-        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = (
-            lambda: self.ddb
-        )
+        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = lambda: self.ddb
 
     def tearDown(self):
         backend_main.app.dependency_overrides.clear()
         super().tearDown()
 
     def _as(self, sub: str, email: str):
-        backend_main.app.dependency_overrides[backend_main.get_current_user] = (
-            lambda: {"sub": sub, "email": email, "token_use": "access"}
-        )
+        backend_main.app.dependency_overrides[backend_main.get_current_user] = lambda: {
+            "sub": sub,
+            "email": email,
+            "token_use": "access",
+        }
 
     def test_get_and_post_admin_auth_mode(self):
         self._as(ADMIN_SUB, ADMIN["email"])
@@ -380,7 +402,9 @@ class TestHttpSurface(DemoAuthTestBase):
         backend_main.app.dependency_overrides.pop(backend_main.get_current_user, None)
         # A successful login now mints a demo session token (needs the secret).
         os.environ["DEMO_TOKEN_SECRET"] = "test-demo-secret-0123456789abcdef0123456789abcdef"
-        response = self.client.post("/api/auth/login", json={"username": "user", "password": "user"})
+        response = self.client.post(
+            "/api/auth/login", json={"username": "user", "password": "user"}
+        )
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
         self.assertEqual(body["username"], "user")
@@ -448,7 +472,9 @@ class TestHttpSurface(DemoAuthTestBase):
         demo_auth.seed_demo_users(self.ddb)
         # Default mode is sso -- no admin-mode change needed.
         backend_main.app.dependency_overrides.pop(backend_main.get_current_user, None)
-        response = self.client.post("/api/auth/login", json={"username": "admin", "password": "admin"})
+        response = self.client.post(
+            "/api/auth/login", json={"username": "admin", "password": "admin"}
+        )
         self.assertEqual(response.status_code, 403, response.text)
 
     def test_post_auth_logout_clears_the_session_cookie(self):

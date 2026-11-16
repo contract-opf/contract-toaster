@@ -213,9 +213,7 @@ def test_extract_and_normalize_carries_reason_detail_through(failures: list) -> 
     result = extraction_normalization_stage.extract_and_normalize(hostile_docx)
 
     if result.get("status") != "unnormalizable_input":
-        failures.append(
-            f"expected status='unnormalizable_input', got {result.get('status')!r}"
-        )
+        failures.append(f"expected status='unnormalizable_input', got {result.get('status')!r}")
         return
 
     report = result.get("analysis_report") or {}
@@ -286,9 +284,7 @@ def test_extract_and_normalize_carries_reason_detail_from_a_clause_heading(
     result = extraction_normalization_stage.extract_and_normalize(hostile_docx)
 
     if result.get("status") != "unnormalizable_input":
-        failures.append(
-            f"expected status='unnormalizable_input', got {result.get('status')!r}"
-        )
+        failures.append(f"expected status='unnormalizable_input', got {result.get('status')!r}")
         return
 
     report = result.get("analysis_report") or {}
@@ -346,9 +342,7 @@ def test_extract_and_normalize_carries_no_reason_detail_for_a_clean_refusal(
     ]
     result = extraction_normalization_stage.normalize_paragraphs(raw_paragraphs)
     if result.get("status") != "unnormalizable_input":
-        failures.append(
-            f"expected status='unnormalizable_input', got {result.get('status')!r}"
-        )
+        failures.append(f"expected status='unnormalizable_input', got {result.get('status')!r}")
         return
     report = result.get("analysis_report") or {}
     if "reason_detail" in report:
@@ -401,10 +395,7 @@ def main() -> int:
             print(f"  - {failure}")
         print(f"\nFAIL: {len(failures)} issue(s) found.")
         return 1
-    print(
-        "\nPASS: a control-character refusal carries a structured reason_detail "
-        "(issue #100)."
-    )
+    print("\nPASS: a control-character refusal carries a structured reason_detail (issue #100).")
     return 0
 
 

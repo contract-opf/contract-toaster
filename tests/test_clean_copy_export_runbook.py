@@ -710,6 +710,7 @@ def gate_7_architecture_marker_placement(architecture_text: str) -> list[str]:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> int:
     try:
         runbook_text = read_text(RUNBOOK_PATH)
@@ -756,10 +757,7 @@ def main() -> int:
         print("  PASS")
 
     print()
-    print(
-        "Gate 3: docs/threat-model.md — trained-user premise; marker conditional "
-        "on notes mode"
-    )
+    print("Gate 3: docs/threat-model.md — trained-user premise; marker conditional on notes mode")
     if g3:
         for f in g3:
             print(f)

@@ -220,9 +220,7 @@ def test_block_map_from_uploaded_bytes_matches_a_genuinely_accepted_document(
             f"  uploaded: {from_source!r}\n"
             f"  accepted: {from_accepted!r}"
         )
-    if _MOVED_SENTENCE.strip() not in "".join(
-        block["text"] for block in from_source.values()
-    ):
+    if _MOVED_SENTENCE.strip() not in "".join(block["text"] for block in from_source.values()):
         failures.append(
             "the moved-in sentence must be part of the block text the model "
             "reads -- it is in the document the recipient receives"
@@ -303,9 +301,7 @@ def test_moved_text_appears_once_not_at_both_ends_of_the_move(failures: list) ->
         ("whole-paragraph move", _whole_move_pending_docx(), _WHOLE_MOVED_PARAGRAPH),
         ("mid-paragraph move", _pending_docx(), _MOVED_SENTENCE.strip()),
     ):
-        body = "\n".join(
-            block["text"] for block in _block_map_of(docx_bytes).values()
-        )
+        body = "\n".join(block["text"] for block in _block_map_of(docx_bytes).values())
         occurrences = body.count(needle)
         if occurrences != 1:
             failures.append(
@@ -336,14 +332,12 @@ def test_a_whole_paragraph_deletion_leaves_the_document(failures: list) -> None:
     body = " ".join(p["text"] for p in result["paragraphs"])
     if _WHOLE_MOVED_PARAGRAPH in body:
         failures.append(
-            f"deleted text must leave the operative draft, unlike moved text; "
-            f"got {body!r}"
+            f"deleted text must leave the operative draft, unlike moved text; got {body!r}"
         )
     notes = result.get("normalization_notes") or ""
     if "struck paragraph is omitted" not in notes:
         failures.append(
-            f"the deletion must be disclosed in normalization_notes, never "
-            f"silent; got {notes!r}"
+            f"the deletion must be disclosed in normalization_notes, never silent; got {notes!r}"
         )
 
 
@@ -403,9 +397,7 @@ def test_an_edit_proven_against_the_uploaded_bytes_applies_to_the_operative_draf
         return
 
     delivered = _document_root(result["docx_bytes"])
-    inserted = "".join(
-        t.text or "" for ins in delivered.iter(_w("ins")) for t in ins.iter(_w("t"))
-    )
+    inserted = "".join(t.text or "" for ins in delivered.iter(_w("ins")) for t in ins.iter(_w("t")))
     if replacement not in inserted:
         failures.append(
             f"the delivered redline must carry the replacement as a tracked "
@@ -428,9 +420,7 @@ def test_the_writer_can_still_see_moved_to_text(failures: list) -> None:
     moved_to_p = list(_document_root(_whole_move_pending_docx()).iter(_w("p")))[3]
     writer_view = redline_block_apply._accepted_text(moved_to_p)
     if writer_view != _WHOLE_MOVED_PARAGRAPH:
-        failures.append(
-            f"the writer must read <w:moveTo> as visible text; got {writer_view!r}"
-        )
+        failures.append(f"the writer must read <w:moveTo> as visible text; got {writer_view!r}")
 
     moved_from_p = list(_document_root(_whole_move_pending_docx()).iter(_w("p")))[2]
     if redline_block_apply._accepted_text(moved_from_p) != "":

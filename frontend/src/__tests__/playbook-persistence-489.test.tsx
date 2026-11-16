@@ -59,7 +59,10 @@ afterEach(() => {
 
 describe('last-selected playbook persistence (issue #489, item 4)', () => {
   it('with nothing stored, the dial defaults to the first active playbook as before', async () => {
-    stubFetch({ 'GET /api/playbooks': { playbooks: TWO_ACTIVE }, 'GET /api/reviews': { reviews: [] } });
+    stubFetch({
+      'GET /api/playbooks': { playbooks: TWO_ACTIVE },
+      'GET /api/reviews': { reviews: [] },
+    });
 
     render(<ReviewSubmission />);
     await screen.findByTestId('review-playbook-dial');
@@ -68,7 +71,10 @@ describe('last-selected playbook persistence (issue #489, item 4)', () => {
   });
 
   it('selecting a different playbook persists it, and a fresh mount ("reload") restores it', async () => {
-    stubFetch({ 'GET /api/playbooks': { playbooks: TWO_ACTIVE }, 'GET /api/reviews': { reviews: [] } });
+    stubFetch({
+      'GET /api/playbooks': { playbooks: TWO_ACTIVE },
+      'GET /api/reviews': { reviews: [] },
+    });
 
     render(<ReviewSubmission />);
     await screen.findByTestId('review-playbook-dial');
@@ -118,7 +124,11 @@ describe('last-selected playbook persistence (issue #489, item 4)', () => {
       'GET /api/playbooks': {
         playbooks: [
           { playbook_id: 'eiaa', display_name: 'EIAA', status: 'active' },
-          { playbook_id: 'sample-agreement', display_name: 'Sample Agreement', status: 'coming_soon' },
+          {
+            playbook_id: 'sample-agreement',
+            display_name: 'Sample Agreement',
+            status: 'coming_soon',
+          },
         ],
       },
       'GET /api/reviews': { reviews: [] },

@@ -59,12 +59,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 INFRA = REPO_ROOT / "infra"
 CDK_OUT = INFRA / "cdk.out"
 
-SUPPLIED_DIGEST = (
-    "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-)
-ZEROED_PLACEHOLDER = (
-    "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-)
+SUPPLIED_DIGEST = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+ZEROED_PLACEHOLDER = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
 
 
 def _assert(condition: bool, label: str, detail: str = "") -> list[str]:
@@ -83,7 +79,10 @@ def _run_synth(context_args: list[str]) -> subprocess.CompletedProcess:
     if not node_modules.is_dir():
         print("  (node_modules absent — running npm install first …)")
         install = subprocess.run(
-            ["npm", "install"], cwd=INFRA, capture_output=True, text=True  # noqa: S607
+            ["npm", "install"],  # noqa: S607
+            cwd=INFRA,
+            capture_output=True,
+            text=True,
         )
         if install.returncode != 0:
             raise RuntimeError(
@@ -128,13 +127,12 @@ def _app_runner_source_configuration(app_template: dict) -> dict:
 # supplied digest, sourced from the real (CicdStack) private ECR repo.
 # ---------------------------------------------------------------------------
 
+
 def check_a_explicit_digest_flows_to_cfn_service() -> list[str]:
     print("\nCheck A: --context imageDigest=... flows through to the CfnService …")
     failures: list[str] = []
 
-    result = _run_synth(
-        ["--context", "env=dev", "--context", f"imageDigest={SUPPLIED_DIGEST}"]
-    )
+    result = _run_synth(["--context", "env=dev", "--context", f"imageDigest={SUPPLIED_DIGEST}"])
     failures += _assert(
         result.returncode == 0,
         "cdk synth --context env=dev --context imageDigest=... exits 0",
@@ -165,8 +163,7 @@ def check_a_explicit_digest_flows_to_cfn_service() -> list[str]:
     )
     failures += _assert(
         "AuthenticationConfiguration" in source_config
-        and "AccessRoleArn"
-        in source_config.get("AuthenticationConfiguration", {}),
+        and "AccessRoleArn" in source_config.get("AuthenticationConfiguration", {}),
         "SourceConfiguration includes an AccessRoleArn for the private ECR pull",
         f"SourceConfiguration keys: {sorted(source_config.keys())}",
     )
@@ -187,6 +184,7 @@ def check_a_explicit_digest_flows_to_cfn_service() -> list[str]:
 # Check B — plain `cdk synth` (no imageDigest) still exits 0, via a
 # deploy-safe public bootstrap image, not the zeroed placeholder.
 # ---------------------------------------------------------------------------
+
 
 def check_b_no_digest_bootstraps_safely() -> list[str]:
     print("\nCheck B: plain cdk synth (no imageDigest) exits 0 via a bootstrap image …")
@@ -230,6 +228,7 @@ def check_b_no_digest_bootstraps_safely() -> list[str]:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> int:
     print("AppStack digest-promotion wiring gate (issue #224)")
     print("=" * 60)
@@ -248,10 +247,7 @@ def main() -> int:
 
     print("\n" + "=" * 60)
     if all_failures:
-        print(
-            f"\nFAIL: {len(all_failures)} check(s) failed.\n"
-            "See output above for details."
-        )
+        print(f"\nFAIL: {len(all_failures)} check(s) failed.\nSee output above for details.")
         return 1
 
     print("\nPASS: all digest-promotion wiring checks passed.")

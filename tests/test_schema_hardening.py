@@ -41,6 +41,7 @@ from pathlib import Path
 
 try:
     import jsonschema
+
     _JSONSCHEMA_AVAILABLE = True
 except ImportError:
     _JSONSCHEMA_AVAILABLE = False
@@ -49,19 +50,39 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_PATH = REPO_ROOT / "playbooks" / "schema.json"
 PLAYBOOK_PATH = REPO_ROOT / "tests" / "fixtures" / "playbooks" / "synthetic-generic-v1.0.0.json"
 
-ON_INSERT_ONLY_FIELDS = {"trigger_terms", "match", "match_surface", "exempt_terms", "regex_trigger_terms"}
+ON_INSERT_ONLY_FIELDS = {
+    "trigger_terms",
+    "match",
+    "match_surface",
+    "exempt_terms",
+    "regex_trigger_terms",
+}
 ON_REMOVE_ONLY_FIELDS = {"protects"}
 # Fields explicitly defined in the hard_rejections.items properties
 KNOWN_RULE_FIELDS = {
-    "id", "description", "kind",
-    "trigger_terms", "match", "match_surface", "exempt_terms", "regex_trigger_terms",
-    "protects", "applies_to_topics",
+    "id",
+    "description",
+    "kind",
+    "trigger_terms",
+    "match",
+    "match_surface",
+    "exempt_terms",
+    "regex_trigger_terms",
+    "protects",
+    "applies_to_topics",
 }
 # Fields explicitly defined in the topics.items properties
 KNOWN_TOPIC_FIELDS = {
-    "id", "section_ref", "section_anchors", "not_in_standard",
-    "our_standard", "acceptable_variations", "must_preserve",
-    "reject_if_proposed", "hard_rejection_refs", "replacement_text",
+    "id",
+    "section_ref",
+    "section_anchors",
+    "not_in_standard",
+    "our_standard",
+    "acceptable_variations",
+    "must_preserve",
+    "reject_if_proposed",
+    "hard_rejection_refs",
+    "replacement_text",
 }
 
 
@@ -72,17 +93,13 @@ def load_json(path: Path) -> dict:
 
 # ── (a) additionalProperties on hard_rejections.items ────────────────────────
 
+
 def check_a_schema_has_additional_props_on_rules(schema: dict) -> tuple[bool, str]:
     """
     Verify schema.json has additionalProperties:false on hard_rejections.items.
     A typo like `exemptTerms` must not validate cleanly.
     """
-    items_schema = (
-        schema
-        .get("properties", {})
-        .get("hard_rejections", {})
-        .get("items", {})
-    )
+    items_schema = schema.get("properties", {}).get("hard_rejections", {}).get("items", {})
     if items_schema.get("additionalProperties") is False:
         return True, "PASS (a-schema): hard_rejections.items has additionalProperties:false"
     return False, (
@@ -102,9 +119,7 @@ def check_a_seed_no_unknown_rule_keys(playbook: dict) -> tuple[bool, str]:
     for rule in playbook.get("hard_rejections", []):
         unknown = set(rule.keys()) - KNOWN_RULE_FIELDS
         if unknown:
-            violations.append(
-                f"rule '{rule.get('id', '?')}' has unknown key(s): {sorted(unknown)}"
-            )
+            violations.append(f"rule '{rule.get('id', '?')}' has unknown key(s): {sorted(unknown)}")
     if violations:
         return False, (
             f"FAIL (a-playbook): hard_rejections rules have unknown keys: "  # noqa: F541
@@ -115,17 +130,13 @@ def check_a_seed_no_unknown_rule_keys(playbook: dict) -> tuple[bool, str]:
 
 # ── (b) on_remove_or_alter must not carry on_insert-only fields ──────────────
 
+
 def check_b_schema_forbids_insert_fields_on_remove(schema: dict) -> tuple[bool, str]:
     """
     Verify schema.json's on_remove_or_alter conditional forbids on_insert-only
     fields (exempt_terms, match, match_surface).
     """
-    items_schema = (
-        schema
-        .get("properties", {})
-        .get("hard_rejections", {})
-        .get("items", {})
-    )
+    items_schema = schema.get("properties", {}).get("hard_rejections", {}).get("items", {})
     all_of = items_schema.get("allOf", [])
 
     remove_conditional = None
@@ -201,17 +212,13 @@ def check_b_seed_no_insert_fields_on_remove(playbook: dict) -> tuple[bool, str]:
 
 # ── (c) present-section topic must have minItems:1 section_anchors ──────────
 
+
 def check_c_schema_encodes_present_section_min_anchors(schema: dict) -> tuple[bool, str]:
     """
     Verify schema.json's topics.items encodes: if not_in_standard is absent or
     false, then section_anchors must have minItems:1.
     """
-    topics_items = (
-        schema
-        .get("properties", {})
-        .get("topics", {})
-        .get("items", {})
-    )
+    topics_items = schema.get("properties", {}).get("topics", {}).get("items", {})
     all_of = topics_items.get("allOf", [])
 
     # Look for a conditional that says: if not not_in_standard (or not_in_standard==false),
@@ -258,18 +265,14 @@ def check_c_seed_no_present_section_empty_anchors(playbook: dict) -> tuple[bool,
 
 # ── (d) not_in_standard topic must have exactly ['sec-_new'] ─────────────────
 
+
 def check_d_schema_encodes_not_in_standard_anchors(schema: dict) -> tuple[bool, str]:
     """
     Verify schema.json's topics.items encodes: if not_in_standard==true, then
     section_anchors must equal exactly ['sec-_new'] (maxItems:1, minItems:1,
     items const or enum 'sec-_new').
     """
-    topics_items = (
-        schema
-        .get("properties", {})
-        .get("topics", {})
-        .get("items", {})
-    )
+    topics_items = schema.get("properties", {}).get("topics", {}).get("items", {})
     all_of = topics_items.get("allOf", [])
 
     for clause in all_of:
@@ -281,9 +284,10 @@ def check_d_schema_encodes_not_in_standard_anchors(schema: dict) -> tuple[bool, 
             sa = then.get("properties", {}).get("section_anchors", {})
             # Must have maxItems:1 (or items const 'sec-_new') to enforce exactly ['sec-_new']
             if sa.get("maxItems") == 1 or (
-                isinstance(sa.get("items"), dict) and (
-                    sa["items"].get("const") == "sec-_new" or
-                    sa["items"].get("enum") == ["sec-_new"]
+                isinstance(sa.get("items"), dict)
+                and (
+                    sa["items"].get("const") == "sec-_new"
+                    or sa["items"].get("enum") == ["sec-_new"]
                 )
             ):
                 return True, (
@@ -323,6 +327,7 @@ def check_d_seed_not_in_standard_anchors_correct(playbook: dict) -> tuple[bool, 
 
 # ── (e) applies_to_topics referential integrity ───────────────────────────────
 
+
 def check_e_applies_to_topics_referential_integrity(playbook: dict) -> tuple[bool, str]:
     """
     Every id in hard_rejections[].applies_to_topics must exist in topics[].id.
@@ -335,13 +340,10 @@ def check_e_applies_to_topics_referential_integrity(playbook: dict) -> tuple[boo
         rule_id = rule.get("id", "<unknown>")
         for tid in rule.get("applies_to_topics", []):
             if tid not in topic_ids:
-                violations.append(
-                    f"rule '{rule_id}' references nonexistent topic '{tid}'"
-                )
+                violations.append(f"rule '{rule_id}' references nonexistent topic '{tid}'")
     if violations:
         return False, (
-            "FAIL (e): applies_to_topics referential integrity violated: "
-            + "; ".join(violations)
+            "FAIL (e): applies_to_topics referential integrity violated: " + "; ".join(violations)
         )
     return True, (
         f"PASS (e): all applies_to_topics ids resolve to existing topics "
@@ -356,8 +358,7 @@ def check_e_governance_doc_mentions_referential_integrity(schema: dict) -> tuple
     a CI constraint (the description field).
     """
     at_prop = (
-        schema
-        .get("properties", {})
+        schema.get("properties", {})
         .get("hard_rejections", {})
         .get("items", {})
         .get("properties", {})
@@ -388,6 +389,7 @@ def check_e_governance_doc_mentions_referential_integrity(schema: dict) -> tuple
 # Fixture (c): present-section topic with section_anchors: [].
 # Fixture (d): not_in_standard:true topic with a real anchor (not 'sec-_new').
 # Seed     : the live playbook — must still PASS (regression guard).
+
 
 def _build_validator(schema: dict):
     """Return a Draft7Validator for schema, or None if jsonschema is unavailable."""
@@ -497,7 +499,9 @@ def check_f_validator_rejects_hostile_fixtures(schema: dict, playbook: dict) -> 
     # ── fixture (d): not_in_standard:true topic with a real anchor ───────────
     nis_topic = _first_topic(playbook, not_in_standard=True)
     if nis_topic is None:
-        results.append("fixture-d: no not_in_standard:true topic found in seed; cannot build fixture")
+        results.append(
+            "fixture-d: no not_in_standard:true topic found in seed; cannot build fixture"
+        )
     else:
         doc_d = copy.deepcopy(playbook)
         for topic in doc_d["topics"]:
@@ -524,6 +528,7 @@ def check_f_validator_rejects_hostile_fixtures(schema: dict, playbook: dict) -> 
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
+
 
 def main() -> int:
     schema = load_json(SCHEMA_PATH)

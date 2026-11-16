@@ -202,9 +202,12 @@ function stubStalledUpload(afterPost: AfterPost): Harness {
       // rejects on its signal.
       return new Promise<Response>((resolve, reject) => {
         init?.signal?.addEventListener('abort', () => reject(abortError()), { once: true });
-        setTimeout(() => {
-          resolve(jsonResponse(202, { review_id: CREATED_ID, resumed: false }));
-        }, submitTimeoutMs(docxFile().size) + 1_000);
+        setTimeout(
+          () => {
+            resolve(jsonResponse(202, { review_id: CREATED_ID, resumed: false }));
+          },
+          submitTimeoutMs(docxFile().size) + 1_000,
+        );
       });
     }
 
@@ -216,7 +219,10 @@ function stubStalledUpload(afterPost: AfterPost): Harness {
       if (!postIssued) {
         // The mount-time reload probe: only what existed before the attempt.
         return Promise.resolve(
-          jsonResponse(200, { reviews: afterPost === 'older-only' ? [olderRow] : [], next_token: null }),
+          jsonResponse(200, {
+            reviews: afterPost === 'older-only' ? [olderRow] : [],
+            next_token: null,
+          }),
         );
       }
       listingsAfterPost += 1;
@@ -274,7 +280,8 @@ function stubStalledUpload(afterPost: AfterPost): Harness {
           decision: null,
           message: null,
           has_output: false,
-          created_at: detailId === OLDER_ID ? olderRow.created_at : String(Math.floor(Date.now() / 1000)),
+          created_at:
+            detailId === OLDER_ID ? olderRow.created_at : String(Math.floor(Date.now() / 1000)),
         }),
       );
     }
@@ -304,9 +311,11 @@ function expectUnconfirmedBanner(): HTMLElement {
   // Still interrupts a screen reader: it carries a key (OrbitDiner's
   // `messageRole`), and what it asks the reviewer to do matters.
   expect(banner.getAttribute('role')).toBe('alert');
-  expect(within(banner).getAllByRole('button').map((key) => key.textContent)).toEqual([
-    CHECK_HISTORY_KEY,
-  ]);
+  expect(
+    within(banner)
+      .getAllByRole('button')
+      .map((key) => key.textContent),
+  ).toEqual([CHECK_HISTORY_KEY]);
   return banner;
 }
 
@@ -447,7 +456,7 @@ describe('a submit whose budget runs out (issue #120)', () => {
     expect(submitArmed()).toBe(true);
   });
 
-  it('two rows in the window: does not guess which is this tab\'s', async () => {
+  it("two rows in the window: does not guess which is this tab's", async () => {
     allowConsoleErrorsInThisTest(/POST \/api\/reviews abandoned after \d+ ms/);
     const h = stubStalledUpload('two-in-window');
     await submitAndRunOutTheBudget(h);
@@ -465,7 +474,7 @@ describe('a submit whose budget runs out (issue #120)', () => {
     expect(submitArmed()).toBe(true);
   });
 
-  it('another tab\'s review under another playbook is not taken for this one', async () => {
+  it("another tab's review under another playbook is not taken for this one", async () => {
     allowConsoleErrorsInThisTest(/POST \/api\/reviews abandoned after \d+ ms/);
     const h = stubStalledUpload('other-playbook');
     await submitAndRunOutTheBudget(h);

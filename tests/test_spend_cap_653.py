@@ -233,9 +233,7 @@ class SpendTestBase(unittest.TestCase):
 class TestTheCapResolution(SpendTestBase):
     def test_nothing_stored_uses_the_deployment_cap(self):
         with _no_env_overrides(DAILY_SPEND_CAP_USD_CENTS="3500"):
-            self.assertEqual(
-                model_settings.resolve_daily_spend_cap_cents(self.ddb), 3500
-            )
+            self.assertEqual(model_settings.resolve_daily_spend_cap_cents(self.ddb), 3500)
 
     def test_nothing_stored_and_no_env_uses_the_built_in_default(self):
         env = dict(os.environ)
@@ -252,7 +250,7 @@ class TestTheCapResolution(SpendTestBase):
             self.assertEqual(model_settings.resolve_daily_spend_cap_cents(self.ddb), 777)
 
     def test_clearing_falls_back_to_the_deployment_rather_than_freezing_its_value(self):
-        """"Use the deployment's cap" has to keep TRACKING the deployment. A
+        """ "Use the deployment's cap" has to keep TRACKING the deployment. A
         clear that stored the deployment's current number would stop tracking
         it the moment the deployment changed."""
         model_settings.set_daily_spend_cap_cents(777, ADMIN, self.ddb)
@@ -733,9 +731,7 @@ class TestHttpSurface(SpendTestBase):
 
     def test_a_non_admin_cannot_set_the_cap(self):
         self._as(NON_ADMIN)
-        response = self.client.post(
-            "/api/admin/spend-cap", json={"daily_cap_usd_cents": 100}
-        )
+        response = self.client.post("/api/admin/spend-cap", json={"daily_cap_usd_cents": 100})
         self.assertEqual(response.status_code, 403)
         self.assertIsNone(model_settings.stored_daily_spend_cap_cents(self.ddb))
 

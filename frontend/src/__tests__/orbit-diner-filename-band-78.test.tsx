@@ -79,8 +79,7 @@ import {
  * console verbatim (the backend only strips the ends), so any name a file
  * chooser can produce arrives here, separators and all.
  */
-const SEPARATOR_HEAVY =
-  'EIAA_Northwestern_University_2026_redline_round3_final_FINAL.docx';
+const SEPARATOR_HEAVY = 'EIAA_Northwestern_University_2026_redline_round3_final_FINAL.docx';
 
 /** What the chunk-boundary-only wrap painted, quoted from #78. */
 const BEFORE = ['EIAA_', 'Northw….docx'];
@@ -156,9 +155,10 @@ describe('issue #78 — a separator-heavy name fills line 1 before it truncates'
     // The guard on part 1's fix: packing is a truncation-time recovery, so a
     // name that fits at its separators is still painted at its separators.
     // Without this, `Mutual NDA draft-v3.docx` would be cut mid-word.
-    expect(
-      fitFilename(SHORT, { measure: metricsAt(PHONE.font), width: PHONE.width }),
-    ).toEqual(['Mutual NDA', 'draft-v3.docx']);
+    expect(fitFilename(SHORT, { measure: metricsAt(PHONE.font), width: PHONE.width })).toEqual([
+      'Mutual NDA',
+      'draft-v3.docx',
+    ]);
   });
 });
 
@@ -185,12 +185,10 @@ describe('issue #78 — the 561–660px console band is covered, not skipped', (
     // sooner, because it already collapses at 1220 — far below this band.
     expect(CONSOLE_PHONE_MAX_PX).toBe(560);
     const collapsed = '@container od-console (max-width: 1220px)';
-    expect(valueOf('.od-appliances', 'grid-template-columns', collapsed)).toBe(
-      'minmax(0, 1fr)',
+    expect(valueOf('.od-appliances', 'grid-template-columns', collapsed)).toBe('minmax(0, 1fr)');
+    expect(valueOf('.od-console:not(.od-plain) .od-toast-name', 'font-size', collapsed)).toBe(
+      '18px',
     );
-    expect(
-      valueOf('.od-console:not(.od-plain) .od-toast-name', 'font-size', collapsed),
-    ).toBe('18px');
     for (const consoleWidth of [BAND_MIN, BAND_MAX]) {
       expect(inscriptionBox(consoleWidth).font).toBe(18);
     }
@@ -214,13 +212,13 @@ describe('issue #78 — the 561–660px console band is covered, not skipped', (
       const measure = metricsAt(box.font);
       for (const name of ORPHAN_PRONE) {
         const lines = fitFilename(name, { measure, width: box.width });
-        const where = `${JSON.stringify(name)} at console ${consoleWidth}px ` +
+        const where =
+          `${JSON.stringify(name)} at console ${consoleWidth}px ` +
           `(box ${box.width}px / ${box.font}px)`;
         expect(lines[lines.length - 1], `orphaned extension: ${where}`).not.toBe('docx');
-        expect(
-          lines[lines.length - 1],
-          `last line does not carry the extension: ${where}`,
-        ).toMatch(/\.docx$/);
+        expect(lines[lines.length - 1], `last line does not carry the extension: ${where}`).toMatch(
+          /\.docx$/,
+        );
         expectInside(lines, box);
       }
     }

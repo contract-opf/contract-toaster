@@ -30,10 +30,16 @@ NEUTRAL_ADMIN_EMAIL = "admin@example.com"
 NEUTRAL_HOSTED_DOMAIN = "example.com"
 
 NEUTRAL_CDK_CONTEXT: list[str] = [
-    "--context", "githubOwner=example-org",
-    "--context", "alarmsEmail=alarms@example.com",
-    "--context", "appDomain=example.com",
-    "--context", f"adminEmail={NEUTRAL_ADMIN_EMAIL}",
-    "--context", f"hostedDomain={NEUTRAL_HOSTED_DOMAIN}",
-    "--context", f"allowedEmailDomains={NEUTRAL_HOSTED_DOMAIN}",
+    "--context",
+    "githubOwner=example-org",
+    "--context",
+    "alarmsEmail=alarms@example.com",
+    "--context",
+    "appDomain=example.com",
+    "--context",
+    f"adminEmail={NEUTRAL_ADMIN_EMAIL}",
+    "--context",
+    f"hostedDomain={NEUTRAL_HOSTED_DOMAIN}",
+    "--context",
+    f"allowedEmailDomains={NEUTRAL_HOSTED_DOMAIN}",
 ]

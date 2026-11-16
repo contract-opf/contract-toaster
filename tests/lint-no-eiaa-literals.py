@@ -171,7 +171,9 @@ def _self_test_walker_catches_reintroduced_literal() -> None:
 # ---------------------------------------------------------------------------
 
 
-def scan_repo(repo_root: Path, target_dirs: tuple[str, ...], allowlist: dict[str, str]) -> list[str]:
+def scan_repo(
+    repo_root: Path, target_dirs: tuple[str, ...], allowlist: dict[str, str]
+) -> list[str]:
     failures: list[str] = []
     for base in target_dirs:
         for path in sorted((repo_root / base).rglob("*.py")):

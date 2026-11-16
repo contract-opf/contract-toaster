@@ -79,15 +79,12 @@ NGINX_CONF = REPO_ROOT / "deploy" / "dts" / "nginx.conf"
 # the Amplify target so a weakened max-age, a dropped `includeSubDomains`, or
 # a `self` allowlist sneaking in for a capability cannot pass silently.
 HSTS_VALUE = "max-age=63072000; includeSubDomains; preload"
-PERMISSIONS_POLICY_VALUE = (
-    "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
-)
+PERMISSIONS_POLICY_VALUE = "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
 COOP_VALUE = "same-origin"
 
 # Each capability the Permissions-Policy must deny, checked individually so
 # the nginx assertion does not depend on the ordering of the list.
-DENIED_CAPABILITIES = ("camera=()", "microphone=()", "geolocation=()",
-                       "payment=()", "usb=()")
+DENIED_CAPABILITIES = ("camera=()", "microphone=()", "geolocation=()", "payment=()", "usb=()")
 
 
 def _assert(condition: bool, label: str, detail: str = "") -> list[str]:
@@ -190,7 +187,7 @@ def _catch_all_segment(collapsed: str) -> str | None:
     start = collapsed.find(marker)
     if start == -1:
         return None
-    rest = collapsed[start + len(marker):]
+    rest = collapsed[start + len(marker) :]
     nxt = rest.find("- pattern:")
     return rest if nxt == -1 else rest[:nxt]
 
@@ -223,6 +220,7 @@ def _extract_server_level(text: str) -> str:
 # Check 1 — cdk synth exits 0
 # ---------------------------------------------------------------------------
 
+
 def check_synth_exits_zero() -> list[str]:
     print("\nCheck 1: cdk synth --context env=dev exits 0 …")
     try:
@@ -241,6 +239,7 @@ def check_synth_exits_zero() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check 2 — Amplify custom headers carry HSTS + Permissions-Policy + COOP
 # ---------------------------------------------------------------------------
+
 
 def check_amplify_hardening_headers() -> list[str]:
     print(
@@ -328,6 +327,7 @@ def check_amplify_hardening_headers() -> list[str]:
 # Check 3 — DTS nginx: Permissions-Policy + COOP at server level
 # ---------------------------------------------------------------------------
 
+
 def check_nginx_hardening_headers() -> list[str]:
     print(
         "\nCheck 3: deploy/dts/nginx.conf declares Permissions-Policy and "
@@ -362,14 +362,17 @@ def check_nginx_hardening_headers() -> list[str]:
             f"Value was {value!r}; missing {missing!r}.",
         )
 
-    coop = bool(re.search(
-        r'add_header\s+Cross-Origin-Opener-Policy\s+"' + re.escape(COOP_VALUE)
-        + r'"\s+always\s*;',
-        server_level,
-    ))
+    coop = bool(
+        re.search(
+            r'add_header\s+Cross-Origin-Opener-Policy\s+"'
+            + re.escape(COOP_VALUE)
+            + r'"\s+always\s*;',
+            server_level,
+        )
+    )
     failures += _assert(
         coop,
-        'nginx.conf has a server-level `add_header Cross-Origin-Opener-Policy '
+        "nginx.conf has a server-level `add_header Cross-Origin-Opener-Policy "
         f'"{COOP_VALUE}" always;`',
         "Not found outside every location block. Same server-level and "
         "`always` requirement as Permissions-Policy above.",
@@ -381,6 +384,7 @@ def check_nginx_hardening_headers() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check 4 — DTS nginx: HSTS iff a TLS listener exists
 # ---------------------------------------------------------------------------
+
 
 def check_nginx_hsts_only_on_tls() -> list[str]:
     print(
@@ -422,6 +426,7 @@ def check_nginx_hsts_only_on_tls() -> list[str]:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> int:
     print("Frontend hosting hardening headers gate (issue #57 / audit F10)")
     print("=" * 70)
@@ -434,10 +439,7 @@ def main() -> int:
 
     print("\n" + "=" * 70)
     if all_failures:
-        print(
-            f"\nFAIL: {len(all_failures)} check(s) failed.\n"
-            "See output above for details."
-        )
+        print(f"\nFAIL: {len(all_failures)} check(s) failed.\nSee output above for details.")
         return 1
 
     print("\nPASS: all issue #57 hardening-header checks passed.")

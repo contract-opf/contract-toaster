@@ -90,11 +90,14 @@ describe('issue #106: explainFailure on the bare run_review stage', () => {
 });
 
 describe('issue #106 review round 1: every review_spine.PROGRESS_STAGES token has a dedicated entry', () => {
-  it.each(PROGRESS_STAGES)('%s resolves to its own STAGE_EXPLANATIONS entry, not the generic fallback', (stage) => {
-    const explanation = explainFailure({ reason: 'unhandled_exception', failing_stage: stage });
-    expect(explanation).not.toBeNull();
-    expect(explanation).not.toEqual(GENERIC_FALLBACK);
-  });
+  it.each(PROGRESS_STAGES)(
+    '%s resolves to its own STAGE_EXPLANATIONS entry, not the generic fallback',
+    (stage) => {
+      const explanation = explainFailure({ reason: 'unhandled_exception', failing_stage: stage });
+      expect(explanation).not.toBeNull();
+      expect(explanation).not.toEqual(GENERIC_FALLBACK);
+    },
+  );
 
   it.each(PROGRESS_STAGES)('%s reaches the same entry with no reason at all', (stage) => {
     // Same "bare failing_stage row" path the run_review tests above cover —

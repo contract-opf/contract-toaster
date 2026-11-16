@@ -117,17 +117,14 @@ def main():
             failures.append(
                 f"EMPTY SCOPE: rule '{rule_id}' (kind={kind}) has provably empty "
                 f"effective hunk-scope.\n"
-                f"  applies_to_topics: {applies_to}\n"
-                + "\n".join(topic_details) + "\n"
+                f"  applies_to_topics: {applies_to}\n" + "\n".join(topic_details) + "\n"
                 f"  FIX: add '{SEC_NEW}' to section_anchors of each not_in_standard "
                 f"topic, then define {SEC_NEW} semantics in schema.json and ARCHITECTURE.md."
             )
 
     if failures:
         print("FAIL: empty-scope gate detected rules with no effective hunk-scope.")
-        print(
-            "These rules are dead config: they can never fire on any diff hunk.\n"
-        )
+        print("These rules are dead config: they can never fire on any diff hunk.\n")
         for f in failures:
             print(f)
         print(

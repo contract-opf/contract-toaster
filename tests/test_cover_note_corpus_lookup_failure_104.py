@@ -117,9 +117,7 @@ class CorpusLookupFailureTestBase(cover_note_499.CoverNoteRouteTestBase):
         assertion below depends on AUDIT_TABLE writes still succeeding)."""
         os.environ["PLAYBOOK_VERSIONS_TABLE"] = _PLAYBOOK_VERSIONS_TABLE_NAME
         self.addCleanup(os.environ.pop, "PLAYBOOK_VERSIONS_TABLE", None)
-        raising = _RaisingTableDynamoDBResource(
-            self._routing_ddb, _PLAYBOOK_VERSIONS_TABLE_NAME
-        )
+        raising = _RaisingTableDynamoDBResource(self._routing_ddb, _PLAYBOOK_VERSIONS_TABLE_NAME)
         self.app.dependency_overrides[review_routes.get_dynamodb_resource] = lambda: raising
 
 
@@ -135,9 +133,7 @@ class TestRaisedLookupFailureFailsClosed(CorpusLookupFailureTestBase):
             "owner-corpus-throttle",
             playbook_id="any-playbook-id",
         )
-        self._set_cover_note_client(
-            cover_note_499.FakeCoverNoteModelClient([_KNOWN_EDITS_DRAFT])
-        )
+        self._set_cover_note_client(cover_note_499.FakeCoverNoteModelClient([_KNOWN_EDITS_DRAFT]))
 
         with self.assertLogs("src.review_routes", level="WARNING") as captured:
             resp = self._butter("owner-corpus-throttle", "review-corpus-throttle")
@@ -145,9 +141,7 @@ class TestRaisedLookupFailureFailsClosed(CorpusLookupFailureTestBase):
         # (a) the response: a 503 carrying a stable, non-substantive
         # token -- never the raw `RuntimeError` text, never a 200.
         self.assertEqual(resp.status_code, 503)
-        self.assertEqual(
-            resp.json()["detail"], review_routes.COVER_NOTE_SCAN_UNAVAILABLE_TOKEN
-        )
+        self.assertEqual(resp.json()["detail"], review_routes.COVER_NOTE_SCAN_UNAVAILABLE_TOKEN)
         self.assertNotIn("ProvisionedThroughputExceededException", resp.text)
 
         # (b) the log: a WARNING naming the review, distinguishing this
@@ -160,9 +154,7 @@ class TestRaisedLookupFailureFailsClosed(CorpusLookupFailureTestBase):
         # (c) the audit row: the scan_corpus marker, matching the
         # response token exactly (the two must never drift apart).
         audit_items = list(self._audit_table().items.values())
-        matching = [
-            item for item in audit_items if item.get("target") == "review-corpus-throttle"
-        ]
+        matching = [item for item in audit_items if item.get("target") == "review-corpus-throttle"]
         self.assertEqual(len(matching), 1, audit_items)
         self.assertEqual(matching[0]["action"], "leakage_scan_corpus_unavailable")
         self.assertEqual(
@@ -184,9 +176,7 @@ class TestRaisedLookupFailureFailsClosed(CorpusLookupFailureTestBase):
             "owner-corpus-throttle-2",
             playbook_id="any-playbook-id",
         )
-        self._set_cover_note_client(
-            cover_note_499.FakeCoverNoteModelClient([_KNOWN_EDITS_DRAFT])
-        )
+        self._set_cover_note_client(cover_note_499.FakeCoverNoteModelClient([_KNOWN_EDITS_DRAFT]))
 
         resp = self._butter("owner-corpus-throttle-2", "review-corpus-throttle-2")
 
@@ -219,9 +209,7 @@ class TestRegistryMissStaysFailOpen(CorpusLookupFailureTestBase):
             "owner-registry-miss",
             playbook_id="does-not-exist-in-registry",
         )
-        self._set_cover_note_client(
-            cover_note_499.FakeCoverNoteModelClient([_KNOWN_EDITS_DRAFT])
-        )
+        self._set_cover_note_client(cover_note_499.FakeCoverNoteModelClient([_KNOWN_EDITS_DRAFT]))
 
         resp = self._butter("owner-registry-miss", "review-registry-miss")
 
@@ -230,12 +218,8 @@ class TestRegistryMissStaysFailOpen(CorpusLookupFailureTestBase):
         self.assertEqual(row.get("cover_note_draft"), _KNOWN_EDITS_DRAFT)
 
     def test_no_playbook_id_at_all_still_answers_200(self):
-        self._seed_done_review(
-            "review-no-playbook-id", "owner-no-playbook-id", playbook_id=None
-        )
-        self._set_cover_note_client(
-            cover_note_499.FakeCoverNoteModelClient([_KNOWN_EDITS_DRAFT])
-        )
+        self._seed_done_review("review-no-playbook-id", "owner-no-playbook-id", playbook_id=None)
+        self._set_cover_note_client(cover_note_499.FakeCoverNoteModelClient([_KNOWN_EDITS_DRAFT]))
 
         resp = self._butter("owner-no-playbook-id", "review-no-playbook-id")
 

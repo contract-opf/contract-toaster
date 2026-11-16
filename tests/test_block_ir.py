@@ -68,9 +68,7 @@ def _churned_bytes(transform_names: list[str], *, flavor: str = BASE_FLAVOR) -> 
     return docx_bytes
 
 
-def _normalized_paragraphs(
-    docx_bytes: bytes, case: str, failures: list[str]
-) -> list[dict] | None:
+def _normalized_paragraphs(docx_bytes: bytes, case: str, failures: list[str]) -> list[dict] | None:
     result = ens.extract_and_normalize(docx_bytes)
     if result.get("status") != "normalized":
         failures.append(f"[{case}] did not normalize: status={result.get('status')!r}")
@@ -112,8 +110,7 @@ def test_same_bytes_produce_the_same_ids_and_the_same_map(failures: list[str]) -
         second_map = ens.build_block_map(second)
         if list(first_map.items()) != list(second_map.items()):
             failures.append(
-                f"[{case}] block map is not deterministic across runs over "
-                f"identical bytes"
+                f"[{case}] block map is not deterministic across runs over identical bytes"
             )
 
 
@@ -176,8 +173,7 @@ def test_ids_are_zero_padded_document_order(failures: list[str]) -> None:
         return
     if paragraphs[0].get("block_id") != "p0001":
         failures.append(
-            f"[format] first block id must be 'p0001'; got "
-            f"{paragraphs[0].get('block_id')!r}"
+            f"[format] first block id must be 'p0001'; got {paragraphs[0].get('block_id')!r}"
         )
     if ens.BLOCK_ID_FORMAT % 42 != "p0042":
         failures.append(
@@ -268,8 +264,7 @@ def test_block_map_text_matches_the_paragraph_text_for_every_block(
             continue
         if list(block_map.keys()) != [p["block_id"] for p in paragraphs]:
             failures.append(
-                f"[{case}] block map is not in document order: "
-                f"{list(block_map.keys())!r}"
+                f"[{case}] block map is not in document order: {list(block_map.keys())!r}"
             )
             continue
 
@@ -413,7 +408,9 @@ def main() -> int:
             print(f"  - {failure}")
         print(f"\nFAIL: {len(failures)} issue(s) found.")
         return 1
-    print("\nPASS: block ids are immutable, deterministic, and 1:1 with logical paragraphs (issue #619).")
+    print(
+        "\nPASS: block ids are immutable, deterministic, and 1:1 with logical paragraphs (issue #619)."
+    )
     return 0
 
 

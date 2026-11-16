@@ -138,23 +138,17 @@ class OpfActiveBundleResolutionTestBase(unittest.TestCase):
 class TestOpfActiveBundleResolvesWithoutTouchingV1Disk(OpfActiveBundleResolutionTestBase):
     def test_resolves_the_real_hash_for_an_unregistered_opf_playbook(self):
         self._activate_opf()
-        resolved = reviews_module._read_active_release_bundle_hash(
-            DB_ONLY_PLAYBOOK_ID, self.ddb
-        )
+        resolved = reviews_module._read_active_release_bundle_hash(DB_ONLY_PLAYBOOK_ID, self.ddb)
         self.assertEqual(resolved, CONTENT_HASH)
 
     def test_resolve_active_release_bundle_hash_does_not_503(self):
         self._activate_opf()
-        resolved = reviews_module.resolve_active_release_bundle_hash(
-            DB_ONLY_PLAYBOOK_ID, self.ddb
-        )
+        resolved = reviews_module.resolve_active_release_bundle_hash(DB_ONLY_PLAYBOOK_ID, self.ddb)
         self.assertEqual(resolved, CONTENT_HASH)
 
     def test_opf_02_artifact_kind_also_resolves(self):
         self._activate_opf(artifact_kind="opf-0.2")
-        resolved = reviews_module._read_active_release_bundle_hash(
-            DB_ONLY_PLAYBOOK_ID, self.ddb
-        )
+        resolved = reviews_module._read_active_release_bundle_hash(DB_ONLY_PLAYBOOK_ID, self.ddb)
         self.assertEqual(resolved, CONTENT_HASH)
 
 
@@ -166,16 +160,12 @@ class TestOpfActiveBundleStillFailsClosed(OpfActiveBundleResolutionTestBase):
             row_content_hash=CONTENT_HASH,
             playbooks_active_hash="sha256:" + "ff" * 32,
         )
-        resolved = reviews_module._read_active_release_bundle_hash(
-            DB_ONLY_PLAYBOOK_ID, self.ddb
-        )
+        resolved = reviews_module._read_active_release_bundle_hash(DB_ONLY_PLAYBOOK_ID, self.ddb)
         self.assertIsNone(resolved)
 
     def test_missing_storage_key_is_none(self):
         self._activate_opf(storage_key=None)
-        resolved = reviews_module._read_active_release_bundle_hash(
-            DB_ONLY_PLAYBOOK_ID, self.ddb
-        )
+        resolved = reviews_module._read_active_release_bundle_hash(DB_ONLY_PLAYBOOK_ID, self.ddb)
         self.assertIsNone(resolved)
 
     def test_no_playbooks_row_at_all_is_none(self):
@@ -188,9 +178,7 @@ class TestOpfActiveBundleStillFailsClosed(OpfActiveBundleResolutionTestBase):
         self.playbooks_table.put_item(
             Item={"playbook_id": DB_ONLY_PLAYBOOK_ID, "active_release_bundle_hash": ""}
         )
-        resolved = reviews_module._read_active_release_bundle_hash(
-            DB_ONLY_PLAYBOOK_ID, self.ddb
-        )
+        resolved = reviews_module._read_active_release_bundle_hash(DB_ONLY_PLAYBOOK_ID, self.ddb)
         self.assertIsNone(resolved)
 
 

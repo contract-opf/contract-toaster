@@ -111,9 +111,7 @@ if str(BACKEND_ROOT) not in sys.path:
 
 os.environ.setdefault("REVIEWS_TABLE", "contract-toaster-reviews-recovery62-test")
 os.environ.setdefault("AUDIT_TABLE", "contract-toaster-audit-recovery62-test")
-os.environ.setdefault(
-    "REVIEW_SUBMISSIONS_TABLE", "contract-toaster-submissions-recovery62-test"
-)
+os.environ.setdefault("REVIEW_SUBMISSIONS_TABLE", "contract-toaster-submissions-recovery62-test")
 os.environ.setdefault("DAILY_SPEND_TABLE", "contract-toaster-daily-spend-recovery62-test")
 os.environ.setdefault("USERS_TABLE", "contract-toaster-users-recovery62-test")
 os.environ.setdefault("PLAYBOOKS_TABLE", "contract-toaster-playbooks-recovery62-test")
@@ -149,7 +147,7 @@ HOUR = 3600
 # selector would have missed and the sixth THIS diff manufactures.
 # `orphan` is the expected outcome.
 #   id                  -> (arn kind, age, orphan?)
-ORPHAN_NO_ARN = "r-a-no-arn"           # RUNNING, died before StartExecution
+ORPHAN_NO_ARN = "r-a-no-arn"  # RUNNING, died before StartExecution
 ORPHAN_INPROCESS = "r-a-inprocess-arn"  # RUNNING, the ordinary stranded run
 # PENDING, never started: `InProcessStepFunctionsClient.shutdown()` passes
 # `cancel_futures=True`, so a review queued on the pool when the container
@@ -161,10 +159,10 @@ ORPHAN_INPROCESS = "r-a-inprocess-arn"  # RUNNING, the ordinary stranded run
 # must still speak for"). Without it the PENDING iteration of the query loop
 # and the `:pending` literal in `_relabel`'s ConditionExpression are green
 # forever whatever they say.
-ORPHAN_PENDING = "r-a-pending-queued"   # PENDING, dropped by cancel_futures
-LIVE_STEPFUNCTIONS = "r-b-sfn-arn"      # RUNNING on AWS: another owner's row
-LIVE_THIS_PROCESS = "r-c-fresh"         # RUNNING, touched after this boot
-ALREADY_DONE = "r-d-done"               # terminal: nothing to recover
+ORPHAN_PENDING = "r-a-pending-queued"  # PENDING, dropped by cancel_futures
+LIVE_STEPFUNCTIONS = "r-b-sfn-arn"  # RUNNING on AWS: another owner's row
+LIVE_THIS_PROCESS = "r-c-fresh"  # RUNNING, touched after this boot
+ALREADY_DONE = "r-d-done"  # terminal: nothing to recover
 
 # Every row this recovery is expected to claim, and every row it must not.
 ORPHANED_IDS = (ORPHAN_NO_ARN, ORPHAN_INPROCESS, ORPHAN_PENDING)
@@ -275,9 +273,7 @@ class RecoveryFixture(unittest.TestCase):
 
         self.ddb = boto3.resource("dynamodb", region_name=REGION)
         self.ddb.create_table(**_reviews_table_spec(os.environ["REVIEWS_TABLE"]))
-        self.ddb.create_table(
-            **_submissions_table_spec(os.environ["REVIEW_SUBMISSIONS_TABLE"])
-        )
+        self.ddb.create_table(**_submissions_table_spec(os.environ["REVIEW_SUBMISSIONS_TABLE"]))
         self.ddb.create_table(
             TableName=os.environ["DAILY_SPEND_TABLE"],
             KeySchema=[{"AttributeName": "spend_date", "KeyType": "HASH"}],
@@ -304,9 +300,7 @@ class RecoveryFixture(unittest.TestCase):
 
     def _submit(self, review_id: str, *, sfn_client: Any | None) -> None:
         """One submission, through the real submit-path writers in order."""
-        reviews._create_review_row(
-            review_id, OWNER, "synthetic-generic", BUNDLE_HASH, self.ddb
-        )
+        reviews._create_review_row(review_id, OWNER, "synthetic-generic", BUNDLE_HASH, self.ddb)
         submission = reviews.create_submission_record(
             idempotency_key=f"idem-{review_id}",
             owner_sub=OWNER,
@@ -392,10 +386,7 @@ class RecoveryFixture(unittest.TestCase):
         return started
 
     def rows(self) -> dict[str, dict[str, Any]]:
-        return {
-            item["review_id"]: item
-            for item in self.reviews_table.scan()["Items"]
-        }
+        return {item["review_id"]: item for item in self.reviews_table.scan()["Items"]}
 
 
 # ---------------------------------------------------------------------------
@@ -419,14 +410,10 @@ class TestRecoverOrphanedReviews(RecoveryFixture):
             str(self.before[ORPHAN_INPROCESS]["execution_arn"]).startswith("inprocess:")
         )
         self.assertTrue(
-            reviews.is_step_functions_execution(
-                self.before[LIVE_STEPFUNCTIONS]["execution_arn"]
-            )
+            reviews.is_step_functions_execution(self.before[LIVE_STEPFUNCTIONS]["execution_arn"])
         )
         self.assertFalse(
-            reviews.is_step_functions_execution(
-                self.before[ORPHAN_INPROCESS]["execution_arn"]
-            )
+            reviews.is_step_functions_execution(self.before[ORPHAN_INPROCESS]["execution_arn"])
         )
         for review_id in (*RUNNING_ORPHAN_IDS, LIVE_STEPFUNCTIONS, LIVE_THIS_PROCESS):
             self.assertEqual(self.before[review_id]["status"], "RUNNING")
@@ -594,9 +581,7 @@ class TestReservationSettlement(RecoveryFixture):
         return int(item["reserved_usd_cents"])
 
     def _submission(self, review_id: str) -> dict[str, Any]:
-        return self.submissions_table.get_item(
-            Key={"idempotency_key": f"idem-{review_id}"}
-        )["Item"]
+        return self.submissions_table.get_item(Key={"idempotency_key": f"idem-{review_id}"})["Item"]
 
     def test_exactly_the_three_orphans_are_settled(self) -> None:
         """Against the REAL reservations `reserve_spend` wrote — six of
@@ -657,16 +642,12 @@ class TestReservationSettlement(RecoveryFixture):
         that is the condition the whole module exists to clear."""
         real = reviews.settle_reservation_for_cancel
 
-        def explode_on_the_first(
-            review_id: str, dynamodb_resource: Any, **kwargs: Any
-        ) -> None:
+        def explode_on_the_first(review_id: str, dynamodb_resource: Any, **kwargs: Any) -> None:
             if review_id == ORPHAN_INPROCESS:
                 raise RuntimeError("dynamodb is unreachable")
             real(review_id, dynamodb_resource, **kwargs)
 
-        with patch.object(
-            reviews, "settle_reservation_for_cancel", explode_on_the_first
-        ):
+        with patch.object(reviews, "settle_reservation_for_cancel", explode_on_the_first):
             recovered = runner_recovery.recover_orphaned_reviews(
                 self.ddb, process_started_at=self.process_started_at
             )
@@ -785,9 +766,7 @@ class TestReasonToken(unittest.TestCase):
         it is exactly the one this recovery owns."""
         started = 2_000_000_000
         old = {"updated_at": str(started - HOUR)}
-        self.assertTrue(
-            runner_recovery.is_orphaned({**old}, process_started_at=started)
-        )
+        self.assertTrue(runner_recovery.is_orphaned({**old}, process_started_at=started))
         self.assertTrue(
             runner_recovery.is_orphaned(
                 {**old, "execution_arn": "inprocess:exec-1"}, process_started_at=started
@@ -797,17 +776,13 @@ class TestReasonToken(unittest.TestCase):
             runner_recovery.is_orphaned(
                 {
                     **old,
-                    "execution_arn": (
-                        "arn:aws:states:us-east-1:000000000000:execution:sm:exec-1"
-                    ),
+                    "execution_arn": ("arn:aws:states:us-east-1:000000000000:execution:sm:exec-1"),
                 },
                 process_started_at=started,
             )
         )
         self.assertFalse(
-            runner_recovery.is_orphaned(
-                {"updated_at": str(started)}, process_started_at=started
-            )
+            runner_recovery.is_orphaned({"updated_at": str(started)}, process_started_at=started)
         )
         # No timestamp at all: not recoverable on a guess.
         self.assertFalse(runner_recovery.is_orphaned({}, process_started_at=started))
@@ -864,9 +839,7 @@ class LifespanFixture(RecoveryFixture):
             async with backend_main._lifespan(None):
                 pass
 
-        with patch.object(
-            backend_main.time, "time", return_value=float(self.process_started_at)
-        ):
+        with patch.object(backend_main.time, "time", return_value=float(self.process_started_at)):
             asyncio.run(drive())
 
 
@@ -1010,9 +983,7 @@ class TestInFlightTracking(unittest.TestCase):
         client = pipeline_runner.InProcessStepFunctionsClient(
             runner=lambda _rid, _payload: None, pool=SyncPool()
         )
-        client.start_execution(
-            stateMachineArn="sm", name="exec-1", input='{"review_id": "r1"}'
-        )
+        client.start_execution(stateMachineArn="sm", name="exec-1", input='{"review_id": "r1"}')
         self.assertEqual(client.in_flight_review_ids(), [])
 
     def test_a_review_whose_body_raised_leaves_the_in_flight_set(self) -> None:
@@ -1026,12 +997,8 @@ class TestInFlightTracking(unittest.TestCase):
         def boom(_rid: str, _payload: dict) -> None:
             raise RuntimeError("the pipeline blew up")
 
-        client = pipeline_runner.InProcessStepFunctionsClient(
-            runner=boom, pool=SyncPool()
-        )
-        client.start_execution(
-            stateMachineArn="sm", name="exec-1", input='{"review_id": "r1"}'
-        )
+        client = pipeline_runner.InProcessStepFunctionsClient(runner=boom, pool=SyncPool())
+        client.start_execution(stateMachineArn="sm", name="exec-1", input='{"review_id": "r1"}')
         self.assertEqual(client.in_flight_review_ids(), [])
 
     def test_a_queued_review_is_reported_in_flight(self) -> None:

@@ -51,8 +51,12 @@ function mockFetch(status = 'RUNNING') {
     const pathname = new URL(url, 'http://localhost').pathname;
     if (method === 'POST' && pathname === '/api/reviews') {
       posts.push(pathname);
-      // eslint-disable-next-line @typescript-eslint/require-await
-      return { ok: true, status: 200, json: async () => ({ review_id: 'rev-1', resumed: false }) } as Response;
+      return {
+        ok: true,
+        status: 200,
+        // eslint-disable-next-line @typescript-eslint/require-await
+        json: async () => ({ review_id: 'rev-1', resumed: false }),
+      } as Response;
     }
     if (pathname === '/api/playbooks') {
       return {
@@ -68,7 +72,13 @@ function mockFetch(status = 'RUNNING') {
       ok: true,
       status: 200,
       // eslint-disable-next-line @typescript-eslint/require-await
-      json: async () => ({ review_id: 'rev-1', status, decision: null, message: null, has_output: false }),
+      json: async () => ({
+        review_id: 'rev-1',
+        status,
+        decision: null,
+        message: null,
+        has_output: false,
+      }),
     } as Response;
   });
 }
@@ -170,5 +180,4 @@ describe('issue #494 — the button path is preserved, not replaced', () => {
     expect(screen.queryByTestId('review-submit-button')).toBeNull();
     expect(posts).toHaveLength(1);
   });
-
 });

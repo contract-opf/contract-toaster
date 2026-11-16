@@ -26,12 +26,17 @@
 # whole tree for them. Hand-written directives for rules `select` leaves off
 # are declared once in `[tool.ruff.lint] external`, never masked line by line.
 #
-# `ruff format --check` and `prettier --check` are deliberately NOT run here. A
-# whole-tree reformat collides with the in-flight #50-#59 series, and CLAUDE.md
-# warns that no gate in this repo can see a stylesheet. Follow-up issue #90
-# turns both on once that series has landed; tests/test_lint_gates_65.py
-# asserts `ruff format` appears in neither this file nor scripts/check.sh until
-# then, so "not yet" cannot quietly become "never noticed".
+# `ruff format --check` and `prettier --check` DO run here (issue #90). The tree
+# was reformatted once, in a single commit named in .git-blame-ignore-revs, and
+# these two steps keep it that way: a formatting nit is now a red step with a
+# one-line fix (`ruff format <paths>` / `npm run format -- <paths>` in frontend/)
+# instead of a review comment. They are CHECKS, never rewrites. Formatting and
+# lint annotations interact: reflowing a line can strand its trailing
+# `# noqa`, so run `ruff check` again after `ruff format` and move the directive
+# onto the line ruff now reports. tests/test_lint_gates_65.py check 7 asserts
+# both formatters are invoked and green, and pins what each one excludes.
+# CLAUDE.md still warns that no gate in this repo can see a stylesheet: a
+# formatter pass over a .css file is read by a person, not trusted to a suite.
 #
 # RELATED
 #   scripts/check.sh runs the same ruff/mypy pair as a fast pre-step, and
@@ -77,9 +82,14 @@ jobs:
             -r requirements-dev.txt -r backend/requirements.txt
 
       - name: ruff check
-        # The same four roots scripts/check.sh lints. NOT `ruff format --check`
-        # — see the header.
+        # The same four roots scripts/check.sh lints.
         run: ruff check backend scripts tests infra/lambda
+
+      - name: ruff format --check
+        # Issue #90. The same four roots; the exclusions (the byte-identical
+        # vendored script, Markdown) live in `[tool.ruff.format]` in
+        # pyproject.toml, so they are the same here and in scripts/check.sh.
+        run: ruff format --check backend scripts tests infra/lambda
 
       - name: mypy
         # Roots and strictness come from `[tool.mypy]` in pyproject.toml.
@@ -120,3 +130,9 @@ jobs:
       - name: npm run typecheck
         working-directory: frontend
         run: npm run typecheck
+
+      - name: npm run format:check
+        # Issue #90. `prettier --check .` over frontend/, honouring
+        # frontend/.prettierignore (vendor/orbit-diner is never formatted).
+        working-directory: frontend
+        run: npm run format:check

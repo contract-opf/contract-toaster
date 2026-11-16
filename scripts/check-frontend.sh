@@ -62,10 +62,15 @@ fi
 # `npm run lint` is the plain `eslint .` — it fails on ERRORS, not warnings;
 # the remaining warnings are the exhaustive-deps backlog and pre-existing
 # `no-console` directives, both deliberately visible rather than silenced.
-# `prettier --check` is NOT run: a whole-tree reformat is deferred to #90,
-# for the reason CLAUDE.md gives — no gate here can see a stylesheet.
 echo "Lint (eslint) …"
 npm run lint
+
+# Format (issue #90): `prettier --check .`, honouring frontend/.prettierignore
+# (vendor/orbit-diner is never formatted). A CHECK, never a rewrite — CLAUDE.md's
+# warning that no gate here can see a stylesheet is why this script must not
+# touch a file on its way past. Fix a red run with `npm run format -- <paths>`.
+echo "Format (prettier --check) …"
+npm run format:check
 
 echo "Typecheck + production build (build:ci) …"
 npm run build:ci

@@ -93,7 +93,13 @@ def _sample_anchored_clauses() -> list[dict[str, Any]]:
 
 
 def _sample_precedent() -> list[dict[str, Any]]:
-    return [{"clause_id": "clause-1", "polarity": "positive", "text": "Aggregate liability capped at $150,000."}]
+    return [
+        {
+            "clause_id": "clause-1",
+            "polarity": "positive",
+            "text": "Aggregate liability capped at $150,000.",
+        }
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +119,9 @@ def test_system_blocks_order_and_cache_breakpoint(failures: list[str]) -> None:
     blocks = pp.assemble_system_blocks(playbook)
 
     if len(blocks) < 3:
-        failures.append(f"[1a] Expected at least 3 system blocks (guidance, overlay, playbook); got {len(blocks)}")
+        failures.append(
+            f"[1a] Expected at least 3 system blocks (guidance, overlay, playbook); got {len(blocks)}"
+        )
         return
 
     guidance = blocks[0]
@@ -123,7 +131,9 @@ def test_system_blocks_order_and_cache_breakpoint(failures: list[str]) -> None:
         failures.append("[1b] System block 0 must be the review-guidance block, verbatim.")
     overlay_matches = [b for b in blocks if b["text"] == pp.BINARY_DECISION_OVERLAY_BLOCK]
     if len(overlay_matches) != 1:
-        failures.append(f"[1c] Expected exactly one binary-decision-overlay block, verbatim; found {len(overlay_matches)}.")
+        failures.append(
+            f"[1c] Expected exactly one binary-decision-overlay block, verbatim; found {len(overlay_matches)}."
+        )
     # Issue #267: the playbook block carries the PROJECTED (knowledge-only)
     # view, not the raw playbook dict -- governance metadata (legal_approval,
     # release, anchor_migrations, hard_rejections) must never reach the
@@ -131,15 +141,21 @@ def test_system_blocks_order_and_cache_breakpoint(failures: list[str]) -> None:
     # inclusion assertions; here we just check the LAST block round-trips to
     # the projected view, not the full input playbook.
     if json.loads(playbook_block["text"]) != pp.project_playbook_for_prompt(playbook):
-        failures.append("[1d] The LAST system block must be the PROJECTED playbook JSON, verbatim (round-trips to project_playbook_for_prompt(playbook), issue #267).")
+        failures.append(
+            "[1d] The LAST system block must be the PROJECTED playbook JSON, verbatim (round-trips to project_playbook_for_prompt(playbook), issue #267)."
+        )
 
     # Cache breakpoint AFTER the playbook block only (issue #30), which is
     # always the LAST block regardless of how many conditional blocks
     # (toaster guidance, Floor) preceded it.
     if any("cache_control" in b for b in blocks[:-1]):
-        failures.append("[1e] Only the LAST (playbook) block may carry cache_control -- no earlier block may.")
+        failures.append(
+            "[1e] Only the LAST (playbook) block may carry cache_control -- no earlier block may."
+        )
     if playbook_block.get("cache_control") != {"type": "ephemeral"}:
-        failures.append(f"[1f] Playbook block must carry cache_control={{'type': 'ephemeral'}}; got {playbook_block.get('cache_control')!r}")
+        failures.append(
+            f"[1f] Playbook block must carry cache_control={{'type': 'ephemeral'}}; got {playbook_block.get('cache_control')!r}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -193,10 +209,14 @@ def test_overlay_instructs_the_addressing_contract_in_key_set(failures: list[str
         "provenance",
     ):
         if f'"{prior_key}"' not in overlay:
-            failures.append(f"[1h] BINARY_DECISION_OVERLAY_BLOCK must still enumerate \"{prior_key}\".")
+            failures.append(
+                f'[1h] BINARY_DECISION_OVERLAY_BLOCK must still enumerate "{prior_key}".'
+            )
 
     if "verbatim" not in overlay.lower():
-        failures.append("[1i] The transcript instruction must require verbatim source text, not paraphrase.")
+        failures.append(
+            "[1i] The transcript instruction must require verbatim source text, not paraphrase."
+        )
 
     # The #378 concern -- never invent an address -- survives as the rule
     # that a transcript is CHECKED against the document's real characters.
@@ -207,9 +227,7 @@ def test_overlay_instructs_the_addressing_contract_in_key_set(failures: list[str
             "quote' rule."
         )
     if "nothing skipped and nothing invented" not in overlay:
-        failures.append(
-            "[1k] The overlay must explicitly forbid inventing transcript text."
-        )
+        failures.append("[1k] The overlay must explicitly forbid inventing transcript text.")
 
 
 # ---------------------------------------------------------------------------
@@ -268,15 +286,23 @@ def test_primary_user_prompt_block_order_full_doc(failures: list[str]) -> None:
     ]
     positions = [prompt.find(tag) for tag in required_tags_in_order]
     if any(pos == -1 for pos in positions):
-        failures.append(f"[1g] Primary prompt missing a required manifest block. Positions: {dict(zip(required_tags_in_order, positions))}")  # noqa: B905
+        failures.append(
+            f"[1g] Primary prompt missing a required manifest block. Positions: {dict(zip(required_tags_in_order, positions))}"  # noqa: B905
+        )
     elif positions != sorted(positions):
-        failures.append(f"[1h] Primary prompt manifest blocks out of order. Positions: {dict(zip(required_tags_in_order, positions))}")  # noqa: B905
+        failures.append(
+            f"[1h] Primary prompt manifest blocks out of order. Positions: {dict(zip(required_tags_in_order, positions))}"  # noqa: B905
+        )
 
     if pp.UNTRUSTED_BLOCK_WARNING not in prompt:
-        failures.append("[1j] Counterparty document block must carry the untrusted-input anti-injection warning.")
+        failures.append(
+            "[1j] Counterparty document block must carry the untrusted-input anti-injection warning."
+        )
 
     if "$75,000" not in prompt:
-        failures.append("[1k] Full document text must be present verbatim in the counterparty-document block.")
+        failures.append(
+            "[1k] Full document text must be present verbatim in the counterparty-document block."
+        )
 
 
 def test_critic_user_prompt_manifest(failures: list[str]) -> None:
@@ -291,19 +317,27 @@ def test_critic_user_prompt_manifest(failures: list[str]) -> None:
     required_tags_in_order = ["<PRIMARY_REVIEWER_OUTPUT>"]
     positions = [prompt.find(tag) for tag in required_tags_in_order]
     if any(pos == -1 for pos in positions):
-        failures.append(f"[1o] Critic prompt missing a required manifest block. Positions: {dict(zip(required_tags_in_order, positions))}")  # noqa: B905
+        failures.append(
+            f"[1o] Critic prompt missing a required manifest block. Positions: {dict(zip(required_tags_in_order, positions))}"  # noqa: B905
+        )
     elif positions != sorted(positions):
-        failures.append(f"[1p] Critic prompt manifest blocks out of order. Positions: {dict(zip(required_tags_in_order, positions))}")  # noqa: B905
+        failures.append(
+            f"[1p] Critic prompt manifest blocks out of order. Positions: {dict(zip(required_tags_in_order, positions))}"  # noqa: B905
+        )
 
     # This call passes no `doc_text`, so no document block is composed
     # (issue #618's absent-or-populated doctrine); retrieved precedent is
     # primary-only per the #29 manifest.
     for forbidden_tag in ("<RETRIEVED_PRECEDENT>", "<COUNTERPARTY_DOCUMENT>"):
         if forbidden_tag in prompt:
-            failures.append(f"[1q] Critic prompt must NOT include {forbidden_tag} for a call that passes no document.")
+            failures.append(
+                f"[1q] Critic prompt must NOT include {forbidden_tag} for a call that passes no document."
+            )
 
     if "$150,000" not in prompt:
-        failures.append("[1r] Critic prompt must include the primary reviewer's full structured output.")
+        failures.append(
+            "[1r] Critic prompt must include the primary reviewer's full structured output."
+        )
 
 
 def test_assembled_size_within_cap_on_every_gold_case(failures: list[str]) -> None:
@@ -321,9 +355,20 @@ def test_assembled_size_within_cap_on_every_gold_case(failures: list[str]) -> No
             continue
         checked += 1
         altered_hunk = case["planted_variation"].get("altered_hunk", "")
-        diff_hunks = [{"kind": "modified_new", "anchor": case["planted_variation"].get("topic_id", "?"), "text": altered_hunk}]  # noqa: F841
+        diff_hunks = [  # noqa: F841
+            {
+                "kind": "modified_new",
+                "anchor": case["planted_variation"].get("topic_id", "?"),
+                "text": altered_hunk,
+            }
+        ]
         anchored_clauses = [  # noqa: F841
-            {"anchor": case["planted_variation"].get("topic_id", "?"), "standard_text": "", "counterparty_text": altered_hunk, "delta": altered_hunk}
+            {
+                "anchor": case["planted_variation"].get("topic_id", "?"),
+                "standard_text": "",
+                "counterparty_text": altered_hunk,
+                "delta": altered_hunk,
+            }
         ]
         user_prompt = pp.assemble_user_prompt_primary(
             retrieved_precedent=[],
@@ -331,10 +376,14 @@ def test_assembled_size_within_cap_on_every_gold_case(failures: list[str]) -> No
         )
         assembled = pp.assembled_prompt_tokens(system_blocks, user_prompt)
         if assembled > pp.MAX_INPUT_TOKENS:
-            failures.append(f"[1s] Gold case {case.get('case_id', path.name)}: assembled size {assembled} exceeds MAX_INPUT_TOKENS={pp.MAX_INPUT_TOKENS}")
+            failures.append(
+                f"[1s] Gold case {case.get('case_id', path.name)}: assembled size {assembled} exceeds MAX_INPUT_TOKENS={pp.MAX_INPUT_TOKENS}"
+            )
 
     if checked == 0:
-        failures.append("[1t] No gold cases with planted_variation were found to check assembled size against -- fixture set is unexpectedly empty.")
+        failures.append(
+            "[1t] No gold cases with planted_variation were found to check assembled size against -- fixture set is unexpectedly empty."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -354,16 +403,29 @@ def test_playbook_projection_excludes_governance_metadata(failures: list[str]) -
     # must never reach the prompt.
     legal_approval_note = playbook["playbook"]["legal_approval"]["note"]
     if legal_approval_note[:80] in system_prompt:
-        failures.append("[8a] Assembled system prompt must NOT contain the legal_approval memo text (governance metadata, issue #267).")
+        failures.append(
+            "[8a] Assembled system prompt must NOT contain the legal_approval memo text (governance metadata, issue #267)."
+        )
     if "legal_approval" in system_prompt:
-        failures.append("[8b] Assembled system prompt must NOT contain the literal key 'legal_approval'.")
+        failures.append(
+            "[8b] Assembled system prompt must NOT contain the literal key 'legal_approval'."
+        )
     if "anchor_migrations" in system_prompt:
-        failures.append("[8c] Assembled system prompt must NOT contain 'anchor_migrations' (release/migration hashes, issue #267).")
+        failures.append(
+            "[8c] Assembled system prompt must NOT contain 'anchor_migrations' (release/migration hashes, issue #267)."
+        )
     for migration in playbook.get("anchor_migrations", []):
-        for hash_field in ("from_heading_hash", "to_heading_hash", "from_standard_form_hash", "to_standard_form_hash"):
+        for hash_field in (
+            "from_heading_hash",
+            "to_heading_hash",
+            "from_standard_form_hash",
+            "to_standard_form_hash",
+        ):
             hash_value = migration.get(hash_field)
             if hash_value and hash_value in system_prompt:
-                failures.append(f"[8d] Assembled system prompt must NOT contain anchor_migrations hash value {hash_value!r}.")
+                failures.append(
+                    f"[8d] Assembled system prompt must NOT contain anchor_migrations hash value {hash_value!r}."
+                )
     # Structural check (not string-search): hard_rejections is a top-level
     # array of deterministic Floor-rule detector config (trigger_terms,
     # regex_trigger_terms, description) that review_spine.py:172 already
@@ -378,7 +440,9 @@ def test_playbook_projection_excludes_governance_metadata(failures: list[str]) -
     playbook_block = system_blocks[-1]
     projected = json.loads(playbook_block["text"])
     if "hard_rejections" in projected:
-        failures.append("[8e] Projected playbook view must NOT include the top-level 'hard_rejections' key (deterministic Floor-rule detector config enforced in review_spine.py, never prompt input, issue #267).")
+        failures.append(
+            "[8e] Projected playbook view must NOT include the top-level 'hard_rejections' key (deterministic Floor-rule detector config enforced in review_spine.py, never prompt input, issue #267)."
+        )
 
 
 def test_playbook_projection_includes_all_knowledge_fields_verbatim(failures: list[str]) -> None:
@@ -398,18 +462,24 @@ def test_playbook_projection_includes_all_knowledge_fields_verbatim(failures: li
         "footnote_templates",
     }
     if set(projected.keys()) != expected_keys:
-        failures.append(f"[9a] Projected playbook view must contain exactly {sorted(expected_keys)}; got {sorted(projected.keys())}")
+        failures.append(
+            f"[9a] Projected playbook view must contain exactly {sorted(expected_keys)}; got {sorted(projected.keys())}"
+        )
 
     for key in expected_keys:
         if key not in playbook:
             continue
         if projected.get(key) != playbook[key]:
-            failures.append(f"[9b] Projected playbook field {key!r} must round-trip verbatim from the input playbook.")
+            failures.append(
+                f"[9b] Projected playbook field {key!r} must round-trip verbatim from the input playbook."
+            )
 
     # Sanity: real topic content (not a stub) is present.
     topic_ids = {t.get("id") for t in projected.get("topics", [])}
     if "term-length" not in topic_ids:
-        failures.append("[9c] Projected topics must retain real topic ids (e.g. 'term-length'), not be stubbed out.")
+        failures.append(
+            "[9c] Projected topics must retain real topic ids (e.g. 'term-length'), not be stubbed out."
+        )
 
 
 def test_critic_pass_shares_same_projection_as_primary(failures: list[str]) -> None:
@@ -433,20 +503,28 @@ def test_critic_pass_shares_same_projection_as_primary(failures: list[str]) -> N
     )
 
     if len(client.calls) != 1:
-        failures.append(f"[10a] Expected exactly 1 critic model invocation; got {len(client.calls)}")
+        failures.append(
+            f"[10a] Expected exactly 1 critic model invocation; got {len(client.calls)}"
+        )
         return
     critic_system_prompt = client.calls[0]["system_prompt"]
 
     legal_approval_note = playbook["playbook"]["legal_approval"]["note"]
     if legal_approval_note[:80] in critic_system_prompt:
-        failures.append("[10b] Critic system prompt must NOT contain the legal_approval memo text (must share primary's projection, issue #267).")
+        failures.append(
+            "[10b] Critic system prompt must NOT contain the legal_approval memo text (must share primary's projection, issue #267)."
+        )
 
     expected_projected = pp.project_playbook_for_prompt(playbook)
     expected_system_prompt = pp.render_system_prompt(pp.assemble_system_blocks(playbook))
     if critic_system_prompt != expected_system_prompt:
-        failures.append("[10c] Critic system prompt must be assembled from the identical projected view as the primary pass (shared assembler, issue #267).")
+        failures.append(
+            "[10c] Critic system prompt must be assembled from the identical projected view as the primary pass (shared assembler, issue #267)."
+        )
     if json.dumps(expected_projected, sort_keys=True) not in critic_system_prompt:
-        failures.append("[10d] Critic system prompt must include the projected (knowledge-only) playbook view.")
+        failures.append(
+            "[10d] Critic system prompt must include the projected (knowledge-only) playbook view."
+        )
 
 
 def test_ledger_records_projected_playbook_hash(failures: list[str]) -> None:
@@ -510,7 +588,9 @@ def test_schema_invalid_then_valid_retries_once_and_succeeds(failures: list[str]
     if result.get("status") != "OK":
         failures.append(f"[2a] Expected status=OK after one retry; got {result!r}")
     if result.get("attempts") != 2:
-        failures.append(f"[2b] Expected exactly 2 attempts (1 retry); got {result.get('attempts')!r}")
+        failures.append(
+            f"[2b] Expected exactly 2 attempts (1 retry); got {result.get('attempts')!r}"
+        )
     if len(client.calls) != 2:
         failures.append(f"[2c] Expected exactly 2 model invocations; got {len(client.calls)}")
 
@@ -519,12 +599,22 @@ def test_schema_invalid_then_valid_retries_once_and_succeeds(failures: list[str]
         failures.append(f"[3a] Expected 2 ledger rows (retry, success); got {len(ledger)}")
     else:
         if ledger[0].outcome != "retry" or ledger[0].attempt_number != 1:
-            failures.append(f"[3b] First ledger row must be outcome=retry, attempt_number=1; got {ledger[0]!r}")
+            failures.append(
+                f"[3b] First ledger row must be outcome=retry, attempt_number=1; got {ledger[0]!r}"
+            )
         if ledger[1].outcome != "success" or ledger[1].attempt_number != 2:
-            failures.append(f"[3c] Second ledger row must be outcome=success, attempt_number=2; got {ledger[1]!r}")
+            failures.append(
+                f"[3c] Second ledger row must be outcome=success, attempt_number=2; got {ledger[1]!r}"
+            )
         for rec in ledger:
-            if rec.review_id != "review-retry-success" or rec.pass_name != "primary" or rec.model_id != _TEST_MODEL_ID:
-                failures.append(f"[3d] Ledger row missing/incorrect review_id/pass_name/model_id: {rec!r}")
+            if (
+                rec.review_id != "review-retry-success"
+                or rec.pass_name != "primary"
+                or rec.model_id != _TEST_MODEL_ID
+            ):
+                failures.append(
+                    f"[3d] Ledger row missing/incorrect review_id/pass_name/model_id: {rec!r}"
+                )
 
 
 def test_two_schema_invalid_responses_terminal_error_manual_review(failures: list[str]) -> None:
@@ -548,11 +638,17 @@ def test_two_schema_invalid_responses_terminal_error_manual_review(failures: lis
     )
 
     if result.get("status") != "ERROR":
-        failures.append(f"[2d] Expected terminal ERROR after 2 schema-invalid responses; got {result!r}")
+        failures.append(
+            f"[2d] Expected terminal ERROR after 2 schema-invalid responses; got {result!r}"
+        )
     if result.get("attempts") != 2:
-        failures.append(f"[2e] Expected exactly 2 attempts (bounded retry budget = 1); got {result.get('attempts')!r}")
+        failures.append(
+            f"[2e] Expected exactly 2 attempts (bounded retry budget = 1); got {result.get('attempts')!r}"
+        )
     if len(client.calls) != 2:
-        failures.append(f"[2f] Expected exactly 2 model invocations (no 3rd attempt beyond the bounded retry); got {len(client.calls)}")
+        failures.append(
+            f"[2f] Expected exactly 2 model invocations (no 3rd attempt beyond the bounded retry); got {len(client.calls)}"
+        )
 
     if len(ledger) != 2:
         failures.append(f"[3e] Expected 2 ledger rows (retry, failure); got {len(ledger)}")
@@ -560,7 +656,9 @@ def test_two_schema_invalid_responses_terminal_error_manual_review(failures: lis
         if ledger[0].outcome != "retry":
             failures.append(f"[3f] First ledger row must be outcome=retry; got {ledger[0]!r}")
         if ledger[1].outcome != "failure":
-            failures.append(f"[3g] Second (terminal) ledger row must be outcome=failure; got {ledger[1]!r}")
+            failures.append(
+                f"[3g] Second (terminal) ledger row must be outcome=failure; got {ledger[1]!r}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -595,9 +693,13 @@ def test_active_schema_accepts_a_block_transcript_end_to_end(failures: list[str]
     )
 
     if result.get("status") != "OK":
-        failures.append(f"[9a] Expected status=OK for a v3-shaped transcript response; got {result!r}")
+        failures.append(
+            f"[9a] Expected status=OK for a v3-shaped transcript response; got {result!r}"
+        )
     if result.get("attempts") != 1:
-        failures.append(f"[9b] Expected exactly 1 attempt (a transcript is schema-valid, not an error); got {result.get('attempts')!r}")
+        failures.append(
+            f"[9b] Expected exactly 1 attempt (a transcript is schema-valid, not an error); got {result.get('attempts')!r}"
+        )
     patches = (result.get("response") or {}).get("block_patches") or []
     if not patches or not patches[0].get("segments"):
         failures.append(
@@ -615,9 +717,13 @@ def test_active_schema_still_rejects_response_missing_issues(failures: list[str]
         _load_fixture_text("schema_invalid_missing_issues.json")
     )
     if is_valid:
-        failures.append(f"[9d] Expected a response missing 'issues' to still fail validation under the active artifact; got valid={parsed_or_error!r}")
+        failures.append(
+            f"[9d] Expected a response missing 'issues' to still fail validation under the active artifact; got valid={parsed_or_error!r}"
+        )
     elif "issues" not in str(parsed_or_error):
-        failures.append(f"[9e] Expected the schema-invalid error to name the missing 'issues' field; got {parsed_or_error!r}")
+        failures.append(
+            f"[9e] Expected the schema-invalid error to name the missing 'issues' field; got {parsed_or_error!r}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -654,9 +760,7 @@ _V2_CLEAN_REPLACEMENT_TEXT = (
 )
 
 
-def _v2_response_with_replacement_text(
-    text: str, topic_id: str = "limitation-of-liability"
-) -> str:
+def _v2_response_with_replacement_text(text: str, topic_id: str = "limitation-of-liability") -> str:
     """The shared REQUEST_CHANGE fixture, projected back onto the V2 issue
     shape: `issue_key` dropped (v2 has no such property and forbids extras),
     `proposed_replacement_text` supplied (v2 requires it)."""
@@ -739,31 +843,47 @@ def test_replacement_text_violation_then_clean_retries_and_succeeds(failures: li
     )
 
     if result.get("status") != "OK":
-        failures.append(f"[7a] Expected status=OK after a replacement-text-violation retry; got {result!r}")
+        failures.append(
+            f"[7a] Expected status=OK after a replacement-text-violation retry; got {result!r}"
+        )
     if result.get("attempts") != 2:
-        failures.append(f"[7b] Expected exactly 2 attempts (1 retry, same budget as schema mismatch); got {result.get('attempts')!r}")
+        failures.append(
+            f"[7b] Expected exactly 2 attempts (1 retry, same budget as schema mismatch); got {result.get('attempts')!r}"
+        )
     if len(client.calls) != 2:
         failures.append(f"[7c] Expected exactly 2 model invocations; got {len(client.calls)}")
 
     expected_clean_text = json.loads(clean)["issues"][0]["proposed_replacement_text"]
     got_text = result.get("response", {}).get("issues", [{}])[0].get("proposed_replacement_text")
     if got_text != expected_clean_text:
-        failures.append(f"[7d] Final response's replacement text must be the clean second attempt's, unmodified; got {got_text!r}")
+        failures.append(
+            f"[7d] Final response's replacement text must be the clean second attempt's, unmodified; got {got_text!r}"
+        )
 
     if len(ledger) != 2:
         failures.append(f"[7e] Expected 2 ledger rows (retry, success); got {len(ledger)}")
     else:
         if ledger[0].outcome != "retry" or ledger[0].attempt_number != 1:
-            failures.append(f"[7f] First ledger row must be outcome=retry, attempt_number=1; got {ledger[0]!r}")
+            failures.append(
+                f"[7f] First ledger row must be outcome=retry, attempt_number=1; got {ledger[0]!r}"
+            )
         if ledger[0].replacement_text_failures != ["must_not_introduce_violation"]:
-            failures.append(f"[7g] First ledger row must record the failure code (rule id only); got {ledger[0].replacement_text_failures!r}")
+            failures.append(
+                f"[7g] First ledger row must record the failure code (rule id only); got {ledger[0].replacement_text_failures!r}"
+            )
         if ledger[1].outcome != "success" or ledger[1].attempt_number != 2:
-            failures.append(f"[7h] Second ledger row must be outcome=success, attempt_number=2; got {ledger[1]!r}")
+            failures.append(
+                f"[7h] Second ledger row must be outcome=success, attempt_number=2; got {ledger[1]!r}"
+            )
         if ledger[1].replacement_text_failures != []:
-            failures.append(f"[7i] Second (clean) attempt's ledger row must record no failures; got {ledger[1].replacement_text_failures!r}")
+            failures.append(
+                f"[7i] Second (clean) attempt's ledger row must record no failures; got {ledger[1].replacement_text_failures!r}"
+            )
 
 
-def test_replacement_text_violation_on_final_attempt_demotes_to_flag_only(failures: list[str]) -> None:
+def test_replacement_text_violation_on_final_attempt_demotes_to_flag_only(
+    failures: list[str],
+) -> None:
     # limitation-of-liability's max_chars is 1200 (synthetic-generic-v1.0.0.json).
     over_length_text = "X" * 1300
     violating = _response_with_replacement_text(over_length_text)
@@ -783,25 +903,39 @@ def test_replacement_text_violation_on_final_attempt_demotes_to_flag_only(failur
     )
 
     if result.get("status") != "OK":
-        failures.append(f"[8a] A still-violating replacement on the final attempt must demote to flag-only, status=OK (never a pipeline error); got {result!r}")
+        failures.append(
+            f"[8a] A still-violating replacement on the final attempt must demote to flag-only, status=OK (never a pipeline error); got {result!r}"
+        )
     if result.get("attempts") != 2:
-        failures.append(f"[8b] Expected exactly 2 attempts (bounded retry budget exhausted); got {result.get('attempts')!r}")
+        failures.append(
+            f"[8b] Expected exactly 2 attempts (bounded retry budget exhausted); got {result.get('attempts')!r}"
+        )
 
     issues = result.get("response", {}).get("issues", [])
     if not issues or issues[0].get("proposed_replacement_text") != "":
-        failures.append(f"[8c] The violating issue must be demoted to flag-only (proposed_replacement_text==''); got {issues!r}")
+        failures.append(
+            f"[8c] The violating issue must be demoted to flag-only (proposed_replacement_text==''); got {issues!r}"
+        )
 
     if len(ledger) != 2:
-        failures.append(f"[8d] Expected 2 ledger rows (retry, success-with-demotion); got {len(ledger)}")
+        failures.append(
+            f"[8d] Expected 2 ledger rows (retry, success-with-demotion); got {len(ledger)}"
+        )
     else:
         if ledger[0].outcome != "retry":
             failures.append(f"[8e] First ledger row must be outcome=retry; got {ledger[0]!r}")
         if ledger[0].replacement_text_failures != ["max_chars_exceeded"]:
-            failures.append(f"[8f] First ledger row must record max_chars_exceeded; got {ledger[0].replacement_text_failures!r}")
+            failures.append(
+                f"[8f] First ledger row must record max_chars_exceeded; got {ledger[0].replacement_text_failures!r}"
+            )
         if ledger[1].outcome != "success":
-            failures.append(f"[8g] Final ledger row must be outcome=success (demoted, not a pipeline failure); got {ledger[1]!r}")
+            failures.append(
+                f"[8g] Final ledger row must be outcome=success (demoted, not a pipeline failure); got {ledger[1]!r}"
+            )
         if ledger[1].replacement_text_failures != ["max_chars_exceeded"]:
-            failures.append(f"[8h] Final ledger row must still record the failure that triggered the demotion; got {ledger[1].replacement_text_failures!r}")
+            failures.append(
+                f"[8h] Final ledger row must still record the failure that triggered the demotion; got {ledger[1].replacement_text_failures!r}"
+            )
 
 
 def test_empty_replacement_text_retries_and_succeeds_on_clean_attempt(failures: list[str]) -> None:
@@ -827,14 +961,20 @@ def test_empty_replacement_text_retries_and_succeeds_on_clean_attempt(failures: 
     )
 
     if result.get("status") != "OK":
-        failures.append(f"[10a] Expected status=OK after an empty-replacement-text retry; got {result!r}")
+        failures.append(
+            f"[10a] Expected status=OK after an empty-replacement-text retry; got {result!r}"
+        )
     if result.get("attempts") != 2:
-        failures.append(f"[10b] Expected exactly 2 attempts (1 retry, same budget as any other pen-rules violation); got {result.get('attempts')!r}")
+        failures.append(
+            f"[10b] Expected exactly 2 attempts (1 retry, same budget as any other pen-rules violation); got {result.get('attempts')!r}"
+        )
 
     got_text = result.get("response", {}).get("issues", [{}])[0].get("proposed_replacement_text")
     expected_clean_text = json.loads(clean)["issues"][0]["proposed_replacement_text"]
     if got_text != expected_clean_text:
-        failures.append(f"[10c] Final response's replacement text must be the clean second attempt's; got {got_text!r}")
+        failures.append(
+            f"[10c] Final response's replacement text must be the clean second attempt's; got {got_text!r}"
+        )
 
     if len(ledger) != 2:
         failures.append(f"[10d] Expected 2 ledger rows (retry, success); got {len(ledger)}")
@@ -842,11 +982,15 @@ def test_empty_replacement_text_retries_and_succeeds_on_clean_attempt(failures: 
         if ledger[0].outcome != "retry":
             failures.append(f"[10e] First ledger row must be outcome=retry; got {ledger[0]!r}")
         if ledger[0].replacement_text_failures != ["empty_replacement_text"]:
-            failures.append(f"[10f] First ledger row must record empty_replacement_text; got {ledger[0].replacement_text_failures!r}")
+            failures.append(
+                f"[10f] First ledger row must record empty_replacement_text; got {ledger[0].replacement_text_failures!r}"
+            )
         if ledger[1].outcome != "success":
             failures.append(f"[10g] Second ledger row must be outcome=success; got {ledger[1]!r}")
         if ledger[1].replacement_text_failures != []:
-            failures.append(f"[10h] Second (clean) attempt's ledger row must record no failures; got {ledger[1].replacement_text_failures!r}")
+            failures.append(
+                f"[10h] Second (clean) attempt's ledger row must record no failures; got {ledger[1].replacement_text_failures!r}"
+            )
 
 
 def test_empty_replacement_text_on_final_attempt_demotes_to_flag_only(failures: list[str]) -> None:
@@ -871,30 +1015,49 @@ def test_empty_replacement_text_on_final_attempt_demotes_to_flag_only(failures: 
     )
 
     if result.get("status") != "OK":
-        failures.append(f"[11a] A still-empty replacement on the final attempt must demote to flag-only, status=OK; got {result!r}")
+        failures.append(
+            f"[11a] A still-empty replacement on the final attempt must demote to flag-only, status=OK; got {result!r}"
+        )
     if result.get("attempts") != 2:
-        failures.append(f"[11b] Expected exactly 2 attempts (bounded retry budget exhausted); got {result.get('attempts')!r}")
+        failures.append(
+            f"[11b] Expected exactly 2 attempts (bounded retry budget exhausted); got {result.get('attempts')!r}"
+        )
 
     issues = result.get("response", {}).get("issues", [])
     if not issues or issues[0].get("proposed_replacement_text") != "":
-        failures.append(f"[11c] The violating issue must remain demoted to flag-only (proposed_replacement_text==''); got {issues!r}")
+        failures.append(
+            f"[11c] The violating issue must remain demoted to flag-only (proposed_replacement_text==''); got {issues!r}"
+        )
     # Issue #585 review round 1, finding 2: the bare empty string is not
     # itself an acceptable terminal state -- demote_issue_to_flag_only must
     # also set an explicit, named marker distinguishing "retry budget
     # exhausted" from any other empty-text outcome, so the redline stage
     # never has to infer the reason from `== ""` alone.
-    if not issues or issues[0].get(_rte.REPLACEMENT_TEXT_OUTCOME_FIELD) != _rte.FLAG_ONLY_RETRY_EXHAUSTED:
-        failures.append(f"[11i] The demoted issue must carry replacement_text_outcome=FLAG_ONLY_RETRY_EXHAUSTED, not a silent empty string; got {issues!r}")
+    if (
+        not issues
+        or issues[0].get(_rte.REPLACEMENT_TEXT_OUTCOME_FIELD) != _rte.FLAG_ONLY_RETRY_EXHAUSTED
+    ):
+        failures.append(
+            f"[11i] The demoted issue must carry replacement_text_outcome=FLAG_ONLY_RETRY_EXHAUSTED, not a silent empty string; got {issues!r}"
+        )
 
     if len(ledger) != 2:
-        failures.append(f"[11d] Expected 2 ledger rows (retry, success-with-demotion); got {len(ledger)}")
+        failures.append(
+            f"[11d] Expected 2 ledger rows (retry, success-with-demotion); got {len(ledger)}"
+        )
     else:
         if ledger[0].replacement_text_failures != ["empty_replacement_text"]:
-            failures.append(f"[11e] First ledger row must record empty_replacement_text; got {ledger[0].replacement_text_failures!r}")
+            failures.append(
+                f"[11e] First ledger row must record empty_replacement_text; got {ledger[0].replacement_text_failures!r}"
+            )
         if ledger[1].outcome != "success":
-            failures.append(f"[11f] Final ledger row must be outcome=success (demoted, not a pipeline failure); got {ledger[1]!r}")
+            failures.append(
+                f"[11f] Final ledger row must be outcome=success (demoted, not a pipeline failure); got {ledger[1]!r}"
+            )
         if ledger[1].replacement_text_failures != ["empty_replacement_text"]:
-            failures.append(f"[11g] Final ledger row must still record the failure that triggered the demotion; got {ledger[1].replacement_text_failures!r}")
+            failures.append(
+                f"[11g] Final ledger row must still record the failure that triggered the demotion; got {ledger[1].replacement_text_failures!r}"
+            )
 
 
 def _opf_playbook() -> dict[str, Any]:
@@ -936,31 +1099,54 @@ def test_opf_none_bundle_empty_replacement_text_does_not_retry_or_fail(failures:
     )
 
     if result.get("status") != "OK":
-        failures.append(f"[12a] Expected status=OK on the first attempt (no violation to retry); got {result!r}")
+        failures.append(
+            f"[12a] Expected status=OK on the first attempt (no violation to retry); got {result!r}"
+        )
     if result.get("attempts") != 1:
-        failures.append(f"[12b] Expected exactly 1 attempt -- a bundle=None empty-text issue must never burn a retry; got {result.get('attempts')!r}")
+        failures.append(
+            f"[12b] Expected exactly 1 attempt -- a bundle=None empty-text issue must never burn a retry; got {result.get('attempts')!r}"
+        )
     if len(client.calls) != 1:
         failures.append(f"[12c] Expected exactly 1 model invocation; got {len(client.calls)}")
 
     issues = result.get("response", {}).get("issues", [])
-    if not issues or issues[0].get(_rte.REPLACEMENT_TEXT_OUTCOME_FIELD) != _rte.FLAG_ONLY_MODE_UNSPECIFIED:
-        failures.append(f"[12d] The issue must be labelled replacement_text_outcome=FLAG_ONLY_MODE_UNSPECIFIED, distinct from FLAG_ONLY_RETRY_EXHAUSTED (no retry was ever warranted); got {issues!r}")
+    if (
+        not issues
+        or issues[0].get(_rte.REPLACEMENT_TEXT_OUTCOME_FIELD) != _rte.FLAG_ONLY_MODE_UNSPECIFIED
+    ):
+        failures.append(
+            f"[12d] The issue must be labelled replacement_text_outcome=FLAG_ONLY_MODE_UNSPECIFIED, distinct from FLAG_ONLY_RETRY_EXHAUSTED (no retry was ever warranted); got {issues!r}"
+        )
 
     if len(ledger) != 1:
-        failures.append(f"[12e] Expected exactly 1 ledger row (success, first attempt); got {len(ledger)}")
+        failures.append(
+            f"[12e] Expected exactly 1 ledger row (success, first attempt); got {len(ledger)}"
+        )
     else:
         if ledger[0].outcome != "success":
-            failures.append(f"[12f] The single ledger row must be outcome=success, never retry; got {ledger[0]!r}")
+            failures.append(
+                f"[12f] The single ledger row must be outcome=success, never retry; got {ledger[0]!r}"
+            )
         if ledger[0].replacement_text_failures != []:
-            failures.append(f"[12g] The ledger row must record no replacement-text failures -- this was never a violation; got {ledger[0].replacement_text_failures!r}")
+            failures.append(
+                f"[12g] The ledger row must record no replacement-text failures -- this was never a violation; got {ledger[0].replacement_text_failures!r}"
+            )
 
 
 def test_fake_client_raises_when_exhausted(failures: list[str]) -> None:
-    client = model_client.FakeBedrockClient({_TEST_MODEL_ID: [_load_fixture_text("primary_accept_valid.json")]})
-    client.invoke(model_id=_TEST_MODEL_ID, system_prompt="s", user_prompt="u", max_output_tokens=100)
+    client = model_client.FakeBedrockClient(
+        {_TEST_MODEL_ID: [_load_fixture_text("primary_accept_valid.json")]}
+    )
+    client.invoke(
+        model_id=_TEST_MODEL_ID, system_prompt="s", user_prompt="u", max_output_tokens=100
+    )
     try:
-        client.invoke(model_id=_TEST_MODEL_ID, system_prompt="s", user_prompt="u", max_output_tokens=100)
-        failures.append("[2g] FakeBedrockClient must raise FakeBedrockClientExhausted when its response queue is empty, not fabricate a response.")
+        client.invoke(
+            model_id=_TEST_MODEL_ID, system_prompt="s", user_prompt="u", max_output_tokens=100
+        )
+        failures.append(
+            "[2g] FakeBedrockClient must raise FakeBedrockClientExhausted when its response queue is empty, not fabricate a response."
+        )
     except model_client.FakeBedrockClientExhausted:
         pass
 
@@ -988,13 +1174,19 @@ def test_cap_exceeded_input_never_calls_model(failures: list[str]) -> None:
     )
 
     if result.get("status") != "ERROR":
-        failures.append(f"[4a] Expected status=ERROR for an oversized assembled prompt; got {result!r}")
+        failures.append(
+            f"[4a] Expected status=ERROR for an oversized assembled prompt; got {result!r}"
+        )
     if result.get("reason") != "document_too_large":
         failures.append(f"[4b] Expected reason=document_too_large; got {result.get('reason')!r}")
     if client.calls:
-        failures.append(f"[4c] Model client must NEVER be invoked when the step-14 cap check fails; got {len(client.calls)} call(s).")
+        failures.append(
+            f"[4c] Model client must NEVER be invoked when the step-14 cap check fails; got {len(client.calls)} call(s)."
+        )
     if ledger:
-        failures.append(f"[4d] No ledger row should be written for a pre-model-call cap failure (nothing was attempted); got {len(ledger)} row(s).")
+        failures.append(
+            f"[4d] No ledger row should be written for a pre-model-call cap failure (nothing was attempted); got {len(ledger)} row(s)."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1018,7 +1210,9 @@ def test_single_region_native_id_enforced(failures: list[str]) -> None:
     for forbidden_id in forbidden_ids:
         try:
             model_client.enforce_single_region_native_model_id(forbidden_id)
-            failures.append(f"[5b] Cross-region inference-profile id {forbidden_id!r} must be rejected but was not.")
+            failures.append(
+                f"[5b] Cross-region inference-profile id {forbidden_id!r} must be rejected but was not."
+            )
         except model_client.ModelPolicyViolation:
             pass
 
@@ -1026,10 +1220,14 @@ def test_single_region_native_id_enforced(failures: list[str]) -> None:
     policy = model_client.load_model_policy()
     resolved_primary = model_client.primary_model_id(policy)
     if not resolved_primary or resolved_primary.startswith(("global.", "us.", "eu.", "apac.")):
-        failures.append(f"[5c] Resolved primary_model_id must be a native single-region id; got {resolved_primary!r}")
+        failures.append(
+            f"[5c] Resolved primary_model_id must be a native single-region id; got {resolved_primary!r}"
+        )
     resolved_critic = model_client.critic_model_id(policy)
     if not resolved_critic or resolved_critic.startswith(("global.", "us.", "eu.", "apac.")):
-        failures.append(f"[5d] Resolved critic_model_id must be a native single-region id; got {resolved_critic!r}")
+        failures.append(
+            f"[5d] Resolved critic_model_id must be a native single-region id; got {resolved_critic!r}"
+        )
 
 
 def test_run_primary_pass_rejects_inference_profile_before_any_call(failures: list[str]) -> None:
@@ -1046,12 +1244,16 @@ def test_run_primary_pass_rejects_inference_profile_before_any_call(failures: li
             ledger_write=ledger.append,
             doc_text="Section 8 text.",
         )
-        failures.append("[5e] run_primary_pass must reject a cross-region inference-profile model_id before any invocation.")
+        failures.append(
+            "[5e] run_primary_pass must reject a cross-region inference-profile model_id before any invocation."
+        )
     except model_client.ModelPolicyViolation:
         pass
 
     if client.calls:
-        failures.append(f"[5f] Model client must never be invoked for a rejected inference-profile id; got {len(client.calls)} call(s).")
+        failures.append(
+            f"[5f] Model client must never be invoked for a rejected inference-profile id; got {len(client.calls)} call(s)."
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -580,10 +580,7 @@ describe('History — load states', () => {
 
   it('a failed load is terminal: an error and a working retry, never a spinner too', async () => {
     stubRoutes({
-      '/api/reviews': [
-        { status: 500, body: {} },
-        listOf(MODERN),
-      ],
+      '/api/reviews': [{ status: 500, body: {} }, listOf(MODERN)],
     });
     render(<ReviewHistory />);
 

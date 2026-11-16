@@ -68,6 +68,7 @@ def _find_ts_sources() -> list[Path]:
 # Check A — pointer-only rule in docs/threat-model.md
 # ---------------------------------------------------------------------------
 
+
 def check_a_threat_model() -> list[str]:
     print("\nCheck A: Pointer-only payload rule documented in docs/threat-model.md …")
     failures: list[str] = []
@@ -84,9 +85,7 @@ def check_a_threat_model() -> list[str]:
 
     # Must mention Step Functions AND execution history in the context of
     # payload / substance leakage.
-    has_sfn = bool(
-        re.search(r"Step Functions", tm)
-    )
+    has_sfn = bool(re.search(r"Step Functions", tm))
     failures += _assert(
         has_sfn,
         "docs/threat-model.md mentions Step Functions",
@@ -126,6 +125,7 @@ def check_a_threat_model() -> list[str]:
 # Check B — pointer-only rule in docs/data-handling.md
 # ---------------------------------------------------------------------------
 
+
 def check_b_data_handling() -> list[str]:
     print("\nCheck B: Pointer-only payload rule documented in docs/data-handling.md …")
     failures: list[str] = []
@@ -140,9 +140,7 @@ def check_b_data_handling() -> list[str]:
 
     dh = _read(dh_path)
 
-    has_sfn = bool(
-        re.search(r"Step Functions", dh)
-    )
+    has_sfn = bool(re.search(r"Step Functions", dh))
     failures += _assert(
         has_sfn,
         "docs/data-handling.md mentions Step Functions",
@@ -171,6 +169,7 @@ def check_b_data_handling() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check C — tracking note for #59 substance scan (pipeline integration test)
 # ---------------------------------------------------------------------------
+
 
 def check_c_issue59_tracking() -> list[str]:
     """Verify the pipeline substance scan is tracked on #59.
@@ -218,6 +217,7 @@ def check_c_issue59_tracking() -> list[str]:
 # Check D — AppStack accepts stateMachineKey?: kms.IKey prop
 # ---------------------------------------------------------------------------
 
+
 def check_d_app_stack_cmk_prop() -> list[str]:
     print("\nCheck D: AppStack accepts stateMachineKey?: kms.IKey prop …")
     failures: list[str] = []
@@ -233,9 +233,7 @@ def check_d_app_stack_cmk_prop() -> list[str]:
     app_ts = _read(app_stack_path)
 
     # Must import or reference kms from aws-cdk-lib
-    has_kms_import = bool(
-        re.search(r"import\s.*kms.*aws-cdk-lib|aws-cdk-lib/aws-kms", app_ts)
-    )
+    has_kms_import = bool(re.search(r"import\s.*kms.*aws-cdk-lib|aws-cdk-lib/aws-kms", app_ts))
     failures += _assert(
         has_kms_import,
         "app-stack.ts imports kms from aws-cdk-lib",
@@ -282,6 +280,7 @@ def check_d_app_stack_cmk_prop() -> list[str]:
 # Check E — RUNBOOK.md console-inspection guidance
 # ---------------------------------------------------------------------------
 
+
 def check_e_runbook() -> list[str]:
     print("\nCheck E: RUNBOOK.md console-inspection guidance updated …")
     failures: list[str] = []
@@ -297,9 +296,7 @@ def check_e_runbook() -> list[str]:
     runbook = _read(runbook_path)
 
     # Must reference Step Functions console inspection in an operator context.
-    has_sfn_console = bool(
-        re.search(r"Step Functions", runbook)
-    )
+    has_sfn_console = bool(re.search(r"Step Functions", runbook))
     failures += _assert(
         has_sfn_console,
         "RUNBOOK.md mentions Step Functions (console-inspection context)",
@@ -331,6 +328,7 @@ def check_e_runbook() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check F — cdk synth still runs cleanly
 # ---------------------------------------------------------------------------
+
 
 def check_f_cdk_synth() -> list[str]:
     print("\nCheck F: cdk synth runs cleanly with stateMachineKey prop in place …")
@@ -375,6 +373,7 @@ def check_f_cdk_synth() -> list[str]:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> int:
     print("Step Functions pointer-only payloads and CMK gate (issue #19)")
     print("=" * 60)
@@ -389,10 +388,7 @@ def main() -> int:
 
     print("\n" + "=" * 60)
     if all_failures:
-        print(
-            f"\nFAIL: {len(all_failures)} check(s) failed.\n"
-            "See output above for details."
-        )
+        print(f"\nFAIL: {len(all_failures)} check(s) failed.\nSee output above for details.")
         return 1
 
     print("\nPASS: all Step Functions pointer-only/CMK structural checks passed.")

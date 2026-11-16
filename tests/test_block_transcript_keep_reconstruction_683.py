@@ -21,6 +21,7 @@ construction. This file builds a transcript that genuinely diverges.
 
 Synthetic throughout -- invented text, no document content.
 """
+
 from __future__ import annotations
 
 import sys
@@ -43,7 +44,7 @@ _SENTENCE = (
 _DELETE_PHRASE = "sixty (60) days"
 _PREFIX = _SENTENCE * 28
 _SUFFIX = " and the remainder of the term shall continue unaffected."
-_MARKER = " [End of Agreement]"          # 19 characters, as in the real failure
+_MARKER = " [End of Agreement]"  # 19 characters, as in the real failure
 BIG_BLOCK = f"{_PREFIX}within {_DELETE_PHRASE}{_SUFFIX}{_MARKER}"
 
 
@@ -67,7 +68,7 @@ class TestKeepReconstruction(unittest.TestCase):
                     _keep(f"{_PREFIX}within "),
                     _delete(_DELETE_PHRASE, "TERM-1"),
                     _insert("thirty (30) days", "TERM-1"),
-                    _keep(trailing_keep[: -len(_MARKER)]),   # marker dropped
+                    _keep(trailing_keep[: -len(_MARKER)]),  # marker dropped
                 )
             ],
             [],
@@ -77,7 +78,7 @@ class TestKeepReconstruction(unittest.TestCase):
 
         block = result["blocks"][0]
         deletion = next(op for op in block["ops"] if op["op"] == "delete")
-        self.assertEqual(BIG_BLOCK[deletion["start"]:deletion["end"]], _DELETE_PHRASE)
+        self.assertEqual(BIG_BLOCK[deletion["start"] : deletion["end"]], _DELETE_PHRASE)
         # every character of the block is still accounted for -- the dropped
         # marker is RESTORED from source, not silently lost from the redline
         self.assertTrue(block["final_text"].endswith(_MARKER))

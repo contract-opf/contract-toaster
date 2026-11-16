@@ -213,9 +213,7 @@ describe('contract-type dial stays in sync with admin Playbooks mutations (#464)
     await goToTab('Review');
 
     await waitFor(() => {
-      expect(playbookStop('synthetic-nda-sample')!.label).toContain(
-        'Renamed NDA Playbook (464)',
-      );
+      expect(playbookStop('synthetic-nda-sample')!.label).toContain('Renamed NDA Playbook (464)');
     });
   });
 

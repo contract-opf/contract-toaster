@@ -207,7 +207,8 @@ class RevisionLayerPlacement(unittest.TestCase):
             parsed = parse_dockerfile(path)
             offenders = [i.line for i in parsed.global_args if consumes(i, REVISION_ARG)]
             self.assertEqual(
-                offenders, [],
+                offenders,
+                [],
                 f"{parsed.rel}: {REVISION_ARG} declared before the first FROM "
                 f"(line {offenders}); declare it in the final metadata block",
             )
@@ -216,17 +217,17 @@ class RevisionLayerPlacement(unittest.TestCase):
         for path in DOCKERFILES:
             parsed = parse_dockerfile(path)
             for index, stage in enumerate(parsed.stages):
-                first_use = next(
-                    (i for i in stage.instructions if consumes(i, REVISION_ARG)), None
-                )
+                first_use = next((i for i in stage.instructions if consumes(i, REVISION_ARG)), None)
                 if first_use is None:
                     continue
                 late = [
-                    i for i in stage.instructions
+                    i
+                    for i in stage.instructions
                     if i.line > first_use.line and is_install_or_copy(i)
                 ]
                 self.assertEqual(
-                    late, [],
+                    late,
+                    [],
                     f"{parsed.rel} stage {index} ({stage.base}): {REVISION_ARG} is "
                     f"consumed at line {first_use.line}, above install/copy step(s) "
                     f"at line(s) {[i.line for i in late]} - a new revision then "
@@ -243,17 +244,17 @@ class RevisionLayerPlacement(unittest.TestCase):
                 if not used:
                     continue
                 self.assertEqual(
-                    path, DTS_FRONTEND,
-                    f"{parsed.rel} stage {index}: only the final stage may consume "
-                    f"{REVISION_ARG}",
+                    path,
+                    DTS_FRONTEND,
+                    f"{parsed.rel} stage {index}: only the final stage may consume {REVISION_ARG}",
                 )
-                after = [
-                    i for i in stage.instructions if i.line > used[0].line
-                ]
+                after = [i for i in stage.instructions if i.line > used[0].line]
                 kinds = {(i.keyword, i.args) for i in after}
                 self.assertTrue(
-                    all(k == "ENV" or (k == "RUN" and a == "npm run build")
-                        or (k == "ARG") for k, a in kinds),
+                    all(
+                        k == "ENV" or (k == "RUN" and a == "npm run build") or (k == "ARG")
+                        for k, a in kinds
+                    ),
                     f"{parsed.rel} stage {index}: after {REVISION_ARG} only the "
                     f"VITE_* ENV and `RUN npm run build` may follow, got {kinds}",
                 )
@@ -263,8 +264,7 @@ class RevisionLayerPlacement(unittest.TestCase):
             parsed = parse_dockerfile(path)
             final = parsed.final
             arg = next(
-                (i for i in final.instructions
-                 if i.keyword == "ARG" and consumes(i, REVISION_ARG)),
+                (i for i in final.instructions if i.keyword == "ARG" and consumes(i, REVISION_ARG)),
                 None,
             )
             self.assertIsNotNone(
@@ -272,13 +272,23 @@ class RevisionLayerPlacement(unittest.TestCase):
             )
             assert arg is not None
             self.assertRegex(
-                arg.args, rf"^{REVISION_ARG}=unknown$",
+                arg.args,
+                rf"^{REVISION_ARG}=unknown$",
                 f"{parsed.rel}: ARG {REVISION_ARG} must default to `unknown`, the "
                 f"/version fallback, so an un-parameterised build degrades cleanly",
             )
             after = [i.keyword for i in final.instructions if i.line > arg.line]
-            allowed = {"ARG", "ENV", "LABEL", "RUN", "WORKDIR", "EXPOSE", "CMD",
-                       "ENTRYPOINT", "USER"}
+            allowed = {
+                "ARG",
+                "ENV",
+                "LABEL",
+                "RUN",
+                "WORKDIR",
+                "EXPOSE",
+                "CMD",
+                "ENTRYPOINT",
+                "USER",
+            }
             self.assertTrue(
                 set(after) <= allowed,
                 f"{parsed.rel}: only metadata may follow ARG {REVISION_ARG}, got "
@@ -292,12 +302,15 @@ class RevisionLayerPlacement(unittest.TestCase):
         for path in DOCKERFILES:
             parsed = parse_dockerfile(path)
             runs = [
-                i for i in parsed.final.instructions
-                if i.keyword == "RUN" and references(i.args, REVISION_ARG)
+                i
+                for i in parsed.final.instructions
+                if i.keyword == "RUN"
+                and references(i.args, REVISION_ARG)
                 and REVISION_FILE in i.args
             ]
             self.assertEqual(
-                len(runs), 1,
+                len(runs),
+                1,
                 f"{parsed.rel}: the final stage must have exactly one RUN that "
                 f"writes ${{{REVISION_ARG}}} to {REVISION_FILE}",
             )
@@ -309,24 +322,29 @@ class OciAnnotations(unittest.TestCase):
             parsed = parse_dockerfile(path)
             labels = label_pairs(parsed.final)
             self.assertIn(
-                OCI_REVISION, labels,
+                OCI_REVISION,
+                labels,
                 f"{parsed.rel}: final stage carries no {OCI_REVISION} label",
             )
             self.assertRegex(
-                labels[OCI_REVISION], rf"^\$\{{{REVISION_ARG}\}}$",
+                labels[OCI_REVISION],
+                rf"^\$\{{{REVISION_ARG}\}}$",
                 f"{parsed.rel}: {OCI_REVISION} must be bound to the "
                 f"{REVISION_ARG} build arg and nothing else",
             )
             label_line = next(
-                i.line for i in parsed.final.instructions
+                i.line
+                for i in parsed.final.instructions
                 if i.keyword == "LABEL" and OCI_REVISION in i.args
             )
             arg_line = next(
-                i.line for i in parsed.final.instructions
+                i.line
+                for i in parsed.final.instructions
                 if i.keyword == "ARG" and consumes(i, REVISION_ARG)
             )
             self.assertGreater(
-                label_line, arg_line,
+                label_line,
+                arg_line,
                 f"{parsed.rel}: the label must follow ARG {REVISION_ARG} in the "
                 f"final stage, or it expands to an empty string",
             )
@@ -342,7 +360,8 @@ class RevisionAndReleaseAreSeparate(unittest.TestCase):
             self.assertFalse(references(labels.get(OCI_REVISION, ""), RELEASE_ARG))
             if OCI_VERSION in labels:
                 self.assertRegex(
-                    labels[OCI_VERSION], rf"^\$\{{{RELEASE_ARG}\}}$",
+                    labels[OCI_VERSION],
+                    rf"^\$\{{{RELEASE_ARG}\}}$",
                     f"{parsed.rel}: {OCI_VERSION} must carry the release "
                     f"identifier ({RELEASE_ARG}) alone",
                 )
@@ -360,7 +379,8 @@ class RevisionAndReleaseAreSeparate(unittest.TestCase):
         for path in DOCKERFILES:
             parsed = parse_dockerfile(path)
             self.assertIn(
-                OCI_VERSION, label_pairs(parsed.final),
+                OCI_VERSION,
+                label_pairs(parsed.final),
                 f"{parsed.rel}: the release identifier needs its own "
                 f"{OCI_VERSION} label, distinct from {OCI_REVISION}",
             )
@@ -372,13 +392,12 @@ class RevisionAndReleaseAreSeparate(unittest.TestCase):
             parsed = parse_dockerfile(path)
             names = [
                 i.args.split("=")[0]
-                for stage in parsed.stages for i in stage.instructions
+                for stage in parsed.stages
+                for i in stage.instructions
                 if i.keyword in ("ARG", "ENV")
             ] + [i.args.split("=")[0] for i in parsed.global_args]
             baked = [n for n in names if re.search(r"DEPLOY|RELEASE", n)]
-            self.assertEqual(
-                baked, [], f"{parsed.rel}: deployment identity baked in: {baked}"
-            )
+            self.assertEqual(baked, [], f"{parsed.rel}: deployment identity baked in: {baked}")
 
     def test_image_digest_is_retained_on_the_backend_images(self) -> None:
         for path in (AWS_BACKEND, DTS_BACKEND):
@@ -394,7 +413,8 @@ class WorkflowsPassTheImmutableRevision(unittest.TestCase):
         text = CI_PIPELINE.read_text(encoding="utf-8")
         build = re.search(
             r"- name: Build container image \(STEP E\)\n(.*?)(?=\n      - name:)",
-            text, re.DOTALL,
+            text,
+            re.DOTALL,
         )
         self.assertIsNotNone(build, "ci-pipeline.yml: STEP E build step not found")
         assert build is not None
@@ -404,7 +424,8 @@ class WorkflowsPassTheImmutableRevision(unittest.TestCase):
         self.assertIsNotNone(assignment, "COMMIT_SHA is never assigned in STEP E")
         assert assignment is not None
         self.assertEqual(
-            assignment.group(1).strip(), "$(git rev-parse HEAD)",
+            assignment.group(1).strip(),
+            "$(git rev-parse HEAD)",
             "ci-pipeline.yml: the revision build arg must be the full commit "
             "SHA, not `--short` (a prefix is not an immutable name)",
         )
@@ -419,7 +440,8 @@ class WorkflowsPassTheImmutableRevision(unittest.TestCase):
         self.assertIsNotNone(producer, f"no step writes the `{output}` output")
         assert producer is not None
         self.assertEqual(
-            producer.group(1), "${TARGET_SHA}",
+            producer.group(1),
+            "${TARGET_SHA}",
             "dts-image-publish.yml: the revision build arg must be the full "
             "TARGET_SHA (the commit that passed CI), not a truncated one",
         )
@@ -431,12 +453,14 @@ class WorkflowsPassTheImmutableRevision(unittest.TestCase):
             text,
         )
         self.assertIsNotNone(
-            build, "cicd-stack.ts: buildspec docker build of backend/Dockerfile with "
+            build,
+            "cicd-stack.ts: buildspec docker build of backend/Dockerfile with "
             "--build-arg COMMIT_SHA=$COMMIT_SHA not found",
         )
         assignments = re.findall(r"^\s*'COMMIT_SHA=(.+)',\s*$", text, re.MULTILINE)
         self.assertEqual(
-            assignments, ["$(git rev-parse HEAD)"],
+            assignments,
+            ["$(git rev-parse HEAD)"],
             "cicd-stack.ts: the CodeBuild buildspec's revision build arg must "
             "be the full commit SHA, not `--short` (a prefix is not an "
             "immutable name)",
@@ -464,10 +488,17 @@ class WarmCacheBuild(unittest.TestCase):
 
     def _build(self, tag: str, revision: str) -> None:
         docker(
-            "build", "-q", "-f", str(DTS_BACKEND),
-            "--build-arg", f"VERSION={revision[:7]}-20261023000000",
-            "--build-arg", f"COMMIT_SHA={revision}",
-            "-t", tag, str(REPO_ROOT),
+            "build",
+            "-q",
+            "-f",
+            str(DTS_BACKEND),
+            "--build-arg",
+            f"VERSION={revision[:7]}-20261023000000",
+            "--build-arg",
+            f"COMMIT_SHA={revision}",
+            "-t",
+            tag,
+            str(REPO_ROOT),
         )
 
     def test_warm_cache_builds_report_different_revisions(self) -> None:
@@ -479,8 +510,10 @@ class WarmCacheBuild(unittest.TestCase):
             self._build(tags[1], second)
             for tag, revision in zip(tags, (first, second), strict=True):
                 label = docker(
-                    "inspect", "--format",
-                    f'{{{{index .Config.Labels "{OCI_REVISION}"}}}}', tag,
+                    "inspect",
+                    "--format",
+                    f'{{{{index .Config.Labels "{OCI_REVISION}"}}}}',
+                    tag,
                 )
                 self.assertEqual(label, revision)
                 env = docker("inspect", "--format", "{{json .Config.Env}}", tag)

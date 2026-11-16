@@ -90,6 +90,7 @@ def _rule(playbook: dict, rule_id: str) -> dict:
 #    under a rule-wide match:'regex'.
 # ---------------------------------------------------------------------------
 
+
 def test_no_exos_indemnity_splits_plain_and_regex_triggers() -> None:
     playbook = load_playbook()
     rule = _rule(playbook, "no-exos-indemnity")
@@ -172,6 +173,7 @@ def test_plain_phrase_trigger_is_not_regex_compiled() -> None:
 # 2. Invalid regex compile failure is loud, not a silent substring fallback.
 # ---------------------------------------------------------------------------
 
+
 def test_invalid_regex_trigger_term_raises_not_silently_falls_back() -> None:
     malformed_rule = {
         "id": "synthetic-bad-regex",
@@ -209,14 +211,14 @@ def test_invalid_regex_trigger_term_raises_not_silently_falls_back() -> None:
         pass
     else:
         FAILURES.append(
-            "malformed trigger_terms entry under match:'regex' did NOT "
-            "raise DetectorConfigError."
+            "malformed trigger_terms entry under match:'regex' did NOT raise DetectorConfigError."
         )
 
 
 # ---------------------------------------------------------------------------
 # 3. protects.fire_on: 'delete_only' vs 'delete_or_modify'.
 # ---------------------------------------------------------------------------
+
 
 def test_fire_on_delete_only_vs_delete_or_modify() -> None:
     delete_only_rule = {
@@ -286,6 +288,7 @@ def test_fire_on_delete_only_vs_delete_or_modify() -> None:
 # ---------------------------------------------------------------------------
 # 4. match_surface: 'inserted' vs 'inserted_or_modified'.
 # ---------------------------------------------------------------------------
+
 
 def test_match_surface_inserted_vs_inserted_or_modified() -> None:
     inserted_only_rule = {
@@ -403,7 +406,10 @@ def test_no_exos_indemnity_fixtures_still_pass() -> None:
                 f"trigger_terms/regex_trigger_terms split, but it fired.",
             )
         else:
-            _check(False, f"{case_id}: unrecognized detector_expectation.expected_result: {expected_result!r}")
+            _check(
+                False,
+                f"{case_id}: unrecognized detector_expectation.expected_result: {expected_result!r}",
+            )
 
     missing = NO_EXOS_INDEMNITY_FIXTURE_CASE_IDS - found_case_ids
     _check(not missing, f"expected no-exos-indemnity gold fixtures not found: {sorted(missing)}")

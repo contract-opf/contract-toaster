@@ -84,7 +84,7 @@ def wrap_opf_html(
         )
     return (
         "<!doctype html>\n"
-        "<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"
+        '<html lang="en">\n<head>\n<meta charset="utf-8">\n'
         f"<title>{title}</title>\n"
         "<!--\n"
         "  Single-file OPF bundle. The canonical playbook is the JSON embedded in\n"
@@ -113,9 +113,7 @@ def extract_opf_from_html(html: str) -> dict:
             'no <script id="opf-canonical" type="application/json"> block found'
         )
     if len(matches) > 1:
-        raise OpfHtmlExtractError(
-            f"expected exactly one opf-canonical block, found {len(matches)}"
-        )
+        raise OpfHtmlExtractError(f"expected exactly one opf-canonical block, found {len(matches)}")
     body = _unescape_json_from_script(matches[0].strip())
     try:
         doc = json.loads(body)

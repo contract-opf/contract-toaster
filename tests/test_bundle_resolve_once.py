@@ -152,6 +152,7 @@ RUNBOOK_RETIRED_BUNDLE_PATTERNS = [
 # Gate runner helpers
 # ---------------------------------------------------------------------------
 
+
 def gate_1_submission_stores_bundle(arch_text: str) -> list[str]:
     failures = []
     labels = [
@@ -159,7 +160,8 @@ def gate_1_submission_stores_bundle(arch_text: str) -> list[str]:
         "submission record explicitly carries the bundle hash field",
     ]
     for i, (pattern, label) in enumerate(
-        zip(STEP3_STORES_BUNDLE_PATTERNS, labels), 1  # noqa: B905
+        zip(STEP3_STORES_BUNDLE_PATTERNS, labels),  # noqa: B905
+        1,
     ):
         if not pattern.search(arch_text):
             failures.append(
@@ -180,7 +182,8 @@ def gate_2_execution_verifies_not_resolves(arch_text: str) -> list[str]:
         "ARCHITECTURE.md explicitly states execution never re-resolves the bundle",
     ]
     for i, (pattern, label) in enumerate(
-        zip(STEP10_VERIFIES_PATTERNS, labels), 1  # noqa: B905
+        zip(STEP10_VERIFIES_PATTERNS, labels),  # noqa: B905
+        1,
     ):
         if not pattern.search(arch_text):
             failures.append(
@@ -201,7 +204,8 @@ def gate_3_retired_bundle_behavior_defined(arch_text: str) -> list[str]:
         "behavior: review refused/re-routed with specific status — not silently continued",
     ]
     for i, (pattern, label) in enumerate(
-        zip(RETIRED_BUNDLE_BEHAVIOR_PATTERNS, labels), 1  # noqa: B905
+        zip(RETIRED_BUNDLE_BEHAVIOR_PATTERNS, labels),  # noqa: B905
+        1,
     ):
         if not pattern.search(arch_text):
             failures.append(
@@ -223,7 +227,8 @@ def gate_4_runbook_retired_bundle(runbook_text: str) -> list[str]:
         "RUNBOOK names the resulting status or describes the operator recovery action",
     ]
     for i, (pattern, label) in enumerate(
-        zip(RUNBOOK_RETIRED_BUNDLE_PATTERNS, labels), 1  # noqa: B905
+        zip(RUNBOOK_RETIRED_BUNDLE_PATTERNS, labels),  # noqa: B905
+        1,
     ):
         if not pattern.search(runbook_text):
             failures.append(

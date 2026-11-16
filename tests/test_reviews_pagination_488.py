@@ -196,7 +196,9 @@ class TestTheCapIsNotAdvisory(unittest.TestCase):
 
     def test_a_nonsense_limit_still_returns_a_page(self) -> None:
         for bad in (0, -1, -100):
-            page = reviews_module.list_reviews(_caller(), _Resource(_PagingTable(_rows(5))), limit=bad)
+            page = reviews_module.list_reviews(
+                _caller(), _Resource(_PagingTable(_rows(5))), limit=bad
+            )
             self.assertEqual(len(page["items"]), 1, f"limit={bad} must clamp to 1, not to empty")
 
     def test_the_default_is_bounded_when_no_limit_is_asked_for(self) -> None:
@@ -264,9 +266,7 @@ class TestScoping(unittest.TestCase):
         # query per status for a page, and every seeded row here is DONE.
         self.assertEqual(table.scan_calls, 0)
         self.assertGreater(table.query_calls, 0)
-        self.assertLessEqual(
-            table.query_calls, len(reviews_module._ADMIN_LISTING_STATUSES)
-        )
+        self.assertLessEqual(table.query_calls, len(reviews_module._ADMIN_LISTING_STATUSES))
 
     def test_an_owner_scoped_listing_uses_the_index_not_a_scan(self) -> None:
         """The whole cost argument depends on this. A scan+filter that

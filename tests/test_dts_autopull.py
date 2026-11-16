@@ -171,9 +171,7 @@ class Box:
             self.container(name, revision, health, state)
 
     def container(self, name: str, revision: str, health: str, state: str) -> None:
-        (self.fake / f"inspect.{name}").write_text(
-            f"{revision}|{health}|{state}", encoding="utf-8"
-        )
+        (self.fake / f"inspect.{name}").write_text(f"{revision}|{health}|{state}", encoding="utf-8")
 
     def add_ps(self, name: str, image: str) -> None:
         with (self.fake / "ps").open("a", encoding="utf-8") as fh:
@@ -261,9 +259,7 @@ class AutopullBehaviour(unittest.TestCase):
         calls = self.box.curl_calls()
         self.assertEqual(len(calls), 1)
         self.assertIn("-X POST", calls[0])
-        self.assertIn(
-            f"http://127.0.0.1:8000/api/v1/services/{UUID}/restart?latest=true", calls[0]
-        )
+        self.assertIn(f"http://127.0.0.1:8000/api/v1/services/{UUID}/restart?latest=true", calls[0])
         self.assertNotIn(TOKEN, calls[0], "the token must not be on the command line")
         self.assertIn(
             f"Authorization: Bearer {TOKEN}",
@@ -310,15 +306,14 @@ class AutopullBehaviour(unittest.TestCase):
     def test_digest_matches_the_watched_repo_and_registry_port(self) -> None:
         image = "localhost:5000/team/contract-toaster-dts-backend:latest"
         self.box.publish(
-            image, "sha256:mine", "c" * 40,
+            image,
+            "sha256:mine",
+            "c" * 40,
             extra="localhost:5000/team/other-image@sha256:not-mine",
         )
         result = self.box.run(images=image)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(
-            self.box.state.read_text(encoding="utf-8"), f"{image} sha256:mine\n"
-        )
-
+        self.assertEqual(self.box.state.read_text(encoding="utf-8"), f"{image} sha256:mine\n")
 
     def publish_b(self) -> None:
         self.box.publish(BACKEND, "sha256:b2", "b" * 40)
@@ -660,7 +655,9 @@ class AutopullCosign(unittest.TestCase):
     def test_enforce_refuses_when_only_the_second_image_fails(self) -> None:
         (self.box.fake / "cosign_fail_on").write_text("sha256:f2", encoding="utf-8")
         self.assert_refused(self.run_box(AUTOPULL_COSIGN="enforce"))
-        self.assertEqual(len(self.box.cosign_calls()), 2, "the first passes, the second is asked and fails")
+        self.assertEqual(
+            len(self.box.cosign_calls()), 2, "the first passes, the second is asked and fails"
+        )
 
     def test_a_cosign_that_reads_stdin_does_not_swallow_the_second_image(self) -> None:
         # `cosign verify` runs inside `while read ... <<<"${current}"`; a binary

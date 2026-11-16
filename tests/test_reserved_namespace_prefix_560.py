@@ -129,9 +129,7 @@ def _apply(docx_bytes: bytes) -> dict:
     """
     normalized = ens.extract_and_normalize(docx_bytes)
     block_map = ens.build_block_map(normalized["paragraphs"])
-    block_id, block = next(
-        (bid, blk) for bid, blk in block_map.items() if CLAUSE in blk["text"]
-    )
+    block_id, block = next((bid, blk) for bid, blk in block_map.items() if CLAUSE in blk["text"])
     result = redline_generate.generate_redline_from_blocks(
         reconciled_result={
             "decision": "REQUEST_CHANGE",
@@ -173,7 +171,9 @@ def _apply(docx_bytes: bytes) -> dict:
         # One edit in, so "applied" is "a document came back with no
         # flag-only entry for it" -- the same one-element shape the assertions
         # below were written against.
-        "applied": [] if result.get("flag_only") or result.get("docx_bytes") is None else [block_id],
+        "applied": []
+        if result.get("flag_only") or result.get("docx_bytes") is None
+        else [block_id],
         "flag_only": result.get("flag_only") or [],
     }
 
@@ -216,9 +216,7 @@ def test_the_ordinary_case_is_unchanged(failures: list) -> None:
 def test_several_reserved_prefixes_are_all_survived(failures: list) -> None:
     """Real round-tripped documents carry more than one. Skipping the first
     and dying on the second would be a fix that passed the test above."""
-    many = "".join(
-        f' xmlns:ns{i}="http://schemas.example.com/rt{i}"' for i in range(4)
-    )
+    many = "".join(f' xmlns:ns{i}="http://schemas.example.com/rt{i}"' for i in range(4))
     try:
         result = _apply(_document(many))
     except ValueError:
@@ -232,13 +230,19 @@ def test_a_legitimate_prefix_is_still_registered(failures: list) -> None:
     """The guard must skip ONLY what ElementTree refuses. A fix that skipped
     every prefix would pass every test above while quietly letting the
     serializer rename bindings this module exists to preserve."""
-    before = dict(getattr(__import__("xml.etree.ElementTree", fromlist=["_namespace_map"]),  # noqa: B009
-                          "_namespace_map"))
+    before = dict(
+        getattr(  # noqa: B009
+            __import__("xml.etree.ElementTree", fromlist=["_namespace_map"]),
+            "_namespace_map",
+        )
+    )
     ooxml_util.register_declared_namespaces(
         [("ns0", "http://example.com/reserved"), ("mc", "http://example.com/legit")]
     )
-    after = getattr(__import__("xml.etree.ElementTree", fromlist=["_namespace_map"]),  # noqa: B009
-                    "_namespace_map")
+    after = getattr(  # noqa: B009
+        __import__("xml.etree.ElementTree", fromlist=["_namespace_map"]),
+        "_namespace_map",
+    )
     if after.get("http://example.com/legit") != "mc":
         failures.append("a legitimate prefix was not registered")
     if after.get("http://example.com/reserved") == "ns0":

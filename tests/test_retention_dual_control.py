@@ -45,6 +45,7 @@ def read(path: Path) -> str:
 
 # ── Check 1: RUNBOOK — dual-control / delay documented in retention section ──
 
+
 def check_runbook_dual_control() -> list[str]:
     """
     The 'Changing document retention' section in RUNBOOK.md must explain
@@ -68,9 +69,7 @@ def check_runbook_dual_control() -> list[str]:
         re.IGNORECASE,
     )
     if not section_match:
-        failures.append(
-            "RUNBOOK.md: Could not find 'Changing document retention' section"
-        )
+        failures.append("RUNBOOK.md: Could not find 'Changing document retention' section")
         return failures
 
     # Grab text from that section until the next same-or-higher heading
@@ -109,6 +108,7 @@ def check_runbook_dual_control() -> list[str]:
 
 # ── Check 2: data-handling.md — invariant 5 (dual-control) present ───────────
 
+
 def check_data_handling_invariant5() -> list[str]:
     """
     docs/data-handling.md currently enumerates four purge invariants (1-4).
@@ -137,7 +137,7 @@ def check_data_handling_invariant5() -> list[str]:
     # The invariant must mention retroactive reduction and dual-control / delay
     # Extract the invariant-5 text (until the next numbered item or heading)
     m = invariant5_pattern.search(text)
-    inv5_text = text[m.start():]
+    inv5_text = text[m.start() :]
     next_boundary = re.search(r"\n\s*(?:\d+\.\s|\#{1,6}\s)", inv5_text[2:])
     inv5_text = inv5_text[: next_boundary.start() + 2] if next_boundary else inv5_text[:1000]
 
@@ -174,6 +174,7 @@ def check_data_handling_invariant5() -> list[str]:
 
 
 # ── Check 3: threat-model.md — malicious-admin section present ────────────────
+
 
 def check_threat_model_malicious_admin() -> list[str]:
     """
@@ -221,6 +222,7 @@ def check_threat_model_malicious_admin() -> list[str]:
 
 # ── Check 4: GC alarm for delay path documented ───────────────────────────────
 
+
 def check_gc_alarm() -> list[str]:
     """
     The GC (General Counsel) alarm for the delay path must be mentioned in
@@ -264,6 +266,7 @@ def check_gc_alarm() -> list[str]:
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
+
 
 def main() -> int:
     checks = [

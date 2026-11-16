@@ -118,6 +118,7 @@ def _prose_strings(raw: dict[str, Any]) -> list[str]:
 
 # ── Check 1: case-type coverage across the whole gold set ──────────────────
 
+
 def check_case_type_coverage(fixtures: dict[str, dict[str, Any]]) -> list[str]:
     failures: list[str] = []
 
@@ -138,18 +139,23 @@ def check_case_type_coverage(fixtures: dict[str, dict[str, Any]]) -> list[str]:
     )
 
     if not has_near_miss:
-        failures.append("  no gold fixture is tagged as a near-miss case (case_id containing 'near-miss'/'near_miss', or case_type=='near_miss')")
+        failures.append(
+            "  no gold fixture is tagged as a near-miss case (case_id containing 'near-miss'/'near_miss', or case_type=='near_miss')"
+        )
     if not has_accept:
         failures.append("  no gold fixture has expected_decision == 'ACCEPT'")
     if not has_must_not_flag:
         failures.append("  no gold fixture has a non-empty must_not_flag[] list")
     if not has_acceptable_variation:
-        failures.append("  no gold fixture's description/must_not_flag[].reason mentions 'acceptable_variation'")
+        failures.append(
+            "  no gold fixture's description/must_not_flag[].reason mentions 'acceptable_variation'"
+        )
 
     return failures
 
 
 # ── Check 2: every issue-183 fixture exists ─────────────────────────────────
+
 
 def check_new_fixtures_exist(fixtures: dict[str, dict[str, Any]]) -> list[str]:
     failures = []
@@ -161,6 +167,7 @@ def check_new_fixtures_exist(fixtures: dict[str, dict[str, Any]]) -> list[str]:
 
 # ── Check 3: every issue-183 fixture is marked synthetic + pending GC sign-off ──
 
+
 def check_new_fixtures_marked_synthetic_pending(fixtures: dict[str, dict[str, Any]]) -> list[str]:
     failures = []
     for case_id in NEW_FIXTURES_183:
@@ -168,13 +175,16 @@ def check_new_fixtures_marked_synthetic_pending(fixtures: dict[str, dict[str, An
         if raw is None:
             continue  # already reported by check 2
         if raw.get("synthetic") is not True:
-            failures.append(f"  {case_id}: \"synthetic\" is not True (got {raw.get('synthetic')!r})")
+            failures.append(f'  {case_id}: "synthetic" is not True (got {raw.get("synthetic")!r})')
         if raw.get("gc_signoff") != "pending":
-            failures.append(f"  {case_id}: \"gc_signoff\" is not 'pending' (got {raw.get('gc_signoff')!r})")
+            failures.append(
+                f"  {case_id}: \"gc_signoff\" is not 'pending' (got {raw.get('gc_signoff')!r})"
+            )
     return failures
 
 
 # ── Check 4: no issue-183 fixture prose contains "exos" ─────────────────────
+
 
 def check_new_fixtures_no_exos_in_prose(fixtures: dict[str, dict[str, Any]]) -> list[str]:
     failures = []
@@ -184,24 +194,35 @@ def check_new_fixtures_no_exos_in_prose(fixtures: dict[str, dict[str, Any]]) -> 
             continue  # already reported by check 2
         for text in _prose_strings(raw):
             if "exos" in text.lower():
-                failures.append(f"  {case_id}: prose field contains 'exos' (release de-brand rule): {text!r}")
+                failures.append(
+                    f"  {case_id}: prose field contains 'exos' (release de-brand rule): {text!r}"
+                )
     return failures
 
 
 # ── main ──────────────────────────────────────────────────────────────────
 
+
 def main() -> int:
     fixtures = _load_all_fixtures()
 
     checks = [
-        ("1", "Case-type coverage (near-miss, ACCEPT, must_not_flag, acceptable_variations) present in gold set",
-         lambda: check_case_type_coverage(fixtures)),
-        ("2", "All issue-183 synthetic fixtures exist",
-         lambda: check_new_fixtures_exist(fixtures)),
-        ("3", "All issue-183 fixtures marked synthetic:true and gc_signoff:pending",
-         lambda: check_new_fixtures_marked_synthetic_pending(fixtures)),
-        ("4", "No issue-183 fixture prose contains tenant-brand strings",
-         lambda: check_new_fixtures_no_exos_in_prose(fixtures)),
+        (
+            "1",
+            "Case-type coverage (near-miss, ACCEPT, must_not_flag, acceptable_variations) present in gold set",
+            lambda: check_case_type_coverage(fixtures),
+        ),
+        ("2", "All issue-183 synthetic fixtures exist", lambda: check_new_fixtures_exist(fixtures)),
+        (
+            "3",
+            "All issue-183 fixtures marked synthetic:true and gc_signoff:pending",
+            lambda: check_new_fixtures_marked_synthetic_pending(fixtures),
+        ),
+        (
+            "4",
+            "No issue-183 fixture prose contains tenant-brand strings",
+            lambda: check_new_fixtures_no_exos_in_prose(fixtures),
+        ),
     ]
 
     overall_pass = True

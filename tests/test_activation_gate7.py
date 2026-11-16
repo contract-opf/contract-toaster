@@ -123,18 +123,18 @@ class ActivationGate7TestBase(unittest.TestCase):
         _put_user(self.users_table, NON_ADMIN_SUB, is_admin=False)
 
         self.client = TestClient(backend_main.app)
-        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = (
-            lambda: self.ddb
-        )
+        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = lambda: self.ddb
 
     def tearDown(self):
         backend_main.app.dependency_overrides.clear()
         self._mock_aws.stop()
 
     def _authenticate_as(self, sub: str) -> None:
-        backend_main.app.dependency_overrides[backend_main.get_current_user] = (
-            lambda: {"sub": sub, "email": f"{sub}@example.com", "token_use": "access"}
-        )
+        backend_main.app.dependency_overrides[backend_main.get_current_user] = lambda: {
+            "sub": sub,
+            "email": f"{sub}@example.com",
+            "token_use": "access",
+        }
 
     def _upload(self, version, content_hash, legal_approval=None, uploader="uploader@example.com"):
         return pv.record_playbook_version_upload(
@@ -155,6 +155,7 @@ class ActivationGate7TestBase(unittest.TestCase):
 
 # -- (0) route is mounted -----------------------------------------------
 
+
 class TestActivationRouteMounted(unittest.TestCase):
     def test_route_is_registered(self):
         registered = any(
@@ -172,6 +173,7 @@ class TestActivationRouteMounted(unittest.TestCase):
 
 # -- (1) admin gate -------------------------------------------------------
 
+
 class TestActivationAdminGate(ActivationGate7TestBase):
     def test_non_admin_gets_403(self):
         self._upload("1.0.0", "sha256:" + "a" * 64)
@@ -182,6 +184,7 @@ class TestActivationAdminGate(ActivationGate7TestBase):
 
 
 # -- (2) matching hash activates AND the resolver serves it ---------------
+
 
 class TestActivationMatchingHashServesResolver(ActivationGate7TestBase):
     def test_matching_hash_activates_and_resolver_serves_it(self):
@@ -204,9 +207,9 @@ class TestActivationMatchingHashServesResolver(ActivationGate7TestBase):
         self.assertEqual(result["status"], "active")
 
         # playbook_versions row is active.
-        row = self.versions_table.get_item(
-            Key={"playbook_id": PLAYBOOK_ID, "version": "1.0.0"}
-        )["Item"]
+        row = self.versions_table.get_item(Key={"playbook_id": PLAYBOOK_ID, "version": "1.0.0"})[
+            "Item"
+        ]
         self.assertEqual(row["status"], "active")
 
         # playbooks.active_release_bundle_hash was written to the SAME
@@ -224,6 +227,7 @@ class TestActivationMatchingHashServesResolver(ActivationGate7TestBase):
 
 # -- (3) mismatch is rejected (Gate 7) -------------------------------------
 
+
 class TestActivationGate7Mismatch(ActivationGate7TestBase):
     def test_mismatched_hash_is_rejected(self):
         self._upload("1.0.0", "sha256:" + "a" * 64)
@@ -234,9 +238,9 @@ class TestActivationGate7Mismatch(ActivationGate7TestBase):
         self.assertEqual(resp.status_code, 409)
 
         # The version was NOT activated.
-        row = self.versions_table.get_item(
-            Key={"playbook_id": PLAYBOOK_ID, "version": "1.0.0"}
-        )["Item"]
+        row = self.versions_table.get_item(Key={"playbook_id": PLAYBOOK_ID, "version": "1.0.0"})[
+            "Item"
+        ]
         self.assertEqual(row["status"], "draft")
 
         # playbooks table was never written.
@@ -254,9 +258,9 @@ class TestActivationGate7Mismatch(ActivationGate7TestBase):
         resp = self.client.post(ACTIVATE_PATH)
         self.assertEqual(resp.status_code, 409)
 
-        row = self.versions_table.get_item(
-            Key={"playbook_id": PLAYBOOK_ID, "version": "1.0.0"}
-        )["Item"]
+        row = self.versions_table.get_item(Key={"playbook_id": PLAYBOOK_ID, "version": "1.0.0"})[
+            "Item"
+        ]
         self.assertEqual(row["status"], "draft")
 
     def test_unknown_version_is_404(self):

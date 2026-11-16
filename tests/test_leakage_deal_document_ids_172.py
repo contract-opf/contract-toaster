@@ -282,9 +282,11 @@ def test_a_cited_deal_blocks_externally_and_is_permitted_internally() -> None:
             assert not leakage_scan.scan_model_output(
                 _output(_issue(**{_INTERNAL: echoed})), corpus
             ).blocked, (slug, echoed)
-            assert not leakage_scan.LeakageScanner(corpus).scan(
-                echoed, field_name=_INTERNAL, channel=leakage_scan.CHANNEL_INTERNAL
-            ).blocked, (slug, echoed)
+            assert (
+                not leakage_scan.LeakageScanner(corpus)
+                .scan(echoed, field_name=_INTERNAL, channel=leakage_scan.CHANNEL_INTERNAL)
+                .blocked
+            ), (slug, echoed)
 
 
 # ---------------------------------------------------------------------------
@@ -336,9 +338,7 @@ def test_each_ref_kind_is_cited_by_alias() -> None:
 def test_the_precedent_record_contributes_deals_the_digest_does_not_cite() -> None:
     doc = _load(GOLD_FIXTURE)
     record = {r["document_id"] for r in doc["evidence"]["precedent"]}
-    cited_slugs = {
-        deal_aliases.resolution_map(doc).get(alias) for alias in _cited(doc)
-    } - {None}
+    cited_slugs = {deal_aliases.resolution_map(doc).get(alias) for alias in _cited(doc)} - {None}
     evidence_only = record - cited_slugs
     # The unsigned deal: nothing in the digest cites it (since OPF 0.6 the
     # digest's representatives are the latest-signed deals, so every signed
@@ -403,7 +403,10 @@ def test_the_current_counterpartys_own_name_is_never_blocked() -> None:
     assert current in aliases
     name = current.replace("-", " ").replace("_", " ").title()
     assert "epsilon systems" in corpus.counterparty_names
-    for said in (f"As agreed with {current}, we keep a US state.", f"We ask {name} to keep a US state."):
+    for said in (
+        f"As agreed with {current}, we keep a US state.",
+        f"We ask {name} to keep a US state.",
+    ):
         issue = _issue(**{_EXTERNAL: said})
         # Both forms: the held name is matched under the folding it was
         # selected with, so the slug's hyphenated spelling blocks as well.

@@ -150,7 +150,9 @@ describe('artwork/ is a closed set of seven plates (issue #732)', () => {
     // The directory listing and the module's import list must not drift apart:
     // an unimported plate is dead weight, and an import of a missing file is a
     // build break that this states as a policy violation first.
-    const imported = [...readOrbitSource('plates.ts').matchAll(/from ['"]\.\/artwork\/([^'"]+)['"]/g)]
+    const imported = [
+      ...readOrbitSource('plates.ts').matchAll(/from ['"]\.\/artwork\/([^'"]+)['"]/g),
+    ]
       .map((match) => match[1])
       .sort();
     expect(imported).toEqual(PLATE_FILES);
@@ -184,7 +186,9 @@ describe('no remote art (issue #732)', () => {
     ];
     for (const { file, content } of readOrbitFiles(TEXT_EXTENSIONS)) {
       for (const { label, re } of patterns) {
-        expect(content, `${file} must not aim a ${label} reference at a remote origin`).not.toMatch(re);
+        expect(content, `${file} must not aim a ${label} reference at a remote origin`).not.toMatch(
+          re,
+        );
       }
     }
   });
@@ -230,7 +234,10 @@ describe('plate paths stay operator-relocatable (issue #732)', () => {
         ).toMatch(/,\s*(?:base|assetBase)\s*,?$/);
       }
     }
-    expect(callSites, 'the platePath() call sites were not found — did it get renamed?').toBeGreaterThanOrEqual(2);
+    expect(
+      callSites,
+      'the platePath() call sites were not found — did it get renamed?',
+    ).toBeGreaterThanOrEqual(2);
   });
 });
 

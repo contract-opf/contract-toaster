@@ -142,8 +142,7 @@ def check_multi_failure_reporting() -> list[str]:
 
     if not SHARED_LOOP.exists():
         failures.append(
-            "  scripts/collect_test_failures.sh does not exist yet — "
-            "skipping behavioral check."
+            "  scripts/collect_test_failures.sh does not exist yet — skipping behavioral check."
         )
         return failures
 
@@ -202,7 +201,11 @@ def main() -> int:
         ("1", "scripts/collect_test_failures.sh exists (shared loop)", check_shared_loop_exists),
         ("2", "scripts/check.sh delegates to the shared loop", check_check_sh_delegates),
         ("3", "CI GATE A delegates to the shared loop (no fail-fast)", check_gate_a_delegates),
-        ("4", "Multi-failure tree reports every failing file in one run", check_multi_failure_reporting),
+        (
+            "4",
+            "Multi-failure tree reports every failing file in one run",
+            check_multi_failure_reporting,
+        ),
     ]
 
     overall_pass = True

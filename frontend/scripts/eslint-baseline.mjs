@@ -40,17 +40,17 @@
 // a backlog rather than being silenced into invisibility.
 //
 // Usage:  node scripts/eslint-baseline.mjs [--dry-run]
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-import { ESLint } from "eslint";
-import ts from "typescript";
+import { ESLint } from 'eslint';
+import ts from 'typescript';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const DRY = process.argv.includes("--dry-run");
+const DRY = process.argv.includes('--dry-run');
 
-const JSX_EXT = new Set([".tsx", ".jsx"]);
+const JSX_EXT = new Set(['.tsx', '.jsx']);
 
 /**
  * Resolve a reported line to its insertion point: WHICH line the directive is
@@ -83,7 +83,7 @@ const JSX_EXT = new Set([".tsx", ".jsx"]);
  *      above the tag's first line would point at the wrong one.
  */
 function resolver(filePath, source) {
-  if (!JSX_EXT.has(path.extname(filePath))) return (line) => ({ line, kind: "line" });
+  if (!JSX_EXT.has(path.extname(filePath))) return (line) => ({ line, kind: 'line' });
   const sf = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const lineStarts = sf.getLineStarts();
   const lineOf = (pos) => sf.getLineAndCharacterOfPosition(pos).line + 1;
@@ -120,7 +120,7 @@ function resolver(filePath, source) {
   const syntaxAbove = (node) => {
     let p = node.parent;
     while (p && p.kind !== ts.SyntaxKind.SourceFile) {
-      if (ts.isJsxElement(p) || ts.isJsxFragment(p)) return "jsx";
+      if (ts.isJsxElement(p) || ts.isJsxFragment(p)) return 'jsx';
       if (
         ts.isJsxExpression(p) ||
         ts.isBlock(p) ||
@@ -129,24 +129,24 @@ function resolver(filePath, source) {
         p.kind === ts.SyntaxKind.JsxAttributes ||
         ts.isJsxAttribute(p)
       ) {
-        return "line";
+        return 'line';
       }
       p = p.parent;
     }
-    return "line";
+    return 'line';
   };
 
   return (line) => {
     const lineStart = lineStarts[line - 1];
-    if (lineStart === undefined) return { line, kind: "line" };
+    if (lineStart === undefined) return { line, kind: 'line' };
     const text = sf.text;
     let pos = lineStart;
-    while (pos < text.length && (text[pos] === " " || text[pos] === "\t")) pos += 1;
+    while (pos < text.length && (text[pos] === ' ' || text[pos] === '\t')) pos += 1;
     const innermost = innermostAt(pos);
 
     // Move 2: inside a tag that opened on an earlier line.
     const tag = enclosingTag(innermost);
-    if (tag && lineOf(tag.getStart(sf)) < line) return { line, kind: "line" };
+    if (tag && lineOf(tag.getStart(sf)) < line) return { line, kind: 'line' };
 
     // Move 1: climb to the outermost node starting here, then read its context.
     let node = innermost;
@@ -162,7 +162,7 @@ function resolver(filePath, source) {
 }
 
 const eslint = new ESLint({ cwd: ROOT });
-const results = await eslint.lintFiles(["."]);
+const results = await eslint.lintFiles(['.']);
 
 let annotated = 0;
 let files = 0;
@@ -170,11 +170,13 @@ for (const result of results) {
   const errors = result.messages.filter((m) => m.severity === 2 && m.ruleId && m.line);
   if (errors.length === 0) continue;
   if (result.messages.some((m) => m.fatal)) {
-    throw new Error(`${result.filePath}: parse error — refusing to annotate a file ESLint cannot read`);
+    throw new Error(
+      `${result.filePath}: parse error — refusing to annotate a file ESLint cannot read`,
+    );
   }
 
-  const source = fs.readFileSync(result.filePath, "utf8");
-  const srcLines = source.split("\n");
+  const source = fs.readFileSync(result.filePath, 'utf8');
+  const srcLines = source.split('\n');
   const resolve = resolver(result.filePath, source);
 
   // rule ids per INSERTION line, deduped and stable-sorted. Two reported lines
@@ -199,16 +201,16 @@ for (const result of results) {
     const { kind, rules } = byLine.get(line);
     const target = srcLines[line - 1];
     const indent = /^\s*/.exec(target)[0];
-    const body = `eslint-disable-next-line ${[...rules].sort().join(", ")}`;
-    const comment = kind === "jsx" ? `${indent}{/* ${body} */}` : `${indent}// ${body}`;
+    const body = `eslint-disable-next-line ${[...rules].sort().join(', ')}`;
+    const comment = kind === 'jsx' ? `${indent}{/* ${body} */}` : `${indent}// ${body}`;
     srcLines.splice(line - 1, 0, comment);
     annotated += 1;
   }
 
   files += 1;
-  if (!DRY) fs.writeFileSync(result.filePath, srcLines.join("\n"), "utf8");
+  if (!DRY) fs.writeFileSync(result.filePath, srcLines.join('\n'), 'utf8');
 }
 
 console.log(
-  `${DRY ? "[dry-run] " : ""}eslint-baseline: ${annotated} annotation(s) across ${files} file(s)`,
+  `${DRY ? '[dry-run] ' : ''}eslint-baseline: ${annotated} annotation(s) across ${files} file(s)`,
 );

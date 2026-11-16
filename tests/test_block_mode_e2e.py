@@ -211,17 +211,13 @@ def _footnote_texts(docx_bytes: bytes) -> list:
 
 def _inserted_texts(docx_bytes: bytes) -> list:
     root = _document_root(docx_bytes)
-    return [
-        "".join(t.text or "" for t in ins.iter(_qn("t")))
-        for ins in root.iter(_qn("ins"))
-    ]
+    return ["".join(t.text or "" for t in ins.iter(_qn("t"))) for ins in root.iter(_qn("ins"))]
 
 
 def _deleted_texts(docx_bytes: bytes) -> list:
     root = _document_root(docx_bytes)
     return [
-        "".join(t.text or "" for t in dele.iter(_qn("delText")))
-        for dele in root.iter(_qn("del"))
+        "".join(t.text or "" for t in dele.iter(_qn("delText"))) for dele in root.iter(_qn("del"))
     ]
 
 
@@ -248,9 +244,7 @@ def _issue(issue_key: str, topic_id: str, *, section: str, note: str | None = No
             f"The counterparty altered {section} relative to the standard form."
         ),
         "decision": "REQUEST_CHANGE",
-        "external_rationale_for_footnote": (
-            f"{section} departs from the standard form position."
-        ),
+        "external_rationale_for_footnote": (f"{section} departs from the standard form position."),
         "playbook_topic_id": topic_id,
         "internal_precedent_citation": None,
         # Deliberately populated and deliberately WRONG: block mode ignores a
@@ -440,9 +434,7 @@ def test_multi_edit_paragraph_inserted_clause_and_per_issue_footnotes(failures: 
     root = _document_root(delivered)
     paragraphs = list(root.iter(_qn("p")))
     edited_paragraph_count = sum(
-        1
-        for p in paragraphs
-        if any(child.tag in (_qn("ins"), _qn("del")) for child in p)
+        1 for p in paragraphs if any(child.tag in (_qn("ins"), _qn("del")) for child in p)
     )
     if edited_paragraph_count < 3:
         failures.append(
@@ -480,8 +472,7 @@ def test_derived_replacement_text_overwrites_the_model_supplied_value(failures: 
     _run_block_mode(reconciled, docx_bytes)
 
     derived = {
-        issue["issue_key"]: issue.get("proposed_replacement_text")
-        for issue in reconciled["issues"]
+        issue["issue_key"]: issue.get("proposed_replacement_text") for issue in reconciled["issues"]
     }
     expected = {
         "I1": "thirty (30)",
@@ -496,8 +487,7 @@ def test_derived_replacement_text_overwrites_the_model_supplied_value(failures: 
             )
     if any(value == "MODEL SUPPLIED TEXT THAT MUST BE IGNORED" for value in derived.values()):
         failures.append(
-            "a model-supplied proposed_replacement_text survived into the result: "
-            f"{derived!r}"
+            f"a model-supplied proposed_replacement_text survived into the result: {derived!r}"
         )
 
 
@@ -540,8 +530,7 @@ def test_pure_deletion_derives_the_empty_string(failures: list) -> None:
         )
     if result.get("analysis_report") is not None:
         failures.append(
-            "a pure-deletion issue must not be reported flag-only: "
-            f"{result['analysis_report']!r}"
+            f"a pure-deletion issue must not be reported flag-only: {result['analysis_report']!r}"
         )
     if " from the Effective Date" not in _deleted_texts(result["docx_bytes"]):
         failures.append(
@@ -592,9 +581,7 @@ def test_a_whole_block_strike_derives_the_placeholder_and_skips_pen_rules(
                 ],
             }
         ],
-        "block_ops": [
-            {"op": "delete_block", "block_id": block_ids[1], "issue_key": "I1"}
-        ],
+        "block_ops": [{"op": "delete_block", "block_id": block_ids[1], "issue_key": "I1"}],
     }
     reconciled = _reconciled(response)
     result = _run_block_mode(reconciled, docx_bytes, pen_rules_bundle=bundle)
@@ -625,8 +612,7 @@ def test_a_whole_block_strike_derives_the_placeholder_and_skips_pen_rules(
         )
     if result.get("analysis_report") is not None:
         failures.append(
-            f"the whole-block strike was reported not-applied: "
-            f"{result['analysis_report']!r}"
+            f"the whole-block strike was reported not-applied: {result['analysis_report']!r}"
         )
 
     # The same `mode: "none"` rule, on an issue that DID propose language,
@@ -653,7 +639,7 @@ def test_a_whole_block_strike_derives_the_placeholder_and_skips_pen_rules(
     if control_reasons != [redline_generate.REASON_DERIVED_REPLACEMENT_TEXT_REJECTED]:
         failures.append(
             f"the pen rule that must still bite did not: {control_reasons!r} "
-            f"(status={control['status']!r}) -- if `mode: \"none\"` no longer rejects a "
+            f'(status={control["status"]!r}) -- if `mode: "none"` no longer rejects a '
             f"proposal, the exemption above proves nothing"
         )
 
@@ -708,9 +694,7 @@ def test_partial_change_set_is_rolled_back_and_the_other_issue_delivered(
             f"the document carries half a legal edit: {inserted!r}"
         )
     if "sixty (60)" in deleted:
-        failures.append(
-            f"issue I1's deletion survived its own change-set rollback: {deleted!r}"
-        )
+        failures.append(f"issue I1's deletion survived its own change-set rollback: {deleted!r}")
     if "sixty (60)" not in _plain_text(delivered):
         failures.append("the rolled-back issue's original text was not left intact")
 
@@ -743,8 +727,7 @@ def test_partial_change_set_is_rolled_back_and_the_other_issue_delivered(
     patch_reasons = [item.get("reason") for item in entry.get("patch_reasons") or []]
     if "spans_physical_paragraph" not in patch_reasons:
         failures.append(
-            "the rollback did not name the per-patch reason that caused it: "
-            f"{patch_reasons!r}"
+            f"the rollback did not name the per-patch reason that caused it: {patch_reasons!r}"
         )
     redline_generate.verify_docx_round_trip(delivered)
 
@@ -800,8 +783,7 @@ def test_a_wholly_failed_issue_keeps_its_own_reason(failures: list) -> None:
     reasons = [entry["reason"] for entry in entries]
     if reasons != ["spans_physical_paragraph"]:
         failures.append(
-            "a wholly-failed issue should keep its own per-edit reason, got "
-            f"{reasons!r}"
+            f"a wholly-failed issue should keep its own per-edit reason, got {reasons!r}"
         )
 
 
@@ -911,9 +893,7 @@ def test_leaked_insert_segment_blocks_the_review(failures: list) -> None:
             }
         ],
     }
-    result = _run_block_mode(
-        _reconciled(response), docx_bytes, corpus=_planted_corpus()
-    )
+    result = _run_block_mode(_reconciled(response), docx_bytes, corpus=_planted_corpus())
     if result["status"] != "ERROR":
         failures.append(
             "a precedent counterparty name in an insert segment did not block the "
@@ -947,9 +927,7 @@ def test_leaked_insert_block_new_text_blocks_the_review(failures: list) -> None:
             }
         ],
     }
-    result = _run_block_mode(
-        _reconciled(response), docx_bytes, corpus=_planted_corpus()
-    )
+    result = _run_block_mode(_reconciled(response), docx_bytes, corpus=_planted_corpus())
     if result["status"] != "ERROR":
         failures.append(
             "a precedent counterparty name in an insert_block_after new_text did "
@@ -995,9 +973,7 @@ def test_replacement_scope_note_is_scanned(failures: list) -> None:
             }
         ],
     }
-    result = _run_block_mode(
-        _reconciled(response), docx_bytes, corpus=_planted_corpus()
-    )
+    result = _run_block_mode(_reconciled(response), docx_bytes, corpus=_planted_corpus())
     if result["status"] != "ERROR":
         failures.append(
             "a precedent counterparty name in replacement_scope_note did not block "
@@ -1006,8 +982,7 @@ def test_replacement_scope_note_is_scanned(failures: list) -> None:
         return
     if result.get("field_name") != "replacement_scope_note":
         failures.append(
-            f"expected field_name='replacement_scope_note', got "
-            f"{result.get('field_name')!r}"
+            f"expected field_name='replacement_scope_note', got {result.get('field_name')!r}"
         )
 
 
@@ -1048,9 +1023,7 @@ def test_flag_only_issue_keeps_the_585_labelling(failures: list) -> None:
         failures.append(f"unexpected report reason {report['reason']!r}")
     entry_reasons = [entry["reason"] for entry in report["changes_not_applied"]]
     if entry_reasons != [rte.FLAG_ONLY_RETRY_EXHAUSTED]:
-        failures.append(
-            f"expected the upstream #585 label to survive, got {entry_reasons!r}"
-        )
+        failures.append(f"expected the upstream #585 label to survive, got {entry_reasons!r}")
 
 
 def test_transcript_rejection_is_terminal_and_names_the_failures(failures: list) -> None:
@@ -1072,18 +1045,14 @@ def test_transcript_rejection_is_terminal_and_names_the_failures(failures: list)
     }
     result = _run_block_mode(_reconciled(response), docx_bytes)
     if result["status"] != "ERROR":
-        failures.append(
-            f"a rejected transcript should be ERROR, got "
-            f"{result['status']!r}"
-        )
+        failures.append(f"a rejected transcript should be ERROR, got {result['status']!r}")
         return
     if result.get("reason") != redline_generate.REASON_BLOCK_TRANSCRIPT_REJECTED:
         failures.append(f"unexpected reason {result.get('reason')!r}")
     if result.get("docx_bytes") is not None:
         failures.append("a rejected transcript produced a document")
     reasons = [
-        entry.get("reason")
-        for entry in result["analysis_report"].get("transcript_failures") or []
+        entry.get("reason") for entry in result["analysis_report"].get("transcript_failures") or []
     ]
     if "unknown_block_id" not in reasons:
         failures.append(
@@ -1232,7 +1201,6 @@ def test_notes_mode_internal_marks_the_document(failures: list) -> None:
     redline_generate.verify_docx_round_trip(delivered)
 
 
-
 def test_an_edit_naming_no_issue_is_terminal(failures: list) -> None:
     """An edit whose `issue_key` resolves to no issue in the response is an
     UNATTRIBUTED change. The v3 schema cannot express that cross-array
@@ -1266,16 +1234,12 @@ def test_an_edit_naming_no_issue_is_terminal(failures: list) -> None:
     }
     result = _run_block_mode(_reconciled(response), docx_bytes)
     if result["status"] != "ERROR":
-        failures.append(
-            "an unattributed edit was not fail-closed: status="
-            f"{result['status']!r}"
-        )
+        failures.append(f"an unattributed edit was not fail-closed: status={result['status']!r}")
         return
     if result.get("docx_bytes") is not None:
         failures.append("an unattributed edit still produced a document")
     reasons = [
-        entry.get("reason")
-        for entry in result["analysis_report"].get("transcript_failures") or []
+        entry.get("reason") for entry in result["analysis_report"].get("transcript_failures") or []
     ]
     if redline_generate.REASON_UNATTRIBUTED_BLOCK_EDIT not in reasons:
         failures.append(f"the report does not name the unattributed edit: {reasons!r}")

@@ -86,7 +86,10 @@ from test_review_spine import (  # noqa: E402
 
 def test_heading_and_text_both_present(failures: list[str]) -> None:
     paragraphs = [
-        {"heading": "Confidentiality", "text": "Each party shall keep the other's information secret."},
+        {
+            "heading": "Confidentiality",
+            "text": "Each party shall keep the other's information secret.",
+        },
     ]
     doc_text = review_spine.document_text_for_review(paragraphs)
     if "Confidentiality" not in doc_text:
@@ -142,9 +145,7 @@ def test_empty_heading_produces_no_stray_separator(failures: list[str]) -> None:
     ]
     doc_text = review_spine.document_text_for_review(paragraphs)
     if "\n\n\n" in doc_text:
-        failures.append(
-            f"[4a] an empty heading produced a stray blank-line run: {doc_text!r}"
-        )
+        failures.append(f"[4a] an empty heading produced a stray blank-line run: {doc_text!r}")
     if "Untitled body." not in doc_text:
         failures.append(f"[4b] paragraph with empty heading lost its body text: {doc_text!r}")
 
@@ -159,7 +160,9 @@ def test_empty_text_produces_no_stray_separator(failures: list[str]) -> None:
     if "\n\n\n" in doc_text:
         failures.append(f"[5a] an empty body produced a stray blank-line run: {doc_text!r}")
     if "Empty Section" not in doc_text:
-        failures.append(f"[5b] the heading of an empty-text paragraph must still be shown: {doc_text!r}")
+        failures.append(
+            f"[5b] the heading of an empty-text paragraph must still be shown: {doc_text!r}"
+        )
 
 
 def test_both_empty_contributes_nothing(failures: list[str]) -> None:
@@ -240,7 +243,9 @@ def test_run_review_sends_heading_to_model(failures: list[str]) -> None:
         }
     )
 
-    result = review_spine.run_review(docx_bytes, bundle, fake_client, review_id="heading-fidelity-test")
+    result = review_spine.run_review(
+        docx_bytes, bundle, fake_client, review_id="heading-fidelity-test"
+    )
 
     if result["status"] != "OK":
         failures.append(f"[9a] setup failure -- expected status=OK, got {result}")

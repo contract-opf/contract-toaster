@@ -164,7 +164,7 @@ function unscopedHelperKeyFailures(owners) {
     .map(
       (key) =>
         `hidden helper: HIDDEN_HELPER_OWNERS key "${key}" is not component-scoped (.ct-<component>__<part>). ` +
-        'A global utility class registered against one component\'s containing block hides every other use of ' +
+        "A global utility class registered against one component's containing block hides every other use of " +
         'it from this audit (issue #36).',
     );
 }
@@ -175,7 +175,9 @@ const failures = [];
 
 function filesUnder(dir, matches) {
   const out = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+  for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) =>
+    a.name.localeCompare(b.name),
+  )) {
     if (entry.name === 'node_modules') continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) out.push(...filesUnder(full, matches));
@@ -274,7 +276,7 @@ function bareFlexTrackFailures(source, label) {
       found.push(
         `grid track: ${label} — "${selector.replace(/\s+/g, ' ')}" sets "${prop}: ${value}"; ` +
           `a bare \`${bare[1]}\` is \`minmax(auto, ${bare[1]})\`, whose automatic minimum is the ` +
-          'min-content width of the track\'s contents — one non-shrinkable child pins the track ' +
+          "min-content width of the track's contents — one non-shrinkable child pins the track " +
           `open and the page scrolls horizontally. Write \`minmax(0, ${bare[1]})\` (issue #457, audit F2).`,
       );
     }
@@ -283,7 +285,9 @@ function bareFlexTrackFailures(source, label) {
 }
 
 for (const cssPath of cssFilesUnder(FRONTEND_SRC)) {
-  failures.push(...bareFlexTrackFailures(readFileSync(cssPath, 'utf8'), path.relative(FRONTEND_SRC, cssPath)));
+  failures.push(
+    ...bareFlexTrackFailures(readFileSync(cssPath, 'utf8'), path.relative(FRONTEND_SRC, cssPath)),
+  );
 }
 
 // --------------------------------- 2. Visually-hidden helpers are contained
@@ -321,7 +325,7 @@ function hiddenHelperFailures(source, label, owners = HIDDEN_HELPER_OWNERS) {
       found.push(
         `hidden helper: ${label} — "${helper}" is absolutely positioned, but its owner "${owner}" ` +
           'declares no `position`, so the helper is laid out against a containing block further up and ' +
-          'escapes any scroll container in between — enlarging the page\'s scrollable overflow with an ' +
+          "escapes any scroll container in between — enlarging the page's scrollable overflow with an " +
           'invisible horizontal scroll (issue #457).',
       );
     }
@@ -330,7 +334,9 @@ function hiddenHelperFailures(source, label, owners = HIDDEN_HELPER_OWNERS) {
 }
 
 for (const cssPath of cssFilesUnder(FRONTEND_SRC)) {
-  failures.push(...hiddenHelperFailures(readFileSync(cssPath, 'utf8'), path.relative(FRONTEND_SRC, cssPath)));
+  failures.push(
+    ...hiddenHelperFailures(readFileSync(cssPath, 'utf8'), path.relative(FRONTEND_SRC, cssPath)),
+  );
 }
 
 failures.push(...unscopedHelperKeyFailures(HIDDEN_HELPER_OWNERS));
@@ -402,7 +408,9 @@ function tabStripWrapFailures(source, label, selectors = TAB_STRIP_SELECTORS) {
 }
 
 for (const cssPath of cssFilesUnder(FRONTEND_SRC)) {
-  failures.push(...tabStripWrapFailures(readFileSync(cssPath, 'utf8'), path.relative(FRONTEND_SRC, cssPath)));
+  failures.push(
+    ...tabStripWrapFailures(readFileSync(cssPath, 'utf8'), path.relative(FRONTEND_SRC, cssPath)),
+  );
 }
 
 // Every declared tab-strip selector must actually exist somewhere, or the
@@ -465,8 +473,12 @@ function columnsBreakpointFailures(source, selector = COLUMNS_SELECTOR) {
   const rules = [...eachRule(text)];
   const targets = (sel) => splitSelectorList(sel).includes(selector);
 
-  const desktopRules = rules.filter((rule) => targets(rule.selector) && !MEDIA_MAX_640_RE.test(rule.context));
-  const mediaRules = rules.filter((rule) => targets(rule.selector) && MEDIA_MAX_640_RE.test(rule.context));
+  const desktopRules = rules.filter(
+    (rule) => targets(rule.selector) && !MEDIA_MAX_640_RE.test(rule.context),
+  );
+  const mediaRules = rules.filter(
+    (rule) => targets(rule.selector) && MEDIA_MAX_640_RE.test(rule.context),
+  );
 
   if (desktopRules.length === 0 && mediaRules.length === 0) {
     found.push(
@@ -541,7 +553,7 @@ function narrowFieldFailures(rules, selector = NARROW_CONTROL_SELECTOR) {
   if (matches.length === 0) {
     found.push(
       `narrow field: no stylesheet declares "${selector}" — a control marked \`narrow\` never opts out of ` +
-        'the flex column\'s default `align-items: stretch`, so it still fills the full container width ' +
+        "the flex column's default `align-items: stretch`, so it still fills the full container width " +
         `(issue #601).`,
     );
     return found;
@@ -585,7 +597,9 @@ function cssImportFailures(pairs) {
       );
       continue;
     }
-    const importRe = new RegExp(`import\\s+['"]\\./${cssName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`);
+    const importRe = new RegExp(
+      `import\\s+['"]\\./${cssName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`,
+    );
     if (!importRe.test(tsSource)) {
       found.push(
         `unimported stylesheet: ui/components/${cssName}'s sibling .ts file does not \`import './${cssName}'\` — ` +
@@ -668,7 +682,8 @@ function resolveFontSize(raw, scale) {
     const [, token, fallback] = varMatch;
     if (!(token in scale)) {
       return {
-        reason: `var(${token}) is not a size in the --ct-text-* scale (styles/tokens.css) — it may not even be ` +
+        reason:
+          `var(${token}) is not a size in the --ct-text-* scale (styles/tokens.css) — it may not even be ` +
           'defined, in which case the declaration is dropped and the element silently inherits',
       };
     }
@@ -688,7 +703,8 @@ function resolveFontSize(raw, scale) {
   if (rem) return { px: Number(rem[1]) * 16 };
 
   return {
-    reason: `"${value}" is not an absolute size — use a --ct-text-* token. Relative units (em/%/smaller) compound ` +
+    reason:
+      `"${value}" is not an absolute size — use a --ct-text-* token. Relative units (em/%/smaller) compound ` +
       'with their context, so no source guard can prove they clear the floor',
   };
 }
@@ -708,7 +724,9 @@ function fontSizeFailures(source, label, scale) {
   for (const raw of declarations) {
     const { px, reason } = resolveFontSize(raw, scale);
     if (reason) {
-      found.push(`font-size floor: ${label} declares \`font-size: ${raw.trim()}\` — ${reason} (issue #600).`);
+      found.push(
+        `font-size floor: ${label} declares \`font-size: ${raw.trim()}\` — ${reason} (issue #600).`,
+      );
     } else if (px !== null && px < MIN_FONT_SIZE_PX) {
       found.push(
         `font-size floor: ${label} declares \`font-size: ${raw.trim()}\`, which resolves to ${px}px — below the ` +
@@ -731,7 +749,13 @@ const TYPE_SCALE = parseTypeScale(readFileSync(TOKENS_CSS, 'utf8'));
   // three sizes measured on the live screen.
   const sources = filesUnder(FRONTEND_SRC, (name) => /\.(css|ts|tsx)$/.test(name));
   for (const file of sources) {
-    failures.push(...fontSizeFailures(readFileSync(file, 'utf8'), path.relative(FRONTEND_SRC, file), TYPE_SCALE));
+    failures.push(
+      ...fontSizeFailures(
+        readFileSync(file, 'utf8'),
+        path.relative(FRONTEND_SRC, file),
+        TYPE_SCALE,
+      ),
+    );
   }
 }
 
@@ -830,24 +854,56 @@ function wrapHeadingsConsumerFailures(sources, className = WRAP_HEADINGS_CLASS) 
 const TRACK_CASES = [
   { name: 'bare 1fr', flagged: true, css: 'ct-app-shell { grid-template-columns: 1fr auto; }' },
   { name: 'bare 1fr alone', flagged: true, css: '.a { grid-template-columns: 1fr; }' },
-  { name: 'fractional bare flex', flagged: true, css: '.b { grid-template-columns: 220px 2.5fr; }' },
-  { name: 'bare flex inside @media', flagged: true, css: '@media (max-width: 640px) { .c { grid-template-columns: 1fr; } }' },
+  {
+    name: 'fractional bare flex',
+    flagged: true,
+    css: '.b { grid-template-columns: 220px 2.5fr; }',
+  },
+  {
+    name: 'bare flex inside @media',
+    flagged: true,
+    css: '@media (max-width: 640px) { .c { grid-template-columns: 1fr; } }',
+  },
   { name: 'bare flex on grid-auto-columns', flagged: true, css: '.d { grid-auto-columns: 1fr; }' },
-  { name: 'one wrapped, one bare', flagged: true, css: '.e { grid-template-columns: minmax(0, 1fr) 1fr; }' },
+  {
+    name: 'one wrapped, one bare',
+    flagged: true,
+    css: '.e { grid-template-columns: minmax(0, 1fr) 1fr; }',
+  },
   // --- must NOT be flagged -------------------------------------------
-  { name: 'minmax(0, 1fr)', flagged: false, css: '.f { grid-template-columns: minmax(0, 1fr) auto; }' },
-  { name: 'two wrapped tracks', flagged: false, css: '.g { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); }' },
+  {
+    name: 'minmax(0, 1fr)',
+    flagged: false,
+    css: '.f { grid-template-columns: minmax(0, 1fr) auto; }',
+  },
+  {
+    name: 'two wrapped tracks',
+    flagged: false,
+    css: '.g { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); }',
+  },
   { name: 'fixed tracks only', flagged: false, css: '.h { grid-template-columns: 220px auto; }' },
-  { name: 'row tracks are out of scope', flagged: false, css: '.i { grid-template-rows: 1fr auto; }' },
-  { name: 'commented-out bare flex is not live', flagged: false, css: '.j { /* grid-template-columns: 1fr; */ grid-template-columns: minmax(0, 1fr); }' },
+  {
+    name: 'row tracks are out of scope',
+    flagged: false,
+    css: '.i { grid-template-rows: 1fr auto; }',
+  },
+  {
+    name: 'commented-out bare flex is not live',
+    flagged: false,
+    css: '.j { /* grid-template-columns: 1fr; */ grid-template-columns: minmax(0, 1fr); }',
+  },
 ];
 
 for (const testCase of TRACK_CASES) {
   const hits = bareFlexTrackFailures(testCase.css, 'self-test');
   if (testCase.flagged && hits.length === 0) {
-    failures.push(`self-test: mutation "${testCase.name}" was NOT detected by the grid-track check (issue #457)`);
+    failures.push(
+      `self-test: mutation "${testCase.name}" was NOT detected by the grid-track check (issue #457)`,
+    );
   } else if (!testCase.flagged && hits.length > 0) {
-    failures.push(`self-test: "${testCase.name}" must be exempt from the grid-track check but was flagged: ${hits[0]}`);
+    failures.push(
+      `self-test: "${testCase.name}" must be exempt from the grid-track check but was flagged: ${hits[0]}`,
+    );
   }
 }
 
@@ -890,9 +946,13 @@ const HELPER_CASES = [
 for (const testCase of HELPER_CASES) {
   const hits = hiddenHelperFailures(testCase.css, 'self-test', HELPER_OWNERS_FIXTURE);
   if (testCase.flagged && hits.length === 0) {
-    failures.push(`self-test: mutation "${testCase.name}" was NOT detected by the hidden-helper check (issue #457)`);
+    failures.push(
+      `self-test: mutation "${testCase.name}" was NOT detected by the hidden-helper check (issue #457)`,
+    );
   } else if (!testCase.flagged && hits.length > 0) {
-    failures.push(`self-test: "${testCase.name}" must be exempt from the hidden-helper check but was flagged: ${hits[0]}`);
+    failures.push(
+      `self-test: "${testCase.name}" must be exempt from the hidden-helper check but was flagged: ${hits[0]}`,
+    );
   }
 }
 
@@ -900,21 +960,37 @@ for (const testCase of HELPER_CASES) {
 // utility key is refused, a component-scoped one passes.
 for (const testCase of [
   { name: 'a bare global utility key', owners: { '.ct-sr-only': 'x-host' }, flagged: true },
-  { name: 'a non-ct- class with a BEM-shaped name', owners: { '.utility-a__b': 'x-host' }, flagged: true },
+  {
+    name: 'a non-ct- class with a BEM-shaped name',
+    owners: { '.utility-a__b': 'x-host' },
+    flagged: true,
+  },
   { name: 'a component-scoped key', owners: { '.ct-button__live': 'ct-button' }, flagged: false },
-  { name: 'a multi-word component-scoped key', owners: { '.ct-file-drop__input': '.ct-file-drop__well' }, flagged: false },
+  {
+    name: 'a multi-word component-scoped key',
+    owners: { '.ct-file-drop__input': '.ct-file-drop__well' },
+    flagged: false,
+  },
 ]) {
   const hits = unscopedHelperKeyFailures(testCase.owners);
   if (testCase.flagged && hits.length === 0) {
-    failures.push(`self-test: mutation "${testCase.name}" was NOT detected by the scoped-helper-key check (issue #36)`);
+    failures.push(
+      `self-test: mutation "${testCase.name}" was NOT detected by the scoped-helper-key check (issue #36)`,
+    );
   } else if (!testCase.flagged && hits.length > 0) {
-    failures.push(`self-test: "${testCase.name}" must pass the scoped-helper-key check but was flagged: ${hits[0]}`);
+    failures.push(
+      `self-test: "${testCase.name}" must pass the scoped-helper-key check but was flagged: ${hits[0]}`,
+    );
   }
 }
 
 const TAB_STRIP_CASES = [
   { name: 'no flex-wrap declared', flagged: true, css: '.ct-tab-bar__track { display: flex; }' },
-  { name: 'flex-wrap: nowrap', flagged: true, css: '.ct-tab-bar__track { display: flex; flex-wrap: nowrap; }' },
+  {
+    name: 'flex-wrap: nowrap',
+    flagged: true,
+    css: '.ct-tab-bar__track { display: flex; flex-wrap: nowrap; }',
+  },
   {
     name: 'overflow-x: auto',
     flagged: true,
@@ -946,15 +1022,23 @@ const TAB_STRIP_CASES = [
     flagged: false,
     css: '.ct-tab-bar__track { display: flex; } .ct-tab-bar__track { flex-wrap: wrap; }',
   },
-  { name: 'a different selector is out of scope', flagged: false, css: '.something-else { overflow-x: auto; }' },
+  {
+    name: 'a different selector is out of scope',
+    flagged: false,
+    css: '.something-else { overflow-x: auto; }',
+  },
 ];
 
 for (const testCase of TAB_STRIP_CASES) {
   const hits = tabStripWrapFailures(testCase.css, 'self-test', ['.ct-tab-bar__track']);
   if (testCase.flagged && hits.length === 0) {
-    failures.push(`self-test: mutation "${testCase.name}" was NOT detected by the tab-strip wrap check (issue #477)`);
+    failures.push(
+      `self-test: mutation "${testCase.name}" was NOT detected by the tab-strip wrap check (issue #477)`,
+    );
   } else if (!testCase.flagged && hits.length > 0) {
-    failures.push(`self-test: "${testCase.name}" must be exempt from the tab-strip wrap check but was flagged: ${hits[0]}`);
+    failures.push(
+      `self-test: "${testCase.name}" must be exempt from the tab-strip wrap check but was flagged: ${hits[0]}`,
+    );
   }
 }
 
@@ -1031,9 +1115,13 @@ const COLUMNS_CASES = [
 for (const testCase of COLUMNS_CASES) {
   const hits = columnsBreakpointFailures(testCase.css);
   if (testCase.flagged && hits.length === 0) {
-    failures.push(`self-test: mutation "${testCase.name}" was NOT detected by the ct-columns breakpoint check (issue #601)`);
+    failures.push(
+      `self-test: mutation "${testCase.name}" was NOT detected by the ct-columns breakpoint check (issue #601)`,
+    );
   } else if (!testCase.flagged && hits.length > 0) {
-    failures.push(`self-test: "${testCase.name}" must be exempt from the ct-columns breakpoint check but was flagged: ${hits[0]}`);
+    failures.push(
+      `self-test: "${testCase.name}" must be exempt from the ct-columns breakpoint check but was flagged: ${hits[0]}`,
+    );
   }
 }
 
@@ -1063,7 +1151,9 @@ const NARROW_FIELD_CASES = [
   {
     name: 'selector present in a multi-selector rule',
     flagged: false,
-    rules: [{ selector: `.something-else, ${NARROW_CONTROL_SELECTOR}`, body: 'align-self: flex-start;' }],
+    rules: [
+      { selector: `.something-else, ${NARROW_CONTROL_SELECTOR}`, body: 'align-self: flex-start;' },
+    ],
   },
   {
     name: 'align-self: start is an accepted equivalent',
@@ -1075,9 +1165,13 @@ const NARROW_FIELD_CASES = [
 for (const testCase of NARROW_FIELD_CASES) {
   const hits = narrowFieldFailures(testCase.rules);
   if (testCase.flagged && hits.length === 0) {
-    failures.push(`self-test: mutation "${testCase.name}" was NOT detected by the narrow-field check (issue #601)`);
+    failures.push(
+      `self-test: mutation "${testCase.name}" was NOT detected by the narrow-field check (issue #601)`,
+    );
   } else if (!testCase.flagged && hits.length > 0) {
-    failures.push(`self-test: "${testCase.name}" must be exempt from the narrow-field check but was flagged: ${hits[0]}`);
+    failures.push(
+      `self-test: "${testCase.name}" must be exempt from the narrow-field check but was flagged: ${hits[0]}`,
+    );
   }
 }
 
@@ -1085,12 +1179,22 @@ const CSS_IMPORT_CASES = [
   {
     name: 'css imported by sibling ts, single quotes (correct)',
     flagged: false,
-    pairs: [{ cssName: 'ct-example.css', tsSource: "import './ct-example.css';\nexport class Example {}" }],
+    pairs: [
+      {
+        cssName: 'ct-example.css',
+        tsSource: "import './ct-example.css';\nexport class Example {}",
+      },
+    ],
   },
   {
     name: 'css imported by sibling ts, double quotes (correct)',
     flagged: false,
-    pairs: [{ cssName: 'ct-example.css', tsSource: 'import "./ct-example.css";\nexport class Example {}' }],
+    pairs: [
+      {
+        cssName: 'ct-example.css',
+        tsSource: 'import "./ct-example.css";\nexport class Example {}',
+      },
+    ],
   },
   {
     // The exact mutation the ticket's reviewer reproduced: delete the import
@@ -1107,16 +1211,22 @@ const CSS_IMPORT_CASES = [
   {
     name: 'sibling ts imports a different stylesheet only',
     flagged: true,
-    pairs: [{ cssName: 'ct-example.css', tsSource: "import './ct-other.css';\nexport class Example {}" }],
+    pairs: [
+      { cssName: 'ct-example.css', tsSource: "import './ct-other.css';\nexport class Example {}" },
+    ],
   },
 ];
 
 for (const testCase of CSS_IMPORT_CASES) {
   const hits = cssImportFailures(testCase.pairs);
   if (testCase.flagged && hits.length === 0) {
-    failures.push(`self-test: mutation "${testCase.name}" was NOT detected by the css-import check (issue #601 follow-up)`);
+    failures.push(
+      `self-test: mutation "${testCase.name}" was NOT detected by the css-import check (issue #601 follow-up)`,
+    );
   } else if (!testCase.flagged && hits.length > 0) {
-    failures.push(`self-test: "${testCase.name}" must be exempt from the css-import check but was flagged: ${hits[0]}`);
+    failures.push(
+      `self-test: "${testCase.name}" must be exempt from the css-import check but was flagged: ${hits[0]}`,
+    );
   }
 }
 
@@ -1124,45 +1234,105 @@ const SCALE_FIXTURE = { '--ct-text-sm': 14, '--ct-text-md': 16 };
 const FONT_SIZE_CASES = [
   { name: '12px literal', flagged: true, source: '.a { font-size: 12px; }' },
   { name: 'sub-floor rem literal', flagged: true, source: ':host { font-size: 0.78rem; }' },
-  { name: 'sub-floor with !important', flagged: true, source: '.b { font-size: 10px !important; }' },
+  {
+    name: 'sub-floor with !important',
+    flagged: true,
+    source: '.b { font-size: 10px !important; }',
+  },
   { name: 'em size (unresolvable)', flagged: true, source: 'code { font-size: 0.92em; }' },
   { name: 'percentage size (unresolvable)', flagged: true, source: '.c { font-size: 90%; }' },
-  { name: 'retired --ct-text-xs token', flagged: true, source: '.d { font-size: var(--ct-text-xs); }' },
-  { name: 'token with sub-floor fallback', flagged: true, source: '.e { font-size: var(--ct-text-sm, 11px); }' },
-  { name: 'sub-floor inside @media', flagged: true, source: '@media (max-width: 640px) { .f { font-size: 11px; } }' },
-  { name: 'React inline fontSize below floor', flagged: true, source: "<p style={{ fontSize: '0.85rem' }} />" },
+  {
+    name: 'retired --ct-text-xs token',
+    flagged: true,
+    source: '.d { font-size: var(--ct-text-xs); }',
+  },
+  {
+    name: 'token with sub-floor fallback',
+    flagged: true,
+    source: '.e { font-size: var(--ct-text-sm, 11px); }',
+  },
+  {
+    name: 'sub-floor inside @media',
+    flagged: true,
+    source: '@media (max-width: 640px) { .f { font-size: 11px; } }',
+  },
+  {
+    name: 'React inline fontSize below floor',
+    flagged: true,
+    source: "<p style={{ fontSize: '0.85rem' }} />",
+  },
   // --- must NOT be flagged -------------------------------------------
-  { name: 'the floor token itself', flagged: false, source: '.g { font-size: var(--ct-text-sm); }' },
-  { name: 'token with matching fallback', flagged: false, source: '.h { font-size: var(--ct-text-sm, 14px); }' },
+  {
+    name: 'the floor token itself',
+    flagged: false,
+    source: '.g { font-size: var(--ct-text-sm); }',
+  },
+  {
+    name: 'token with matching fallback',
+    flagged: false,
+    source: '.h { font-size: var(--ct-text-sm, 14px); }',
+  },
   { name: 'a larger token', flagged: false, source: '.i { font-size: var(--ct-text-md); }' },
   { name: 'exactly the floor, in px', flagged: false, source: '.j { font-size: 14px; }' },
   { name: 'exactly the floor, in rem', flagged: false, source: '.k { font-size: 0.875rem; }' },
   { name: 'inherit', flagged: false, source: '.l { font-size: inherit; }' },
-  { name: 'React inline fontSize on a token', flagged: false, source: "<p style={{ fontSize: 'var(--ct-text-md)' }} />" },
-  { name: 'sub-floor size inside a comment', flagged: false, source: '/* was font-size: 12px */ .m { font-size: 16px; }' },
+  {
+    name: 'React inline fontSize on a token',
+    flagged: false,
+    source: "<p style={{ fontSize: 'var(--ct-text-md)' }} />",
+  },
+  {
+    name: 'sub-floor size inside a comment',
+    flagged: false,
+    source: '/* was font-size: 12px */ .m { font-size: 16px; }',
+  },
 ];
 for (const testCase of FONT_SIZE_CASES) {
   const hits = fontSizeFailures(testCase.source, 'self-test', SCALE_FIXTURE);
   if (testCase.flagged && hits.length === 0) {
-    failures.push(`self-test: mutation "${testCase.name}" was NOT detected by the font-size floor check (issue #600)`);
+    failures.push(
+      `self-test: mutation "${testCase.name}" was NOT detected by the font-size floor check (issue #600)`,
+    );
   } else if (!testCase.flagged && hits.length > 0) {
-    failures.push(`self-test: "${testCase.name}" must be exempt from the font-size floor check but was flagged: ${hits[0]}`);
+    failures.push(
+      `self-test: "${testCase.name}" must be exempt from the font-size floor check but was flagged: ${hits[0]}`,
+    );
   }
 }
 
 const TYPE_SCALE_CASES = [
-  { name: 're-added 12px --ct-text-xs', flagged: true, tokens: ':root { --ct-text-xs: 12px; --ct-text-sm: 14px; }' },
-  { name: 'the floor token lowered', flagged: true, tokens: ':root { --ct-text-sm: 11px; --ct-text-md: 16px; }' },
+  {
+    name: 're-added 12px --ct-text-xs',
+    flagged: true,
+    tokens: ':root { --ct-text-xs: 12px; --ct-text-sm: 14px; }',
+  },
+  {
+    name: 'the floor token lowered',
+    flagged: true,
+    tokens: ':root { --ct-text-sm: 11px; --ct-text-md: 16px; }',
+  },
   // --- must NOT be flagged -------------------------------------------
-  { name: 'the shipped scale', flagged: false, tokens: ':root { --ct-text-sm: 14px; --ct-text-md: 16px; }' },
-  { name: 'sub-floor token only inside a comment', flagged: false, tokens: ':root { /* --ct-text-xs: 12px; */ --ct-text-sm: 14px; }' },
+  {
+    name: 'the shipped scale',
+    flagged: false,
+    tokens: ':root { --ct-text-sm: 14px; --ct-text-md: 16px; }',
+  },
+  {
+    name: 'sub-floor token only inside a comment',
+    flagged: false,
+    tokens: ':root { /* --ct-text-xs: 12px; */ --ct-text-sm: 14px; }',
+  },
 ];
 for (const testCase of TYPE_SCALE_CASES) {
   const hits = typeScaleFailures(parseTypeScale(testCase.tokens));
   if (testCase.flagged && hits.length === 0) {
-    failures.push(`self-test: mutation "${testCase.name}" was NOT detected by the type-scale check (issue #600)`);
+    failures.push(
+      `self-test: mutation "${testCase.name}" was NOT detected by the type-scale check (issue #600)`,
+    );
   } else if (!testCase.flagged && hits.length > 0) {
-    failures.push(`self-test: "${testCase.name}" must be exempt from the type-scale check but was flagged: ${hits[0]}`);
+    failures.push(
+      `self-test: "${testCase.name}" must be exempt from the type-scale check but was flagged: ${hits[0]}`,
+    );
   }
 }
 
@@ -1187,7 +1357,12 @@ const WRAP_HEADINGS_CASES = [
   {
     name: 'the shipped rule',
     flagged: false,
-    rules: [{ selector: WRAP_HEADINGS_SELF_SELECTOR, body: 'white-space: normal; vertical-align: bottom;' }],
+    rules: [
+      {
+        selector: WRAP_HEADINGS_SELF_SELECTOR,
+        body: 'white-space: normal; vertical-align: bottom;',
+      },
+    ],
   },
   {
     name: 'declared inside a multi-selector rule',
@@ -1213,9 +1388,13 @@ const WRAP_HEADINGS_CASES = [
 for (const testCase of WRAP_HEADINGS_CASES) {
   const hits = wrapHeadingsFailures(testCase.rules);
   if (testCase.flagged && hits.length === 0) {
-    failures.push(`self-test: mutation "${testCase.name}" was NOT detected by the wrappable-headings check (issue #668)`);
+    failures.push(
+      `self-test: mutation "${testCase.name}" was NOT detected by the wrappable-headings check (issue #668)`,
+    );
   } else if (!testCase.flagged && hits.length > 0) {
-    failures.push(`self-test: "${testCase.name}" must be exempt from the wrappable-headings check but was flagged: ${hits[0]}`);
+    failures.push(
+      `self-test: "${testCase.name}" must be exempt from the wrappable-headings check but was flagged: ${hits[0]}`,
+    );
   }
 }
 
@@ -1238,20 +1417,25 @@ const WRAP_HEADINGS_CONSUMER_CASES = [
     sources: [
       {
         label: 'ReviewHistory.tsx',
-        source: '{/* ct-table--wrap-headings lets headings wrap */}\n<table data-testid="history-table">',
+        source:
+          '{/* ct-table--wrap-headings lets headings wrap */}\n<table data-testid="history-table">',
       },
     ],
   },
   {
     name: 'named only in a line comment',
     flagged: true,
-    sources: [{ label: 'ReviewHistory.tsx', source: '// ct-table--wrap-headings is the opt-in\n<table />' }],
+    sources: [
+      { label: 'ReviewHistory.tsx', source: '// ct-table--wrap-headings is the opt-in\n<table />' },
+    ],
   },
   // --- must NOT be flagged -------------------------------------------
   {
     name: 'a component applies the class',
     flagged: false,
-    sources: [{ label: 'ReviewHistory.tsx', source: '<table className="ct-table--wrap-headings" />' }],
+    sources: [
+      { label: 'ReviewHistory.tsx', source: '<table className="ct-table--wrap-headings" />' },
+    ],
   },
   {
     name: 'applied alongside another class',
@@ -1261,15 +1445,21 @@ const WRAP_HEADINGS_CONSUMER_CASES = [
   {
     name: 'applied through a template literal',
     flagged: false,
-    sources: [{ label: 'X.tsx', source: '<table className={`ct-table--wrap-headings ${extra}`} />' }],
+    sources: [
+      { label: 'X.tsx', source: '<table className={`ct-table--wrap-headings ${extra}`} />' },
+    ],
   },
 ];
 for (const testCase of WRAP_HEADINGS_CONSUMER_CASES) {
   const hits = wrapHeadingsConsumerFailures(testCase.sources);
   if (testCase.flagged && hits.length === 0) {
-    failures.push(`self-test: mutation "${testCase.name}" was NOT detected by the wrappable-headings consumer check (issue #668)`);
+    failures.push(
+      `self-test: mutation "${testCase.name}" was NOT detected by the wrappable-headings consumer check (issue #668)`,
+    );
   } else if (!testCase.flagged && hits.length > 0) {
-    failures.push(`self-test: "${testCase.name}" must be exempt from the wrappable-headings consumer check but was flagged: ${hits[0]}`);
+    failures.push(
+      `self-test: "${testCase.name}" must be exempt from the wrappable-headings consumer check but was flagged: ${hits[0]}`,
+    );
   }
 }
 

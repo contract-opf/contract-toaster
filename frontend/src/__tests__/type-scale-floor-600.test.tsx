@@ -31,16 +31,25 @@ const FLOOR_PX = 14;
 
 /** `{ '--ct-text-sm': 14, … }` from the shipped scale. */
 function typeScale(): Record<string, number> {
-  const source = readFileSync(path.join(SRC, 'styles', 'tokens.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const source = readFileSync(path.join(SRC, 'styles', 'tokens.css'), 'utf8').replace(
+    /\/\*[\s\S]*?\*\//g,
+    '',
+  );
   const scale: Record<string, number> = {};
-  for (const m of source.matchAll(/(--ct-text-[a-z0-9-]+)\s*:\s*([\d.]+)px/gi)) scale[m[1]] = Number(m[2]);
+  for (const m of source.matchAll(/(--ct-text-[a-z0-9-]+)\s*:\s*([\d.]+)px/gi))
+    scale[m[1]] = Number(m[2]);
   return scale;
 }
 
 /** The px the given selector's `font-size` resolves to in the shipped CSS. */
 function resolvedFontSizePx(stylesheet: string, selector: string): number {
-  const source = readFileSync(path.join(SRC, 'ui', 'components', stylesheet), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
-  const rule = new RegExp(`${selector.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`).exec(source);
+  const source = readFileSync(path.join(SRC, 'ui', 'components', stylesheet), 'utf8').replace(
+    /\/\*[\s\S]*?\*\//g,
+    '',
+  );
+  const rule = new RegExp(
+    `${selector.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`,
+  ).exec(source);
   expect(rule, `${stylesheet} has no rule for ${selector}`).not.toBeNull();
   const decl = /font-size\s*:\s*([^;}]+)/i.exec(rule![1]);
   expect(decl, `${selector} declares no font-size`).not.toBeNull();
@@ -49,14 +58,18 @@ function resolvedFontSizePx(stylesheet: string, selector: string): number {
   const token = /^var\(\s*(--[a-z0-9-]+)\s*\)$/i.exec(value);
   if (token) {
     const scale = typeScale();
-    expect(Object.keys(scale), `${value} is not a size in the --ct-text-* scale`).toContain(token[1]);
+    expect(Object.keys(scale), `${value} is not a size in the --ct-text-* scale`).toContain(
+      token[1],
+    );
     return scale[token[1]];
   }
   const px = /^([\d.]+)px$/i.exec(value);
   if (px) return Number(px[1]);
   const rem = /^([\d.]+)rem$/i.exec(value);
   if (rem) return Number(rem[1]) * 16;
-  throw new Error(`${selector} declares an off-scale font-size "${value}" — use a --ct-text-* token (issue #600)`);
+  throw new Error(
+    `${selector} declares an off-scale font-size "${value}" — use a --ct-text-* token (issue #600)`,
+  );
 }
 
 describe('type-scale floor (issue #600)', () => {

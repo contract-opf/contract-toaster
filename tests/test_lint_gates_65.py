@@ -58,16 +58,31 @@ WHAT IT CHECKS (exit 0 = all pass, 1 = one or more fail)
      and its steps actually run `ruff check`, `mypy`, `npm run lint` and
      `npm run typecheck`.
   6. `frontend/package.json` declares a `lint` script.
-  7. `ruff format` is NOT INVOKED by `lint.yml` or `scripts/check.sh`. It is
-     deliberately deferred (a whole-tree reformat collides with #50-#59;
-     follow-up issue #90 turns it on afterwards), and "deferred" has to be
-     checkable or it becomes "forgotten".
+  7. THE FORMATTERS ARE ENFORCED (issue #90). `ruff format --check` runs in
+     `lint.yml`, `scripts/check.sh` and `scripts/land.sh` over the same four
+     roots `ruff check` lints, `prettier --check .` runs (as
+     `npm run format:check`) in `lint.yml` and `scripts/check-frontend.sh`, and
+     `ruff format --check` really does exit 0 on the committed tree. Until #90
+     this check asserted the OPPOSITE, so "not yet" could not drift into "never
+     noticed"; it now asserts the gates are on, so they cannot be dropped
+     quietly either. Three things are pinned so they can only change in a diff
+     a reviewer reads:
 
-     The check reads COMMAND text, not file text: both files discuss
-     `ruff format --check` in their comments, on purpose, and a grep over raw
-     bytes would fail on the documentation of the decision it is meant to
-     police. Check 0 proves the command extractor is not vacuous — it is fed a
-     synthetic workflow and a synthetic shell script that really do invoke
+       * `[tool.ruff.format] exclude` is exactly the two entries the config
+         explains (the byte-identical vendored script, and Markdown);
+       * `frontend/.prettierignore` still lists `vendor/orbit-diner` (the
+         designer's source of record, which CLAUDE.md says is never edited) and
+         `src/orbit-diner` (our copy, which is merged against the vendored one
+         by diff, so a reformat would bury the local edits);
+       * `.git-blame-ignore-revs` holds only 40-hex commit ids (and, where the
+         clone is not shallow, ids that resolve), so the reformat commit stays
+         out of `git blame`.
+
+     The check reads COMMAND text, not file text: the files discuss the
+     formatters in their comments, on purpose, and a grep over raw bytes would
+     pass on the documentation of the decision it is meant to police. Check 0
+     proves the command extractor is not vacuous — it is fed a synthetic
+     workflow and a synthetic shell script that really do invoke
      `ruff format --check`, in code and in comments respectively, and must
      report the first and ignore the second.
 
@@ -117,6 +132,7 @@ Run with: python3 tests/test_lint_gates_65.py
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -133,6 +149,10 @@ MYPY_BASELINE = REPO_ROOT / "mypy-baseline.txt"
 LINT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "lint.yml"
 CHECK_SCRIPT = REPO_ROOT / "scripts" / "check.sh"
 FRONTEND_PACKAGE_JSON = REPO_ROOT / "frontend" / "package.json"
+FRONTEND_CHECK_SCRIPT = REPO_ROOT / "scripts" / "check-frontend.sh"
+LAND_SCRIPT = REPO_ROOT / "scripts" / "land.sh"
+PRETTIER_IGNORE = REPO_ROOT / "frontend" / ".prettierignore"
+BLAME_IGNORE = REPO_ROOT / ".git-blame-ignore-revs"
 
 # The roots the issue names, and the ones scripts/check.sh and lint.yml lint.
 RUFF_ROOTS = ("backend", "scripts", "tests", "infra/lambda")
@@ -140,6 +160,10 @@ RUFF_ROOTS = ("backend", "scripts", "tests", "infra/lambda")
 # The rule selection the issue specifies, verbatim.
 EXPECTED_RUFF_SELECT = ["E", "F", "W", "I", "B", "UP", "S", "BLE", "C4", "SIM", "RUF"]
 EXPECTED_RUFF_IGNORE = ["E501"]
+
+# What `[tool.ruff.format] exclude` may hold (issue #90). pyproject.toml says why
+# each entry is there; adding a third means editing this line too, in a diff.
+EXPECTED_RUFF_FORMAT_EXCLUDE = ["scripts/pre-push-confidentiality.py", "*.md"]
 
 
 def _assert(ok: bool, label: str, detail: str = "") -> int:
@@ -503,9 +527,7 @@ _MYPY_FILE_RE = re.compile(r"^(\S+\.py):\d+:", re.MULTILINE)
 
 def _mypy_failing_files(config_text: str, cache_dir: Path) -> tuple[set[str], str]:
     """Run mypy from the repo root with `config_text` as its configuration."""
-    with tempfile.NamedTemporaryFile(
-        "w", suffix=".toml", delete=False, encoding="utf-8"
-    ) as fh:
+    with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False, encoding="utf-8") as fh:
         fh.write(config_text)
         cfg = fh.name
     try:
@@ -561,7 +583,9 @@ def check_mypy_baseline_only_shrinks() -> int:
         return failures
 
     baseline = _baseline_paths()
-    failures += _assert(len(baseline) > 0, "4a. the baseline is non-empty", f"{len(baseline)} paths")
+    failures += _assert(
+        len(baseline) > 0, "4a. the baseline is non-empty", f"{len(baseline)} paths"
+    )
     failures += _assert(
         baseline == sorted(baseline),
         "4b. the baseline is sorted (so a diff to it is readable)",
@@ -613,8 +637,7 @@ def check_mypy_baseline_only_shrinks() -> int:
     now_passing = sorted(set(baseline) - failing)
     failures += _assert(
         not now_passing,
-        "4i. mypy-baseline.txt lists no module mypy now PASSES — delete its line and "
-        "its override",
+        "4i. mypy-baseline.txt lists no module mypy now PASSES — delete its line and its override",
         f"now clean: {now_passing[:8]}",
     )
     return failures
@@ -696,7 +719,13 @@ def check_frontend_lint_script() -> int:
         "typecheck" in scripts,
         "6c. frontend/package.json still declares `typecheck` (lint.yml runs it)",
     )
-    for dep in ("eslint", "typescript-eslint", "eslint-plugin-react-hooks", "eslint-plugin-jsx-a11y", "prettier"):
+    for dep in (
+        "eslint",
+        "typescript-eslint",
+        "eslint-plugin-react-hooks",
+        "eslint-plugin-jsx-a11y",
+        "prettier",
+    ):
         failures += _assert(
             dep in pkg.get("devDependencies", {}),
             f"6d. {dep} is a pinned devDependency",
@@ -705,35 +734,53 @@ def check_frontend_lint_script() -> int:
 
 
 # ---------------------------------------------------------------------------
-# Check 7 — `ruff format` stays deferred, visibly
+# Check 7 — the formatters are enforced (issue #90)
 # ---------------------------------------------------------------------------
 
 
-def check_formatter_deferred() -> int:
+def _git(*args: str) -> subprocess.CompletedProcess[str]:
+    # S603/S607: `git` by name, with arguments built from this file's own literals
+    # and the commit ids it just read out of .git-blame-ignore-revs after
+    # checking each is 40 hex digits.
+    return subprocess.run(  # noqa: S603
+        ["git", *args],  # noqa: S607
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+    )
+
+
+def _is_shallow_or_unversioned() -> bool:
+    proc = _git("rev-parse", "--is-shallow-repository")
+    return proc.returncode != 0 or proc.stdout.strip() != "false"
+
+
+def check_formatter_enforced() -> int:
     failures = 0
-    wf_cmds = workflow_commands(LINT_WORKFLOW.read_text(encoding="utf-8"))
-    offenders = [c for c in wf_cmds if "ruff format" in c]
+    roots = " ".join(RUFF_ROOTS)
+    fmt = f"ruff format --check {roots}"
+
+    wf_text = LINT_WORKFLOW.read_text(encoding="utf-8")
+    wf_cmds = workflow_commands(wf_text)
     failures += _assert(
-        not offenders,
-        "7a. lint.yml does not INVOKE `ruff format` (deferred — follow-up issue #90)",
-        f"{offenders}",
+        any(c == fmt for c in wf_cmds),
+        f"7a. lint.yml INVOKES `{fmt}`",
+        f"{[c for c in wf_cmds if 'ruff' in c]}",
     )
     sh_cmds = script_commands(CHECK_SCRIPT.read_text(encoding="utf-8"))
-    sh_offenders = [c for c in sh_cmds if "ruff format" in c]
     failures += _assert(
-        not sh_offenders,
-        "7b. scripts/check.sh does not INVOKE `ruff format`",
-        f"{sh_offenders}",
+        any(fmt in c for c in sh_cmds),
+        f"7b. scripts/check.sh INVOKES `{fmt}`",
+        f"{[c for c in sh_cmds if 'ruff' in c]}",
     )
-    # …and the decision is written down where the next person will read it.
     failures += _assert(
-        "ruff format" in LINT_WORKFLOW.read_text(encoding="utf-8"),
-        "7c. lint.yml still DOCUMENTS the deferral (so it is a decision, not an omission)",
+        fmt in LAND_SCRIPT.read_text(encoding="utf-8"),
+        f"7b2. scripts/land.sh's lint gate runs `{fmt}`",
     )
-    # scripts/check.sh must genuinely run the pair, or 7b passes vacuously.
+    # scripts/check.sh must genuinely run the pair, or 7b is the weaker claim.
     failures += _assert(
         any("ruff check" in c for c in sh_cmds),
-        "7d. scripts/check.sh really does invoke `ruff check` (7b is not vacuous)",
+        "7d. scripts/check.sh really does invoke `ruff check`",
         f"{[c for c in sh_cmds if 'ruff' in c]}",
     )
     failures += _assert(
@@ -741,6 +788,72 @@ def check_formatter_deferred() -> int:
         "7e. scripts/check.sh really does invoke `mypy`",
         f"{[c for c in sh_cmds if 'mypy' in c]}",
     )
+
+    # …and it is green, run for real rather than inferred from the config.
+    proc = _run(["ruff", "format", "--check", *RUFF_ROOTS], cwd=REPO_ROOT)
+    failures += _assert(
+        proc.returncode == 0,
+        f"7f. `{fmt}` exits 0 on the committed tree",
+        (proc.stdout + proc.stderr).strip()[-600:],
+    )
+
+    cfg = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+    excluded = cfg.get("tool", {}).get("ruff", {}).get("format", {}).get("exclude")
+    failures += _assert(
+        excluded == EXPECTED_RUFF_FORMAT_EXCLUDE,
+        "7g. `[tool.ruff.format] exclude` is exactly the documented entries",
+        f"{excluded}",
+    )
+
+    # The frontend half: package.json, lint.yml and check-frontend.sh agree.
+    pkg = json.loads(FRONTEND_PACKAGE_JSON.read_text(encoding="utf-8"))
+    failures += _assert(
+        pkg.get("scripts", {}).get("format:check") == "prettier --check .",
+        "7h. frontend/package.json declares `format:check` as `prettier --check .`",
+        f"{pkg.get('scripts', {}).get('format:check')}",
+    )
+    failures += _assert(
+        any("npm run format:check" in c for c in wf_cmds),
+        "7i. lint.yml INVOKES `npm run format:check`",
+        f"{[c for c in wf_cmds if 'npm' in c]}",
+    )
+    fe_cmds = script_commands(FRONTEND_CHECK_SCRIPT.read_text(encoding="utf-8"))
+    failures += _assert(
+        any("npm run format:check" in c for c in fe_cmds),
+        "7j. scripts/check-frontend.sh INVOKES `npm run format:check`",
+        f"{[c for c in fe_cmds if 'npm' in c]}",
+    )
+    ignore_lines = {ln.strip() for ln in PRETTIER_IGNORE.read_text(encoding="utf-8").splitlines()}
+    for entry in ("vendor/orbit-diner", "src/orbit-diner"):
+        failures += _assert(
+            entry in ignore_lines,
+            f"7k. frontend/.prettierignore still lists {entry} (kept off the formatter on purpose)",
+        )
+
+    # The reformat commit is named in .git-blame-ignore-revs.
+    failures += _assert(BLAME_IGNORE.is_file(), "7l. .git-blame-ignore-revs exists")
+    if BLAME_IGNORE.is_file():
+        revs = [
+            ln.strip()
+            for ln in BLAME_IGNORE.read_text(encoding="utf-8").splitlines()
+            if ln.strip() and not ln.lstrip().startswith("#")
+        ]
+        failures += _assert(
+            bool(revs) and all(re.fullmatch(r"[0-9a-f]{40}", r) for r in revs),
+            "7m. .git-blame-ignore-revs lists at least one commit, each a full 40-hex id",
+            f"{revs}",
+        )
+        if _is_shallow_or_unversioned():
+            print(
+                "  [SKIP] 7n. revs resolve (shallow or unversioned checkout: the objects are absent)"
+            )
+        else:
+            missing = [r for r in revs if _git("cat-file", "-e", f"{r}^{{commit}}").returncode != 0]
+            failures += _assert(
+                not missing,
+                "7n. every id in .git-blame-ignore-revs is a commit in this clone",
+                f"{missing}",
+            )
     return failures
 
 
@@ -926,7 +1039,7 @@ def main() -> int:
         ("Check 4 — the mypy baseline only shrinks", check_mypy_baseline_only_shrinks),
         ("Check 5 — lint.yml triggers and steps", check_lint_workflow),
         ("Check 6 — frontend lint script and dependencies", check_frontend_lint_script),
-        ("Check 7 — `ruff format` stays deferred, visibly", check_formatter_deferred),
+        ("Check 7 — the formatters are enforced", check_formatter_enforced),
         ("Check 8 — no `# noqa` outlives its finding", check_no_ruf100_self_suppression),
     ):
         print(label)

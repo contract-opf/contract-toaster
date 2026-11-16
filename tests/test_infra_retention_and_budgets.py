@@ -57,6 +57,7 @@ def _assert(condition: bool, label: str, detail: str = "") -> list[str]:
 # Check A — retention_settings table
 # ---------------------------------------------------------------------------
 
+
 def check_a_retention_settings_table() -> list[str]:
     print("\nCheck A: retention_settings DynamoDB table defined …")
     failures: list[str] = []
@@ -67,8 +68,7 @@ def check_a_retention_settings_table() -> list[str]:
         "retentionSettingsTable construct present in data-stack.ts",
     )
     failures += _assert(
-        "contract-toaster-retention-settings-" in text
-        or "retention-settings-${envName}" in text,
+        "contract-toaster-retention-settings-" in text or "retention-settings-${envName}" in text,
         "table name follows {appName}-retention-settings-{env} convention "
         "(default appName is 'contract-toaster'; issue #233 made the prefix a "
         "CDK context parameter)",
@@ -79,7 +79,7 @@ def check_a_retention_settings_table() -> list[str]:
     )
     # PITR + CMK on the same construct block.
     idx = text.find("RetentionSettingsTable")
-    block = text[idx: idx + 1200] if idx != -1 else ""
+    block = text[idx : idx + 1200] if idx != -1 else ""
     failures += _assert(
         "pointInTimeRecovery: true" in block,
         "retention_settings table has pointInTimeRecovery: true",
@@ -94,6 +94,7 @@ def check_a_retention_settings_table() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check B — purge worker Lambda + schedule
 # ---------------------------------------------------------------------------
+
 
 def check_b_purge_worker_lambda() -> list[str]:
     print("\nCheck B: Purge worker Lambda + schedule defined in pipeline-stack.ts …")
@@ -123,6 +124,7 @@ def check_b_purge_worker_lambda() -> list[str]:
 # Check C — least privilege: delete only in uploads/outputs, no Bedrock/SFN
 # ---------------------------------------------------------------------------
 
+
 def check_c_least_privilege() -> list[str]:
     print("\nCheck C: Purge worker role is least-privilege …")
     failures: list[str] = []
@@ -136,7 +138,7 @@ def check_c_least_privilege() -> list[str]:
     # Look at the grant block immediately following construction (up to the
     # next construct's grants / the schedule rule).
     end_idx = text.find("RetentionPurgeWorkerSchedule", idx)
-    block = text[idx:end_idx] if end_idx != -1 else text[idx: idx + 3000]
+    block = text[idx:end_idx] if end_idx != -1 else text[idx : idx + 3000]
 
     failures += _assert(
         "grantDelete(this.purgeWorkerFunction)" in block,
@@ -174,7 +176,7 @@ def check_c_least_privilege() -> list[str]:
         "AUDIT_TABLE: `contract-toaster-audit-${envName}`" in block,
         "purge worker is given AUDIT_TABLE (every sweep run is audited)",
     )
-    audit_grant = block[block.find("PurgeSweepAuditWrite"):][:400]
+    audit_grant = block[block.find("PurgeSweepAuditWrite") :][:400]
     failures += _assert(
         "PurgeSweepAuditWrite" in block
         and "'dynamodb:PutItem'" in audit_grant
@@ -193,6 +195,7 @@ def check_c_least_privilege() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check D — AWS Budgets construct routed to the alarms SNS topic
 # ---------------------------------------------------------------------------
+
 
 def check_d_aws_budgets() -> list[str]:
     print("\nCheck D: AWS Budgets monthly cost guardrail routed to alarms SNS topic …")
@@ -230,6 +233,7 @@ def check_d_aws_budgets() -> list[str]:
 # Check E — cdk synth produces the expected resources
 # ---------------------------------------------------------------------------
 
+
 def check_e_cdk_synth() -> list[str]:
     print("\nCheck E: cdk synth produces purge worker + Budgets/SNS resources …")
     failures: list[str] = []
@@ -241,11 +245,15 @@ def check_e_cdk_synth() -> list[str]:
     if not node_modules.is_dir():
         print("  (node_modules absent -- running npm install first …)")
         install = subprocess.run(
-            ["npm", "install"], cwd=INFRA, capture_output=True, text=True,  # noqa: S607
+            ["npm", "install"],  # noqa: S607
+            cwd=INFRA,
+            capture_output=True,
+            text=True,
         )
         if install.returncode != 0:
             return _assert(
-                False, "npm install succeeded in infra/",
+                False,
+                "npm install succeeded in infra/",
                 f"stderr: {install.stderr[-500:]}",
             )
 
@@ -269,7 +277,9 @@ def check_e_cdk_synth() -> list[str]:
     observability_templates = list(cdk_out.glob("*Observability*.nested.template.json"))
 
     failures += _assert(len(pipeline_templates) == 1, "exactly one Pipeline nested template found")
-    failures += _assert(len(observability_templates) == 1, "exactly one Observability nested template found")
+    failures += _assert(
+        len(observability_templates) == 1, "exactly one Observability nested template found"
+    )
     if failures:
         return failures
 
@@ -280,13 +290,17 @@ def check_e_cdk_synth() -> list[str]:
         r["Type"] == "AWS::Lambda::Function" and "PurgeWorker" in name
         for name, r in pipeline_resources.items()
     )
-    failures += _assert(has_purge_lambda, "Pipeline template contains the PurgeWorker Lambda function")
+    failures += _assert(
+        has_purge_lambda, "Pipeline template contains the PurgeWorker Lambda function"
+    )
 
     has_purge_schedule = any(
         r["Type"] == "AWS::Events::Rule" and "PurgeWorker" in name
         for name, r in pipeline_resources.items()
     )
-    failures += _assert(has_purge_schedule, "Pipeline template contains the PurgeWorker EventBridge rule")
+    failures += _assert(
+        has_purge_schedule, "Pipeline template contains the PurgeWorker EventBridge rule"
+    )
 
     has_sns_topic = any(r["Type"] == "AWS::SNS::Topic" for r in observability_resources.values())
     failures += _assert(has_sns_topic, "Observability template contains an SNS::Topic")
@@ -300,6 +314,7 @@ def check_e_cdk_synth() -> list[str]:
 # ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
+
 
 def main() -> int:
     checks = [

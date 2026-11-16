@@ -44,6 +44,7 @@ def _import_modules():
     normalize_input = None
     try:
         import normalize_input as _normalize_input  # type: ignore
+
         normalize_input = _normalize_input
     except ImportError as exc:
         missing.append(
@@ -87,7 +88,9 @@ def main():
     if result_clean.get("normalizable") is not True:
         failures.append(f"[C1] Clean document must be normalizable. Got: {result_clean}")
     if not result_clean.get("clean_body"):
-        failures.append(f"[C1b] Clean document must produce a non-empty clean_body. Got: {result_clean}")
+        failures.append(
+            f"[C1b] Clean document must produce a non-empty clean_body. Got: {result_clean}"
+        )
 
     # C2: the counterparty's own ACCEPTED tracked changes normalize cleanly
     # (documented rule: accept the counterparty's own accepted changes).
@@ -165,9 +168,7 @@ def main():
     # C6: the un-normalizable path maps to the documented pipeline status
     # (docs/output-contract.md: status=ERROR,
     # reason=unnormalizable_input) -- never a legal decision.
-    for label, result in (
-        ("corrupt", result_corrupt),
-    ):
+    for label, result in (("corrupt", result_corrupt),):
         report = normalize_input.build_unnormalizable_report(result)
         if report.get("report_type") != "analysis_report":
             failures.append(
@@ -201,8 +202,7 @@ def main():
         status = report_builder_result.get("status", "ERROR")
         if status != "ERROR":
             failures.append(
-                f"[D2:{label}] Fail-closed status must be ERROR (issue #133). "
-                f"Got: {status!r}"
+                f"[D2:{label}] Fail-closed status must be ERROR (issue #133). Got: {status!r}"
             )
 
     # --- Report -----------------------------------------------------------

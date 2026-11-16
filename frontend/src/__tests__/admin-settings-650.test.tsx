@@ -224,7 +224,15 @@ describe('AdminSettings panel (#650)', () => {
 
     // Capabilities panel itself has no controls or buttons
     const capabilities = screen.getByTestId('admin-settings-capabilities-panel');
-    for (const role of ['checkbox', 'switch', 'radio', 'combobox', 'textbox', 'slider', 'button'] as const) {
+    for (const role of [
+      'checkbox',
+      'switch',
+      'radio',
+      'combobox',
+      'textbox',
+      'slider',
+      'button',
+    ] as const) {
       expect(within(capabilities).queryAllByRole(role)).toHaveLength(0);
     }
   });
@@ -234,7 +242,9 @@ describe('AdminSettings panel (#650)', () => {
 
     const { container } = render(<AdminSettings />);
 
-    await waitFor(() => expect(container.querySelector('[data-testid="admin-settings-panel"]')).toBeNull());
+    await waitFor(() =>
+      expect(container.querySelector('[data-testid="admin-settings-panel"]')).toBeNull(),
+    );
   });
 
   it('re-loads on credentialsRefreshKey so a rotation un-hides it (#635)', async () => {

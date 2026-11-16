@@ -178,11 +178,13 @@ def load(playbook_id: str = playbook_registry.DEFAULT_PLAYBOOK_ID) -> list:
     paragraphs = []
     for anchor, entry in anchors.items():
         heading = entry["heading"]
-        paragraphs.append({
-            "anchor": anchor,
-            "heading": heading,
-            "text": text_by_anchor.get(anchor, heading),
-            "absent_from_form": entry.get("absent_from_form", False),
-            "structural": entry.get("structural", False),
-        })
+        paragraphs.append(
+            {
+                "anchor": anchor,
+                "heading": heading,
+                "text": text_by_anchor.get(anchor, heading),
+                "absent_from_form": entry.get("absent_from_form", False),
+                "structural": entry.get("structural", False),
+            }
+        )
     return paragraphs

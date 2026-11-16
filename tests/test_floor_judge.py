@@ -109,7 +109,11 @@ def _accept_result() -> dict[str, Any]:
 def test_violated_invariant_fires_and_forces_request_change(failures: list[str]) -> None:
     invariants = _sample_invariants()[:1]
     client = model_client.FakeBedrockClient(
-        {_MODEL_ID: [_verdict_response("floor-no-uncapped-liability", True, "liability is uncapped")]}
+        {
+            _MODEL_ID: [
+                _verdict_response("floor-no-uncapped-liability", True, "liability is uncapped")
+            ]
+        }
     )
 
     judgment = floor_judge.judge_floor_invariants(
@@ -130,7 +134,9 @@ def test_violated_invariant_fires_and_forces_request_change(failures: list[str])
         return
     fire = fires[0]
     if fire.get("provenance") != "floor:floor-no-uncapped-liability":
-        failures.append(f"[1d] Expected provenance='floor:floor-no-uncapped-liability'; got {fire.get('provenance')!r}")
+        failures.append(
+            f"[1d] Expected provenance='floor:floor-no-uncapped-liability'; got {fire.get('provenance')!r}"
+        )
     if fire.get("decision") != "REQUEST_CHANGE":
         failures.append(f"[1e] Fire decision must be REQUEST_CHANGE; got {fire.get('decision')!r}")
 
@@ -143,11 +149,17 @@ def test_violated_invariant_fires_and_forces_request_change(failures: list[str])
         failures.append(
             f"[1f] reconcile() must force REQUEST_CHANGE from a floor fire even when primary/critic ACCEPT; got {result['decision']!r}"
         )
-    if not any(issue.get("provenance") == "floor:floor-no-uncapped-liability" for issue in result["issues"]):
-        failures.append("[1g] Reconciled issues must include the floor fire with its provenance intact.")
+    if not any(
+        issue.get("provenance") == "floor:floor-no-uncapped-liability" for issue in result["issues"]
+    ):
+        failures.append(
+            "[1g] Reconciled issues must include the floor fire with its provenance intact."
+        )
 
     if len(client.calls) != 1:
-        failures.append(f"[1h] Expected exactly one model call for one invariant; got {len(client.calls)}")
+        failures.append(
+            f"[1h] Expected exactly one model call for one invariant; got {len(client.calls)}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -207,9 +219,13 @@ def test_malformed_then_valid_retry_succeeds(failures: list[str]) -> None:
     if judgment.fail_closed:
         failures.append("[3a] A malformed-then-valid retry must recover and not be fail_closed.")
     if len(judgment.verdicts) != 1 or judgment.verdicts[0]["violated"] is not True:
-        failures.append(f"[3b] Expected one recovered violated=True verdict; got {judgment.verdicts!r}")
+        failures.append(
+            f"[3b] Expected one recovered violated=True verdict; got {judgment.verdicts!r}"
+        )
     if len(client.calls) != 2:
-        failures.append(f"[3c] Expected exactly 2 model calls (1 initial + 1 retry); got {len(client.calls)}")
+        failures.append(
+            f"[3c] Expected exactly 2 model calls (1 initial + 1 retry); got {len(client.calls)}"
+        )
 
 
 def test_malformed_twice_lands_in_unjudged_and_fails_closed(failures: list[str]) -> None:
@@ -233,11 +249,17 @@ def test_malformed_twice_lands_in_unjudged_and_fails_closed(failures: list[str])
     if not judgment.fail_closed:
         failures.append("[4a] Twice-malformed invariant must be fail_closed=True.")
     if judgment.unjudged != ["floor-no-uncapped-liability"]:
-        failures.append(f"[4b] Expected unjudged=['floor-no-uncapped-liability']; got {judgment.unjudged!r}")
+        failures.append(
+            f"[4b] Expected unjudged=['floor-no-uncapped-liability']; got {judgment.unjudged!r}"
+        )
     if judgment.verdicts:
-        failures.append(f"[4c] A never-validly-judged invariant must not appear in verdicts; got {judgment.verdicts!r}")
+        failures.append(
+            f"[4c] A never-validly-judged invariant must not appear in verdicts; got {judgment.verdicts!r}"
+        )
     if len(client.calls) != 2:
-        failures.append(f"[4d] Expected exactly 2 model calls (1 initial + 1 retry); got {len(client.calls)}")
+        failures.append(
+            f"[4d] Expected exactly 2 model calls (1 initial + 1 retry); got {len(client.calls)}"
+        )
 
     fires = floor_judge.floor_fires(judgment)
     if fires:
@@ -265,13 +287,19 @@ def test_multi_invariant_call_count_and_provenance(failures: list[str]) -> None:
     if judgment.fail_closed:
         failures.append("[5a] Two fully valid verdicts must not be fail_closed.")
     if len(judgment.verdicts) != 2:
-        failures.append(f"[5b] Expected 2 verdicts (one per invariant); got {len(judgment.verdicts)}")
+        failures.append(
+            f"[5b] Expected 2 verdicts (one per invariant); got {len(judgment.verdicts)}"
+        )
     if len(client.calls) != 2:
-        failures.append(f"[5c] Expected exactly one call per invariant (2 total); got {len(client.calls)}")
+        failures.append(
+            f"[5c] Expected exactly one call per invariant (2 total); got {len(client.calls)}"
+        )
 
     fires = floor_judge.floor_fires(judgment)
     if len(fires) != 1:
-        failures.append(f"[5d] Expected exactly one fire (only the violated invariant); got {len(fires)}")
+        failures.append(
+            f"[5d] Expected exactly one fire (only the violated invariant); got {len(fires)}"
+        )
     elif fires[0]["provenance"] != "floor:floor-no-uncapped-liability":
         failures.append(f"[5e] Unexpected fire provenance: {fires[0]['provenance']!r}")
 

@@ -124,7 +124,10 @@ class OpenRouterBase(unittest.TestCase):
             BillingMode="PAY_PER_REQUEST",
         )
         self.ddb.Table(os.environ["DAILY_SPEND_TABLE"]).put_item(
-            Item={"spend_date": time.strftime("%Y-%m-%d", time.gmtime()), "reserved_usd_cents": 5_000}
+            Item={
+                "spend_date": time.strftime("%Y-%m-%d", time.gmtime()),
+                "reserved_usd_cents": 5_000,
+            }
         )
         self.ddb.create_table(
             TableName=os.environ["MODEL_SETTINGS_TABLE"],
@@ -176,7 +179,11 @@ class OpenRouterBase(unittest.TestCase):
         created = BASE_EPOCH + self.next_id * 1_000
         with patch("time.time", return_value=float(created)):
             reviews._create_review_row(
-                review_id, OWNER["cognito_sub"], playbook_id, BUNDLE_HASH, self.ddb,
+                review_id,
+                OWNER["cognito_sub"],
+                playbook_id,
+                BUNDLE_HASH,
+                self.ddb,
                 word_count=words,
             )
         cost: dict[str, Any] | None = None
@@ -203,13 +210,20 @@ class OpenRouterBase(unittest.TestCase):
     def _row(self, review_id: str) -> dict[str, Any]:
         return self.table.get_item(Key={"review_id": review_id})["Item"]
 
-    def _estimate(self, words: int | None = DOC_WORDS, playbook_id: str = PLAYBOOK,
-                  basis: reviews.PromptBasis | None = BASIS) -> dict[str, Any]:
+    def _estimate(
+        self,
+        words: int | None = DOC_WORDS,
+        playbook_id: str = PLAYBOOK,
+        basis: reviews.PromptBasis | None = BASIS,
+    ) -> dict[str, Any]:
         return reviews.estimate_review_cost(playbook_id, words, basis, self.ddb)
 
     def _independent_formula_cents(
-        self, words: int, basis: reviews.PromptBasis = BASIS,
-        out_primary: int | None = None, out_critic: int | None = None,
+        self,
+        words: int,
+        basis: reviews.PromptBasis = BASIS,
+        out_primary: int | None = None,
+        out_critic: int | None = None,
     ) -> float:
         """The documented formula, priced from the policy artifact with plain
         arithmetic -- not by calling the implementation's helpers."""
@@ -220,8 +234,13 @@ class OpenRouterBase(unittest.TestCase):
         self.assertEqual(self.effective["primary"], self.effective["critic"])
         p_in, p_out = primary["cost_per_million_input_usd"], primary["cost_per_million_output_usd"]
         c_in, c_out = critic["cost_per_million_input_usd"], critic["cost_per_million_output_usd"]
-        write, read = primary["cache_write_input_rate_multiplier"], primary["cache_read_input_rate_multiplier"]
-        out_primary = primary["approx_tokens_per_review_output"] if out_primary is None else out_primary
+        write, read = (
+            primary["cache_write_input_rate_multiplier"],
+            primary["cache_read_input_rate_multiplier"],
+        )
+        out_primary = (
+            primary["approx_tokens_per_review_output"] if out_primary is None else out_primary
+        )
         out_critic = critic["approx_tokens_per_review_output"] if out_critic is None else out_critic
         doc = max(1, -(-int(words * 6.0) // 4))  # ceil(words * 6 / 4)
         cacheable = basis.prefix_tokens + doc
@@ -277,8 +296,11 @@ class TestEstimateFormula(OpenRouterBase):
         rates = reviews._active_provider_rates(self.ddb)
         cache = reviews._active_cache_multipliers(self.ddb)
         kwargs = {
-            "document_tokens": 12_000, "basis": BASIS, "output_tokens": (8_000, 5_000),
-            "rates": rates, "cache": cache,
+            "document_tokens": 12_000,
+            "basis": BASIS,
+            "output_tokens": (8_000, 5_000),
+            "rates": rates,
+            "cache": cache,
         }
         shared = reviews._expected_review_usd(shared_cache=True, **kwargs)
         split = reviews._expected_review_usd(shared_cache=False, **kwargs)
@@ -498,10 +520,15 @@ class TestPromptBasis(unittest.TestCase):
     def test_a_bigger_playbook_has_a_bigger_prefix(self):
         with open(OPF_FIXTURE_PATH, encoding="utf-8") as fh:
             opf_doc = json.load(fh)
-        wrapper = {"opf": opf_doc, "overrides": None, "knowledge_memo": None,
-                   "accepted_stub_basis": True}
+        wrapper = {
+            "opf": opf_doc,
+            "overrides": None,
+            "knowledge_memo": None,
+            "accepted_stub_basis": True,
+        }
         with patch.object(
-            pipeline_runner, "_load_playbook_bundle",
+            pipeline_runner,
+            "_load_playbook_bundle",
             return_value={"opf_bundle_v2": wrapper, "playbook": {"metadata": {}}},
         ):
             opf_basis = pipeline_runner.review_prompt_basis("opf-playbook", None, None)
@@ -551,7 +578,8 @@ class TestActualCostIsPersisted(OpenRouterBase):
             patch.object(reviews, "verify_submission_time_bundle", return_value={"verified": True}),
             patch.object(pipeline_runner, "_load_playbook_bundle", return_value={}),
             patch.object(
-                pipeline_runner, "_bundle_with_openrouter_model_ids",
+                pipeline_runner,
+                "_bundle_with_openrouter_model_ids",
                 side_effect=lambda bundle, dynamodb_resource=None: bundle,
             ),
             patch.object(pipeline_runner, "_fetch_upload_bytes", return_value=b"docx"),
@@ -563,7 +591,10 @@ class TestActualCostIsPersisted(OpenRouterBase):
             patcher.start()
             self.addCleanup(patcher.stop)
         pipeline_runner.run_real_pipeline(
-            REVIEW_ID, self._payload(), dynamodb_resource=self.ddb, s3_client=object(),
+            REVIEW_ID,
+            self._payload(),
+            dynamodb_resource=self.ddb,
+            s3_client=object(),
             model_client=client,
         )
         return self._row(REVIEW_ID)
@@ -651,9 +682,7 @@ class TestActualCostIsPersisted(OpenRouterBase):
 
 class TestRecordActualCost(OpenRouterBase):
     def _pending(self) -> str:
-        reviews._create_review_row(
-            REVIEW_ID, OWNER["cognito_sub"], PLAYBOOK, BUNDLE_HASH, self.ddb
-        )
+        reviews._create_review_row(REVIEW_ID, OWNER["cognito_sub"], PLAYBOOK, BUNDLE_HASH, self.ddb)
         return REVIEW_ID
 
     def test_it_stamps_the_row_and_the_first_write_wins(self):
@@ -686,7 +715,8 @@ class TestRecordActualCost(OpenRouterBase):
         submissions = self.ddb.Table(os.environ["REVIEW_SUBMISSIONS_TABLE"])
         submissions.put_item(
             Item={
-                "idempotency_key": "idem-1", "review_id": review_id,
+                "idempotency_key": "idem-1",
+                "review_id": review_id,
                 "spend_reservation_id": "res-1",
             }
         )
@@ -701,7 +731,8 @@ class TestRecordActualCost(OpenRouterBase):
         submissions = self.ddb.Table(os.environ["REVIEW_SUBMISSIONS_TABLE"])
         submissions.put_item(
             Item={
-                "idempotency_key": "idem-2", "review_id": review_id,
+                "idempotency_key": "idem-2",
+                "review_id": review_id,
                 "spend_reservation_id": "res-2",
             }
         )
@@ -721,15 +752,18 @@ class TestRecordActualCost(OpenRouterBase):
 class TestSubmitTimeEstimate(OpenRouterBase):
     def test_the_estimate_shown_at_submit_is_recorded_on_the_row(self):
         reviews._create_review_row(
-            REVIEW_ID, OWNER["cognito_sub"], PLAYBOOK, BUNDLE_HASH, self.ddb,
-            word_count=5_000, estimated_usd_cents=81,
+            REVIEW_ID,
+            OWNER["cognito_sub"],
+            PLAYBOOK,
+            BUNDLE_HASH,
+            self.ddb,
+            word_count=5_000,
+            estimated_usd_cents=81,
         )
         self.assertEqual(int(self._row(REVIEW_ID)["estimated_usd_cents"]), 81)
 
     def test_no_estimate_means_no_attribute_never_a_null(self):
-        reviews._create_review_row(
-            REVIEW_ID, OWNER["cognito_sub"], PLAYBOOK, BUNDLE_HASH, self.ddb
-        )
+        reviews._create_review_row(REVIEW_ID, OWNER["cognito_sub"], PLAYBOOK, BUNDLE_HASH, self.ddb)
         self.assertNotIn("estimated_usd_cents", self._row(REVIEW_ID))
 
     def test_a_zero_or_bool_estimate_is_not_recorded(self):
@@ -737,19 +771,25 @@ class TestSubmitTimeEstimate(OpenRouterBase):
             with self.subTest(bad=bad):
                 review_id = f"00000000-0000-4000-a000-00000000bb{int(bad) + 5:02d}"
                 reviews._create_review_row(
-                    review_id, OWNER["cognito_sub"], PLAYBOOK, BUNDLE_HASH, self.ddb,
+                    review_id,
+                    OWNER["cognito_sub"],
+                    PLAYBOOK,
+                    BUNDLE_HASH,
+                    self.ddb,
                     estimated_usd_cents=bad,  # type: ignore[arg-type]
                 )
                 self.assertNotIn("estimated_usd_cents", self._row(review_id))
 
     def test_the_route_computes_it_server_side_from_the_counted_words(self):
         with patch.object(pipeline_runner, "review_prompt_basis", return_value=BASIS):
-            cents = review_routes._submitted_cost_estimate_cents(PLAYBOOK, 8_000, self.ddb, object())
+            cents = review_routes._submitted_cost_estimate_cents(
+                PLAYBOOK, 8_000, self.ddb, object()
+            )
         self.assertEqual(
             cents,
-            reviews.review_cost_estimate(
-                self.ddb, playbook_id=PLAYBOOK, words=8_000, basis=BASIS
-            )["estimated_usd_cents"],
+            reviews.review_cost_estimate(self.ddb, playbook_id=PLAYBOOK, words=8_000, basis=BASIS)[
+                "estimated_usd_cents"
+            ],
         )
 
     def test_it_is_fail_soft_without_a_word_count_or_a_basis_or_on_error(self):
@@ -819,7 +859,9 @@ class TestAllowlists(OpenRouterBase):
         self.assertIn("actual_cost_failed", row)
         for internal in ("actual_input_tokens", "actual_output_tokens"):
             self.assertNotIn(internal, row)
-        self.assertTrue(set(reviews.REVIEW_COST_ROW_FIELDS) <= set(reviews._REVIEW_LIST_ITEM_FIELDS))
+        self.assertTrue(
+            set(reviews.REVIEW_COST_ROW_FIELDS) <= set(reviews._REVIEW_LIST_ITEM_FIELDS)
+        )
 
     def test_a_non_owner_cannot_read_another_reviewers_cost(self):
         review_id = self._finished()
@@ -874,8 +916,14 @@ class TestTheNonAdminRouteStillLeaksNoOperatorFacts(OpenRouterBase):
         self.assertEqual(set(body), set(reviews.REVIEW_COST_ESTIMATE_FIELDS))
         self.assertEqual(body["estimate_basis"], "document")
         for budget_field in (
-            "daily_cap_usd_cents", "spent_today_usd_cents", "remaining_usd_cents",
-            "cap_setting", "today", "days", "primary_model_id", "critic_model_id",
+            "daily_cap_usd_cents",
+            "spent_today_usd_cents",
+            "remaining_usd_cents",
+            "cap_setting",
+            "today",
+            "days",
+            "primary_model_id",
+            "critic_model_id",
         ):
             self.assertNotIn(budget_field, body)
         for secret in ("4321", *self.effective.values()):

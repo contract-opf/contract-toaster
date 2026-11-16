@@ -66,7 +66,9 @@ PLAYBOOKS_DIR = REPO_ROOT / "playbooks"
 POLICY_SCHEMA_PATH = PLAYBOOKS_DIR / "policy.schema.json"
 
 #: <playbook_id>-policy-v<N>.json — N is an integer, no leading zeros.
-POLICY_FILENAME_RE = re.compile(r"^(?P<playbook_id>[a-z0-9][a-z0-9-]*)-policy-v(?P<version>[1-9]\d*)\.json$")
+POLICY_FILENAME_RE = re.compile(
+    r"^(?P<playbook_id>[a-z0-9][a-z0-9-]*)-policy-v(?P<version>[1-9]\d*)\.json$"
+)
 
 _SCHEMA_CACHE: Optional[dict] = None  # noqa: UP045
 
@@ -143,7 +145,9 @@ def load_policy(path: Path) -> dict:
     try:
         jsonschema.validate(instance=doc, schema=_load_schema())
     except jsonschema.ValidationError as exc:
-        location = "/" + "/".join(str(p) for p in exc.absolute_path) if exc.absolute_path else "'' (root)"
+        location = (
+            "/" + "/".join(str(p) for p in exc.absolute_path) if exc.absolute_path else "'' (root)"
+        )
         raise PolicyValidationError(
             f"policy validation failed at {location}: failed the '{exc.validator}' check"
         ) from None

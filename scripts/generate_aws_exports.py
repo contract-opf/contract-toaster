@@ -153,8 +153,7 @@ def select_stack_outputs(all_outputs: dict, *, stack_name: str | None) -> dict:
     if stack_name is not None:
         if stack_name not in all_outputs:
             raise GenerateAwsExportsError(
-                f"stack {stack_name!r} not found in outputs file "
-                f"(available: {sorted(all_outputs)})"
+                f"stack {stack_name!r} not found in outputs file (available: {sorted(all_outputs)})"
             )
         return all_outputs[stack_name]
 
@@ -227,7 +226,9 @@ def generate(*, outputs_path: Path, output_path: Path, region: str, stack_name: 
     try:
         all_outputs = json.loads(outputs_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise GenerateAwsExportsError(f"outputs file is not valid JSON: {outputs_path} ({exc})") from exc
+        raise GenerateAwsExportsError(
+            f"outputs file is not valid JSON: {outputs_path} ({exc})"
+        ) from exc
 
     if not isinstance(all_outputs, dict):
         raise GenerateAwsExportsError(
@@ -243,15 +244,21 @@ def generate(*, outputs_path: Path, output_path: Path, region: str, stack_name: 
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--outputs", required=True, type=Path, help="Path to a cdk deploy --outputs-file JSON.")
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--outputs", required=True, type=Path, help="Path to a cdk deploy --outputs-file JSON."
+    )
     parser.add_argument(
         "--output",
         type=Path,
         default=DEFAULT_OUTPUT_PATH,
         help=f"Path to write the generated aws-exports.ts (default: {DEFAULT_OUTPUT_PATH}).",
     )
-    parser.add_argument("--region", default=DEFAULT_REGION, help=f"AWS region (default: {DEFAULT_REGION}).")
+    parser.add_argument(
+        "--region", default=DEFAULT_REGION, help=f"AWS region (default: {DEFAULT_REGION})."
+    )
     parser.add_argument(
         "--stack",
         default=None,

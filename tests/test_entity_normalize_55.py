@@ -127,9 +127,7 @@ class TestStripLegalForm(unittest.TestCase):
             self.assertTrue(spellings, f"{canonical} has no spellings")
             for spelling in spellings:
                 with self.subTest(f"{canonical}/{spelling}"):
-                    core, found = en.strip_legal_form(
-                        en.fold(f"Synthetic Holdings {spelling}")
-                    )
+                    core, found = en.strip_legal_form(en.fold(f"Synthetic Holdings {spelling}"))
                     self.assertEqual(core, "synthetic holdings")
                     self.assertEqual(found, canonical)
 
@@ -211,9 +209,7 @@ class TestSplitDba(unittest.TestCase):
         for separator in en.DBA_SEPARATORS:
             with self.subTest(separator):
                 name = f"Synthetic Holdings LLC {separator} Synthetic Legal"
-                self.assertEqual(
-                    en.split_dba(name), ["Synthetic Holdings LLC", "Synthetic Legal"]
-                )
+                self.assertEqual(en.split_dba(name), ["Synthetic Holdings LLC", "Synthetic Legal"])
 
     def test_separators_are_case_insensitive(self):
         for separator in ("D/B/A", "DBA", "Doing Business As", "Trading As", "T/A"):
@@ -245,8 +241,11 @@ class TestSplitDba(unittest.TestCase):
 
 COLLIDING_PAIRS: tuple[tuple[str, str, str], ...] = (
     ("gmbh dotted", "Synthetic Holdings GmbH", "SYNTHETIC HOLDINGS G.m.b.H."),
-    ("gmbh spelled out", "Synthetic Holdings GmbH",
-     "Synthetic Holdings Gesellschaft mit beschränkter Haftung"),
+    (
+        "gmbh spelled out",
+        "Synthetic Holdings GmbH",
+        "Synthetic Holdings Gesellschaft mit beschränkter Haftung",
+    ),
     ("bv", "Synthetic Holdings B.V.", "synthetic holdings bv"),
     ("srl", "Synthetic Holdings S.r.l.", "SYNTHETIC HOLDINGS SRL"),
     ("sas", "Synthetic Holdings SAS", "Synthetic Holdings S.A.S."),
@@ -277,8 +276,11 @@ DISTINCT_PAIRS: tuple[tuple[str, str, str], ...] = (
     ("hyphen is significant", "Smith-Jones Ltd", "Smith Jones Ltd"),
     ("suffix-only names do not merge", "Limited", "GmbH"),
     ("digits matter", "Synthetic 360 Ltd", "Synthetic 361 Ltd"),
-    ("a dba compound is not its own half", "Alpha Holdings LLC d/b/a Beta Studio",
-     "Alpha Holdings LLC"),
+    (
+        "a dba compound is not its own half",
+        "Alpha Holdings LLC d/b/a Beta Studio",
+        "Alpha Holdings LLC",
+    ),
 )
 
 

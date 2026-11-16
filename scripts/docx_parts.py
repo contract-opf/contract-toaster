@@ -62,15 +62,9 @@ DEFAULT_AUTHOR = "contract-toaster"
 FOOTNOTES_CONTENT_TYPE = (
     "application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"
 )
-HEADER_CONTENT_TYPE = (
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"
-)
-FOOTER_CONTENT_TYPE = (
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"
-)
-STYLES_CONTENT_TYPE = (
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"
-)
+HEADER_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"
+FOOTER_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"
+STYLES_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"
 FOOTNOTES_REL_TYPE = f"{REL_NS}/footnotes"
 HEADER_REL_TYPE = f"{REL_NS}/header"
 FOOTER_REL_TYPE = f"{REL_NS}/footer"

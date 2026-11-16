@@ -258,9 +258,7 @@ def check_defaults_are_selectable(openrouter_policy: dict) -> list[str]:
     none today, but nothing here assumes there never will be).
     """
     failures: list[str] = []
-    selectable_ids = {
-        entry.get("model_id") for entry in openrouter_policy.get("selectable", [])
-    }
+    selectable_ids = {entry.get("model_id") for entry in openrouter_policy.get("selectable", [])}
     openrouter_models = openrouter_policy.get("models", {})
 
     for role_key in SHARED_ROLES:
@@ -273,7 +271,7 @@ def check_defaults_are_selectable(openrouter_policy: dict) -> list[str]:
                 f"openrouter.json models.{role_key}.model_id {model_id!r} is not a "
                 f"member of openrouter.json's `selectable` allowlist -- an admin who "
                 f"changes the selection can never pick their way back to it (only a "
-                f"null/\"\" write reverting to the default reaches it)."
+                f'null/"" write reverting to the default reaches it).'
             )
     return failures
 
@@ -283,8 +281,7 @@ def main() -> int:
     openrouter_policy = load_json(OPENROUTER_POLICY_PATH)
 
     print(
-        "Checking model-policy artifact consistency "
-        "(bedrock-us-east-1.json vs openrouter.json)..."
+        "Checking model-policy artifact consistency (bedrock-us-east-1.json vs openrouter.json)..."
     )
     failures = check_consistency(bedrock_policy, openrouter_policy)
     failures += check_defaults_are_selectable(openrouter_policy)

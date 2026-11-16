@@ -376,8 +376,8 @@ describe('App — rotating the seeded password recovers every admin panel (#635)
     await screen.findByTestId('change-password-success');
 
     for (const { name, testId } of PANELS) {
-      await waitFor(
-        () => expect(screen.queryByTestId(testId), `${name} stayed blank`).not.toBeNull(),
+      await waitFor(() =>
+        expect(screen.queryByTestId(testId), `${name} stayed blank`).not.toBeNull(),
       );
     }
   });

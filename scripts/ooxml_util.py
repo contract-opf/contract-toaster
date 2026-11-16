@@ -93,9 +93,7 @@ def root_open_tag(xml_text: str) -> str:
     end = scan_tag_end(xml_text, start)
     open_tag = xml_text[start : end + 1]
     if open_tag.endswith("/>"):
-        raise ValueError(
-            "ooxml_util: word/document.xml root element must not be self-closing"
-        )
+        raise ValueError("ooxml_util: word/document.xml root element must not be self-closing")
     return open_tag
 
 

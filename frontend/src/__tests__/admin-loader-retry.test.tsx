@@ -104,7 +104,13 @@ const BODIES: Record<string, unknown> = {
   '/api/admin/retention/holds': { holds: [] },
   '/api/reviews': { reviews: [] },
   '/api/admin/users': { users: [] },
-  '/api/admin/sync-status': { sync_type: 'workspace', last_run_at: null, last_run_outcome: null, users_deprovisioned_count: 0, next_run_at: null },
+  '/api/admin/sync-status': {
+    sync_type: 'workspace',
+    last_run_at: null,
+    last_run_outcome: null,
+    users_deprovisioned_count: 0,
+    next_run_at: null,
+  },
   '/api/playbooks': { playbooks: [] },
 };
 
@@ -218,9 +224,7 @@ describe('AdminPlaybooks — version history', () => {
   // Not table-driven with the rest: this loader only runs once a playbook has
   // been selected, so the failure has to be provoked through the UI.
   const CATALOG = {
-    playbooks: [
-      { playbook_id: 'eiaa', display_name: 'Affiliation', status: 'active', notes: '' },
-    ],
+    playbooks: [{ playbook_id: 'eiaa', display_name: 'Affiliation', status: 'active', notes: '' }],
   };
 
   function stub() {
@@ -246,8 +250,12 @@ describe('AdminPlaybooks — version history', () => {
       // Issue #605: selecting the playbook (below) also mounts its
       // standing-instructions pane, which fetches this on its own.
       if (pathname.endsWith('/instructions')) {
-        // eslint-disable-next-line @typescript-eslint/require-await
-        return { ok: true, status: 200, json: async () => ({ current: null, history: [] }) } as Response;
+        return {
+          ok: true,
+          status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
+          json: async () => ({ current: null, history: [] }),
+        } as Response;
       }
       // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => ({}) } as Response;
@@ -286,8 +294,6 @@ describe('AdminPlaybooks — version history', () => {
   it('the retry re-fetches that playbook in place', async () => {
     await openVersionHistory();
     fireEvent.click(await screen.findByTestId('admin-playbooks-versions-retry'));
-    await waitFor(() =>
-      expect(screen.queryByTestId('admin-playbooks-versions-error')).toBeNull(),
-    );
+    await waitFor(() => expect(screen.queryByTestId('admin-playbooks-versions-error')).toBeNull());
   });
 });

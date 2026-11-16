@@ -59,7 +59,11 @@ class TestDemoToken(unittest.TestCase):
     def test_wrong_secret_rejected(self) -> None:
         with patch.dict("os.environ", {"DEMO_TOKEN_SECRET": SECRET}, clear=True):
             token = demo_auth.issue_demo_token(USER_ROW)
-        with patch.dict("os.environ", {"DEMO_TOKEN_SECRET": "a-different-but-equally-strong-secret-9f8e7d6c5b4a"}, clear=True):
+        with patch.dict(
+            "os.environ",
+            {"DEMO_TOKEN_SECRET": "a-different-but-equally-strong-secret-9f8e7d6c5b4a"},
+            clear=True,
+        ):
             with self.assertRaises(HTTPException) as ctx:
                 demo_auth.verify_demo_token(token)
             self.assertEqual(ctx.exception.status_code, 401)
@@ -107,7 +111,9 @@ class TestGetCurrentUserDispatch(unittest.TestCase):
 
     def test_sso_mode_does_not_accept_demo_token(self) -> None:
         # Default sso mode routes to Cognito; a demo token must NOT be honored.
-        with patch.dict("os.environ", {"DEMO_TOKEN_SECRET": SECRET, "AUTH_MODE": "sso"}, clear=True):
+        with patch.dict(
+            "os.environ", {"DEMO_TOKEN_SECRET": SECRET, "AUTH_MODE": "sso"}, clear=True
+        ):
             token = demo_auth.issue_demo_token(ADMIN_ROW)
             sentinel = {"sub": "cognito-verified"}
             with patch.object(auth, "_verify_cognito_token", return_value=sentinel) as m:
@@ -116,7 +122,9 @@ class TestGetCurrentUserDispatch(unittest.TestCase):
             self.assertEqual(claims, sentinel)
 
     def test_both_mode_routes_by_issuer(self) -> None:
-        with patch.dict("os.environ", {"DEMO_TOKEN_SECRET": SECRET, "AUTH_MODE": "both"}, clear=True):
+        with patch.dict(
+            "os.environ", {"DEMO_TOKEN_SECRET": SECRET, "AUTH_MODE": "both"}, clear=True
+        ):
             demo = demo_auth.issue_demo_token(USER_ROW)
             # Demo token -> demo verifier (Cognito untouched).
             with patch.object(auth, "_verify_cognito_token") as m:
@@ -125,7 +133,9 @@ class TestGetCurrentUserDispatch(unittest.TestCase):
             self.assertEqual(claims["sub"], "local:alice")
 
             # Non-demo token -> Cognito verifier.
-            cognito_like = jwt.encode({"iss": "https://cognito", "sub": "c"}, "k", algorithm="HS256")
+            cognito_like = jwt.encode(
+                {"iss": "https://cognito", "sub": "c"}, "k", algorithm="HS256"
+            )
             with patch.object(auth, "_verify_cognito_token", return_value={"sub": "c"}) as m:
                 claims = auth.get_current_user(_creds(cognito_like))
             m.assert_called_once_with(cognito_like)
@@ -135,7 +145,9 @@ class TestGetCurrentUserDispatch(unittest.TestCase):
         # A demo session cookie with no Authorization header must still be
         # rejected in sso mode, and must never reach the Cognito verifier
         # (the cookie counterpart of test_sso_mode_does_not_accept_demo_token).
-        with patch.dict("os.environ", {"DEMO_TOKEN_SECRET": SECRET, "AUTH_MODE": "sso"}, clear=True):
+        with patch.dict(
+            "os.environ", {"DEMO_TOKEN_SECRET": SECRET, "AUTH_MODE": "sso"}, clear=True
+        ):
             token = demo_auth.issue_demo_token(ADMIN_ROW)
             with patch.object(auth, "_verify_cognito_token") as m:  # noqa: SIM117
                 with self.assertRaises(HTTPException) as ctx:
@@ -157,7 +169,9 @@ class TestGetCurrentUserDispatch(unittest.TestCase):
                     self.assertEqual(ctx.exception.status_code, 401)
 
     def test_both_mode_cookie_only_routes_to_demo_verifier(self) -> None:
-        with patch.dict("os.environ", {"DEMO_TOKEN_SECRET": SECRET, "AUTH_MODE": "both"}, clear=True):
+        with patch.dict(
+            "os.environ", {"DEMO_TOKEN_SECRET": SECRET, "AUTH_MODE": "both"}, clear=True
+        ):
             token = demo_auth.issue_demo_token(USER_ROW)
             with patch.object(auth, "_verify_cognito_token") as m:
                 claims = auth.get_current_user(credentials=None, session_cookie=token)

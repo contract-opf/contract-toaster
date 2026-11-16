@@ -218,6 +218,7 @@ def check_ac3_phase0_issue11_notes() -> list[str]:
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
+
 def main() -> int:
     checks = [
         (

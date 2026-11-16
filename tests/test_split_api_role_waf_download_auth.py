@@ -84,6 +84,7 @@ def _assert(condition: bool, label: str, detail: str = "") -> list[str]:
 # AC1 — Split API role with KMS encryption-context checks
 # ---------------------------------------------------------------------------
 
+
 def check_ac1_split_api_role() -> list[str]:
     """AC1: infra and ARCHITECTURE.md show split API role capabilities with KMS context."""
     print("\nAC1: Split API role with KMS encryption-context checks ...")
@@ -126,9 +127,15 @@ def check_ac1_split_api_role() -> list[str]:
     # infra CDK: distinct policy statement SIDs for each capability
     # App-stack.ts already has StartReview, ReadStatus, Upload, Download SIDs.
     has_upload_sid = bool(re.search(r"sid.*['\"]Upload['\"]|Upload.*sid", ts_all, re.IGNORECASE))
-    has_download_sid = bool(re.search(r"sid.*['\"]Download['\"]|Download.*sid", ts_all, re.IGNORECASE))
-    has_start_review_sid = bool(re.search(r"sid.*['\"]StartReview['\"]|StartReview.*sid", ts_all, re.IGNORECASE))
-    has_read_status_sid = bool(re.search(r"sid.*['\"]ReadStatus['\"]|ReadStatus.*sid", ts_all, re.IGNORECASE))
+    has_download_sid = bool(
+        re.search(r"sid.*['\"]Download['\"]|Download.*sid", ts_all, re.IGNORECASE)
+    )
+    has_start_review_sid = bool(
+        re.search(r"sid.*['\"]StartReview['\"]|StartReview.*sid", ts_all, re.IGNORECASE)
+    )
+    has_read_status_sid = bool(
+        re.search(r"sid.*['\"]ReadStatus['\"]|ReadStatus.*sid", ts_all, re.IGNORECASE)
+    )
 
     failures += _assert(
         has_upload_sid,
@@ -174,9 +181,12 @@ def check_ac1_split_api_role() -> list[str]:
 # AC2 — Download authorization
 # ---------------------------------------------------------------------------
 
+
 def check_ac2_download_auth() -> list[str]:
     """AC2: presigned URL owner/admin check, Cache-Control: no-store, non-enumerable IDs."""
-    print("\nAC2: Download authorization — presigned URL + auth + Cache-Control + non-enumerable IDs ...")
+    print(
+        "\nAC2: Download authorization — presigned URL + auth + Cache-Control + non-enumerable IDs ..."
+    )
     failures: list[str] = []
 
     arch = _read(ARCH_MD)
@@ -251,6 +261,7 @@ def check_ac2_download_auth() -> list[str]:
 # ---------------------------------------------------------------------------
 # AC3 — Document access audit
 # ---------------------------------------------------------------------------
+
 
 def check_ac3_document_access_audit() -> list[str]:
     """AC3: audit rows for review views, download attempts, presigned issuance, denials."""
@@ -329,6 +340,7 @@ def check_ac3_document_access_audit() -> list[str]:
 # AC4 — WAF + abuse limits
 # ---------------------------------------------------------------------------
 
+
 def check_ac4_waf_abuse_limits() -> list[str]:
     """AC4: WAF rules, request-size caps, rate limits, per-user concurrency/daily limits."""
     print("\nAC4: WAF + abuse limits — WAF, rate limits, per-user concurrency/daily limits ...")
@@ -343,8 +355,7 @@ def check_ac4_waf_abuse_limits() -> list[str]:
     failures += _assert(
         has_waf_threat,
         "docs/threat-model.md: WAF referenced in Abuse/DoS controls",
-        "Per AC: a WAF fronts the API with managed rule sets plus request-size and "
-        "rate rules.",
+        "Per AC: a WAF fronts the API with managed rule sets plus request-size and rate rules.",
     )
 
     # docs/threat-model.md: request-size caps
@@ -445,6 +456,7 @@ def check_ac4_waf_abuse_limits() -> list[str]:
 # AC5 — Test coverage scenarios documented
 # ---------------------------------------------------------------------------
 
+
 def check_ac5_test_scenarios() -> list[str]:
     """AC5: test scenarios for non-owner rejection, expired URL, and per-user limits."""
     print("\nAC5: Test coverage — non-owner rejection, expired URL, per-user limit scenarios ...")
@@ -510,8 +522,11 @@ def check_ac5_test_scenarios() -> list[str]:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> int:
-    print("Split API role + scoped download auth + WAF & abuse limits — structural gate (issue #71)")
+    print(
+        "Split API role + scoped download auth + WAF & abuse limits — structural gate (issue #71)"
+    )
     print("=" * 80)
 
     all_failures: list[str] = []
@@ -523,10 +538,7 @@ def main() -> int:
 
     print("\n" + "=" * 80)
     if all_failures:
-        print(
-            f"\nFAIL: {len(all_failures)} check(s) failed.\n"
-            "See output above for details."
-        )
+        print(f"\nFAIL: {len(all_failures)} check(s) failed.\nSee output above for details.")
         return 1
 
     print("\nPASS: all split-API-role / download-auth / WAF structural checks passed.")

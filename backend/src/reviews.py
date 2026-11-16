@@ -137,6 +137,7 @@ def _is_table_not_found(exc: Exception) -> bool:
         return False
     return resp.get("Error", {}).get("Code") == "ResourceNotFoundException"
 
+
 # ---------------------------------------------------------------------------
 # Idempotency-key derivation constants.
 # ---------------------------------------------------------------------------
@@ -407,6 +408,7 @@ STAGE_FAILURE_REASON_STATUS: dict[str, str] = {
 # Idempotency key derivation
 # ---------------------------------------------------------------------------
 
+
 def _current_bucket(now_epoch: float) -> int:
     return int(now_epoch // (BUCKET_WIDTH_MINUTES * 60))
 
@@ -472,6 +474,7 @@ def resolve_idempotency_key(
 # ---------------------------------------------------------------------------
 # Submission record: conditional create-or-fetch
 # ---------------------------------------------------------------------------
+
 
 def find_existing_submission(
     idempotency_key: str,
@@ -583,6 +586,7 @@ def create_submission_record(
 # Atomic, worst-case, retry-inclusive spend reservation
 # ---------------------------------------------------------------------------
 
+
 def _openrouter_rates_for_role(
     policy: dict[str, Any], role: str, effective_model_id: str
 ) -> tuple[float, float]:
@@ -684,9 +688,7 @@ def _usage_reports_cache_tokens(usage: dict[str, int] | None) -> bool:
     only case in which pricing could differ from the base input rate."""
     if not usage:
         return False
-    return bool(
-        usage.get("cache_creation_input_tokens") or usage.get("cache_read_input_tokens")
-    )
+    return bool(usage.get("cache_creation_input_tokens") or usage.get("cache_read_input_tokens"))
 
 
 def _active_provider_rates(
@@ -816,12 +818,12 @@ def compute_worst_case_reservation_usd_cents(dynamodb_resource: Any = None) -> i
     primary_input_rate, primary_output_rate, critic_input_rate, critic_output_rate = (
         _active_provider_rates(dynamodb_resource)
     )
-    primary_usd = MAX_INPUT_TOKENS * (
-        primary_input_rate / 1_000_000
-    ) + MAX_OUTPUT_TOKENS * (primary_output_rate / 1_000_000)
-    critic_usd = MAX_INPUT_TOKENS * (
-        critic_input_rate / 1_000_000
-    ) + MAX_OUTPUT_TOKENS * (critic_output_rate / 1_000_000)
+    primary_usd = MAX_INPUT_TOKENS * (primary_input_rate / 1_000_000) + MAX_OUTPUT_TOKENS * (
+        primary_output_rate / 1_000_000
+    )
+    critic_usd = MAX_INPUT_TOKENS * (critic_input_rate / 1_000_000) + MAX_OUTPUT_TOKENS * (
+        critic_output_rate / 1_000_000
+    )
     usd = attempts_per_pass * (primary_usd + critic_usd)
     return int(round(usd * 100))  # noqa: RUF046
 
@@ -1071,9 +1073,7 @@ class PromptBasis:
 
 def document_tokens_for_words(words: int) -> int:
     """Estimated prompt tokens of a document of `words` words."""
-    return max(
-        1, math.ceil(words * CHARS_PER_WORD_ESTIMATE / DOCUMENT_CHARS_PER_TOKEN_ESTIMATE)
-    )
+    return max(1, math.ceil(words * CHARS_PER_WORD_ESTIMATE / DOCUMENT_CHARS_PER_TOKEN_ESTIMATE))
 
 
 def _percentile(sorted_values: list[float], fraction: float) -> float:
@@ -1598,8 +1598,7 @@ def reserve_spend_with_amount(
             # a mid-day change to DAILY_SPEND_CAP_USD_CENTS now takes effect on
             # the next reservation rather than the next UTC day.
             ConditionExpression=(
-                "attribute_not_exists(reserved_usd_cents) OR "
-                "reserved_usd_cents <= :budget"
+                "attribute_not_exists(reserved_usd_cents) OR reserved_usd_cents <= :budget"
             ),
             ExpressionAttributeValues={
                 ":zero": 0,
@@ -1739,8 +1738,7 @@ def reserve_floor_spend(
     submissions.update_item(
         Key={"idempotency_key": submission["idempotency_key"]},
         UpdateExpression=(
-            "SET " + field + " = if_not_exists(" + field + ", :zero) + :amount, "
-            "updated_at = :now"
+            "SET " + field + " = if_not_exists(" + field + ", :zero) + :amount, updated_at = :now"
         ),
         ExpressionAttributeValues={
             ":zero": 0,
@@ -2158,6 +2156,7 @@ def record_cover_note_draft(
 # Retry-safe "ensure execution started"
 # ---------------------------------------------------------------------------
 
+
 def deterministic_execution_name(review_id: str) -> str:
     """The execution name IS the dedup mechanism (no SQS on this path).
 
@@ -2468,9 +2467,8 @@ def _read_active_release_bundle_hash(
         if active_version is not None:
             artifact_kind = active_version.get("artifact_kind") or ""
             if artifact_kind.startswith("opf-"):
-                if (
-                    active_version.get("content_hash") != active_hash
-                    or not active_version.get("storage_key")
+                if active_version.get("content_hash") != active_hash or not active_version.get(
+                    "storage_key"
                 ):
                     return None
                 return active_hash
@@ -2535,9 +2533,7 @@ def resolve_and_submit_review(
     reconciler's re-drive path) keep working unmodified. This function is
     the resolving entry point a live `POST /api/reviews` route would call.
     """
-    active_release_bundle_hash = resolve_active_release_bundle_hash(
-        playbook_id, dynamodb_resource
-    )
+    active_release_bundle_hash = resolve_active_release_bundle_hash(playbook_id, dynamodb_resource)
     return submit_review(
         owner_sub=owner_sub,
         playbook_id=playbook_id,
@@ -2665,9 +2661,7 @@ def resolve_notes_mode(value: str | None) -> str:
     if not normalized:
         return DEFAULT_NOTES_MODE
     if normalized not in NOTES_MODES:
-        raise ValueError(
-            f"notes_mode must be one of {', '.join(NOTES_MODES)}; got {value!r}"
-        )
+        raise ValueError(f"notes_mode must be one of {', '.join(NOTES_MODES)}; got {value!r}")
     if normalized in ("internal", "both") and not config.notes_mode_enabled():
         raise ValueError(
             f"notes_mode {normalized!r} is not available: NOTES_MODE_ENABLED "
@@ -2853,9 +2847,7 @@ def submit_review(
     # reads the same dict (via `instructions_lineage`) so the pipeline
     # receives the exact version/hash/text this resolution settled on too --
     # never a second, independent read from inside the pipeline.
-    playbook_version_lineage.update(
-        _resolve_instructions_lineage(playbook_id, dynamodb_resource)
-    )
+    playbook_version_lineage.update(_resolve_instructions_lineage(playbook_id, dynamodb_resource))
     execution_input_json = _build_execution_input_json_from_parts(
         review_id=review_id,
         owner_sub=owner_sub,
@@ -3819,7 +3811,9 @@ def load_analysis_artifact(item: dict[str, Any], s3_client: Any) -> dict[str, An
         # with ClientError alone.
         logger.warning(
             "ANALYSIS_ARTIFACT: could not read %s for review_id=%s: %s",
-            key, item.get("review_id"), exc,
+            key,
+            item.get("review_id"),
+            exc,
         )
         return None
     try:
@@ -3827,7 +3821,9 @@ def load_analysis_artifact(item: dict[str, Any], s3_client: Any) -> dict[str, An
     except (json.JSONDecodeError, UnicodeDecodeError, TypeError) as exc:
         logger.warning(
             "ANALYSIS_ARTIFACT: malformed JSON body at %s for review_id=%s: %s",
-            key, item.get("review_id"), exc,
+            key,
+            item.get("review_id"),
+            exc,
         )
         return None
     if not isinstance(document, dict):
@@ -3838,7 +3834,9 @@ def load_analysis_artifact(item: dict[str, Any], s3_client: Any) -> dict[str, An
         # which is precisely what this function promises never to do.
         logger.warning(
             "ANALYSIS_ARTIFACT: %s for review_id=%s parsed to %s, not an object",
-            key, item.get("review_id"), type(document).__name__,
+            key,
+            item.get("review_id"),
+            type(document).__name__,
         )
         return None
     return document
@@ -3890,7 +3888,9 @@ def get_review_detail(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review not found.")
 
     status_value = item.get("status", "PENDING")
-    reason = item.get("reason") or item.get("quarantine_reason") or item.get("analysis_report_reason")
+    reason = (
+        item.get("reason") or item.get("quarantine_reason") or item.get("analysis_report_reason")
+    )
 
     # `findings`/`critic_delta` are produced by the pipeline
     # (`pipeline_runner._ANALYSIS_FIELDS`, issue #416) but no writer has
@@ -3911,204 +3911,206 @@ def get_review_detail(
     # second, and the Review screen sat on "Stage not yet reported" past DONE.
     # The in-memory test doubles store plain ints, which is how the suite
     # missed it -- the same blind spot as GET /api/users (issue #440).
-    return json_safe({
-        "review_id": review_id,
-        "status": status_value,
-        "decision": item.get("decision"),
-        "confidence_state": item.get("confidence_state"),
-        "confidence_band": item.get("confidence_band"),
-        "issues": analysis.get("findings") if analysis is not None else None,
-        "critic_delta": analysis.get("critic_delta") if analysis is not None else None,
-        # Issue #147: the hard-rejection ledger record, read off the analysis
-        # artifact like `critic_delta` above (it is never a row attribute).
-        # Ids, reason tokens, counts and hashes only -- no clause or model
-        # text -- so the receipt can print its counts-only line. None for a
-        # review with no ledger, and for one with no artifact.
-        "hard_ledger": analysis.get("hard_ledger") if analysis is not None else None,
-        # The RESPONSE key stays `verdict_summary` (the documented public
-        # field name, and the model-output vocabulary docs/output-contract.md
-        # specifies) but the DynamoDB ATTRIBUTE it reads is `summary`.
-        # `scripts/review_spine.py`'s result dict deliberately renames the
-        # model's `verdict_summary` to `summary` (see that file's result
-        # assembly and the note at scripts/primary_review_pass.py), and all
-        # three writers persist it under that name:
-        # `pipeline_runner._write_terminal` / `._write_real_terminal` and the
-        # AWS Step Functions persist Lambda (infra/lambda/persist/handler.py).
-        # Nothing has EVER written an attribute called `verdict_summary` --
-        # confirmed against the full history -- so this read returned None on
-        # every real review from the day the field shipped, and no test caught
-        # it because every fixture hand-seeds a row with the reader's key
-        # instead of going through a writer.
-        "verdict_summary": item.get("summary"),
-        # Issue #563: disclosure that stage 1 accepted one or more pending
-        # tracked changes (single or multi-cluster/multi-author) into the
-        # operative draft before review -- names the paragraph heading and
-        # cluster/author counts, never silent. Absent-on-the-row -> None
-        # here, same faithful-projection convention as every other field.
-        "normalization_notes": item.get("normalization_notes"),
-        "reason": reason,
-        # Issue #100: a structured sub-classification of `reason` --
-        # currently only "suspicious_control_characters", the one branch of
-        # `reason == "unnormalizable_input"` that is NOT about a tracked
-        # change and so must not get the tracked-change copy. Read off the
-        # persisted analysis artifact's `analysis_report` the SAME way
-        # `issues`/`critic_delta` above are (`normalize_input.
-        # build_unnormalizable_report` is the only writer, via
-        # `pipeline_runner._ANALYSIS_FIELDS`'s `analysis_report` entry --
-        # never a second DynamoDB column) -- absent (never a null
-        # placeholder) whenever there is no artifact, no `analysis_report`
-        # on it, or the refusal has no sub-classification, all of which the
-        # frontend's default `unnormalizable_input` copy already fits.
-        "reason_detail": (
-            (analysis.get("analysis_report") or {}).get("reason_detail")
-            if analysis is not None
-            else None
-        ),
-        # Target-agnostic stage-failure taxonomy (issue #258): the specific
-        # pipeline stage a failure occurred in, when
-        # `record_stage_failure` has written one.
-        "failing_stage": item.get("failing_stage"),
-        # Live progress (issue #447): which of the review spine's four
-        # user-visible sub-stages (primary_pass / critic_pass /
-        # reconciliation / redline -- scripts/review_spine.py's
-        # PROGRESS_STAGES) is running RIGHT NOW, written by
-        # pipeline_runner._write_progress_stage as each one starts. None on a
-        # review that has not reached the spine yet, on one whose runner
-        # predates this field, and on any deployment target that does not
-        # report progress -- the UI falls back to its honest indeterminate
-        # treatment rather than inventing a step. Same faithful-projection
-        # convention as every field above: this is a read of the row, never a
-        # computation of pipeline state (and emphatically never elapsed
-        # time).
-        "progress_stage": item.get("progress_stage"),
-        "message": STATUS_USER_MESSAGES.get(status_value),
-        "has_output": bool(item.get("output_s3_key")),
-        # Issue #449: whether the INPUT document is still identifiable from
-        # this row (the pointer, never the key itself -- same discipline as
-        # `has_output` directly above). False for every review created before
-        # the pointer was recorded; that is a truthful "not recorded", not a
-        # claim that the document is gone.
-        "has_input": bool(item.get("upload_s3_key")),
-        # Issue #499 ("Butter it"): whether a cover-note draft is already
-        # cached on this row -- a boolean pointer, never the draft text
-        # itself, same discipline as `has_output`/`has_input` above. Lets
-        # the UI show "cached, free to view" without a billed round trip
-        # just to find out.
-        "has_cover_note_draft": bool(item.get("cover_note_draft")),
-        "playbook_id": item.get("playbook_id"),
-        # Issue #449: WHICH MODELS RAN THIS REVIEW. Written at terminal-write
-        # time by pipeline_runner._write_real_terminal from the bundle metadata
-        # the spine actually resolved its primary/critic calls from. None for a
-        # review that predates the field, for the mock pipeline (which invokes
-        # no model at all), and for one that failed before the spine ran -- and
-        # deliberately NOT back-filled from today's configured model: a review
-        # run last week under a different model must never be relabelled with
-        # the one configured now (this gets sharper once an admin can change
-        # models). "Not recorded" is the honest answer; a guess is not.
-        "primary_model_id": item.get("primary_model_id"),
-        "critic_model_id": item.get("critic_model_id"),
-        # Issue #508/#514: what the PROVIDER said it served, beside what was
-        # asked for. Absent on every review predating the field, on the mock
-        # pipeline, and wherever the provider omitted it -- and absent is NOT
-        # a mismatch, which the reader-side comparison has to honour or the
-        # whole history of the product reads as suspicious.
-        "served_primary_model_id": item.get("served_primary_model_id"),
-        "served_critic_model_id": item.get("served_critic_model_id"),
-        # Issue #431: the per-review free-text guidance this review was
-        # submitted with, so the Review tab can show back (read-only) which
-        # instructions governed it. None for a review submitted without any
-        # -- and for every review created before that field was recorded --
-        # the same faithful-projection convention as every field above.
-        "toaster_guidance": item.get("toaster_guidance"),
-        # Issue #520: None on a review predating the field -- which is the
-        # honest answer, not a back-filled "external" that would claim the
-        # review was submitted under a mode nobody chose.
-        "notes_mode": item.get("notes_mode"),
-        # Issue #54: same convention -- None on a review predating the field
-        # or submitted at the default, never a back-filled "medium".
-        "markup_intensity": item.get("markup_intensity"),
-        # What this review cost: the estimate shown when it was submitted and
-        # the settled actual (`REVIEW_COST_ROW_FIELDS`). The detail route is
-        # owner-or-admin scoped above -- a non-owner gets the 404 before this
-        # projection exists -- and None means "not recorded" (a row from
-        # before the fields), never $0.00.
-        **{field: item.get(field) for field in REVIEW_COST_ROW_FIELDS},
-        "owner_sub": owner_sub,
-        "created_at": item.get("created_at"),
-        "updated_at": item.get("updated_at"),
-        # OPF §8 lineage (issue #287): admin/API visibility for a v2-bundle
-        # review's opf_content_hash / opf_section_digests_hash /
-        # opf_corpus_snapshot_hash. Absent-on-the-row -> None here too, same
-        # "faithful projection" convention as every other field above.
-        "opf_content_hash": item.get("opf_content_hash"),
-        "opf_section_digests_hash": item.get("opf_section_digests_hash"),
-        "opf_corpus_snapshot_hash": item.get("opf_corpus_snapshot_hash"),
-        # Issue #479 floor coverage: WHICH invariants were judged, which were
-        # violated, and which went unjudged. Projected alongside the lineage
-        # hashes above because the point of persisting the ids is that an
-        # operator looking at a quarantined row can see which invariant went
-        # unjudged, not merely that one did -- and a row-level attribute with
-        # no read surface cannot answer that. Absent-on-the-row -> None here,
-        # same faithful-projection convention as every other field.
-        "floor_judged_invariant_ids": item.get("floor_judged_invariant_ids"),
-        "floor_violated_invariant_ids": item.get("floor_violated_invariant_ids"),
-        "floor_unjudged_invariant_ids": item.get("floor_unjudged_invariant_ids"),
-        # Issue #471: the `playbook_versions` admin-facing version + content
-        # hash that gated this submission -- populated for the live,
-        # non-OPF playbook too (unlike the OPF-only fields above). Absent-
-        # on-the-row -> None here, same faithful-projection convention.
-        "playbook_version": item.get("playbook_version"),
-        "playbook_content_hash": item.get("playbook_content_hash"),
-        # Issue #482 (epic #481): the standing-instructions version + text
-        # hash that governed this review, if any -- same faithful-
-        # projection convention as every field above.
-        "instructions_version": item.get("instructions_version"),
-        "instructions_content_hash": item.get("instructions_content_hash"),
-        # Issue #294: the review's governed Posture-version override, if
-        # any. Absent-on-the-row -> None here too, same "faithful
-        # projection" convention as the fields above.
-        "posture_version": item.get("posture_version"),
-        # OPF 0.3: the review POLICY (prescriptive rules) that governed this
-        # document, alongside the playbook (descriptive precedent) above --
-        # including whether those rules had been approved when they were
-        # applied, which a hash alone does not say.
-        "policy_version": item.get("policy_version"),
-        "policy_hash": item.get("policy_hash"),
-        "policy_approval_status": item.get("policy_approval_status"),
-        # Whether a stop has been asked for and not yet taken effect. The UI
-        # needs this to say "stopping…" instead of leaving the reviewer
-        # pressing a button that looks like it did nothing: cancellation is
-        # cooperative, so the gap between the request and the terminal write
-        # is real and must be visible rather than hidden.
-        "cancel_requested": bool(item.get("cancel_requested_at")),
-        # Issue #486: the reviewer's OPTIONAL disposition capture -- NOT an
-        # approval gate (owner correction 2026-08-02: a lightweight "what
-        # happened with this one" record for the negotiating-history / eval
-        # feedback loop, never something this product enforces or nags
-        # about). `record_disposition` never touches `status`/`decision`
-        # above; these five keys are a faithful projection of whatever the
-        # row currently holds -- None on a review with nothing recorded yet,
-        # same convention as every field above.
-        #
-        # The issue's "What to build" asks for the disposition as "(value,
-        # who, when)"; this projects value + when
-        # (`attorney_disposition_recorded_at`) but deliberately no "who" --
-        # this route is owner-scoped (a caller can only ever record a
-        # disposition on their OWN review, or as an admin acting on someone
-        # else's), so "who recorded this" is never in question for the
-        # common case the way it would be on a shared/team surface. The
-        # actual actor IS captured, in the one place cross-user visibility
-        # matters: `review_routes.post_review_disposition`'s audit row
-        # (`actor=caller_sub`). This is a decision, not a miss -- adding
-        # `attorney_disposition_by` here would duplicate what the audit
-        # trail already answers authoritatively.
-        "attorney_disposition": item.get("attorney_disposition"),
-        "attorney_disposition_reason_codes": item.get("attorney_disposition_reason_codes"),
-        "attorney_disposition_topic_ids": item.get("attorney_disposition_topic_ids"),
-        "attorney_disposition_note": item.get("attorney_disposition_note"),
-        "attorney_disposition_recorded_at": item.get("attorney_disposition_recorded_at"),
-        "legal_triage_status": item.get("legal_triage_status"),
-    })
+    return json_safe(
+        {
+            "review_id": review_id,
+            "status": status_value,
+            "decision": item.get("decision"),
+            "confidence_state": item.get("confidence_state"),
+            "confidence_band": item.get("confidence_band"),
+            "issues": analysis.get("findings") if analysis is not None else None,
+            "critic_delta": analysis.get("critic_delta") if analysis is not None else None,
+            # Issue #147: the hard-rejection ledger record, read off the analysis
+            # artifact like `critic_delta` above (it is never a row attribute).
+            # Ids, reason tokens, counts and hashes only -- no clause or model
+            # text -- so the receipt can print its counts-only line. None for a
+            # review with no ledger, and for one with no artifact.
+            "hard_ledger": analysis.get("hard_ledger") if analysis is not None else None,
+            # The RESPONSE key stays `verdict_summary` (the documented public
+            # field name, and the model-output vocabulary docs/output-contract.md
+            # specifies) but the DynamoDB ATTRIBUTE it reads is `summary`.
+            # `scripts/review_spine.py`'s result dict deliberately renames the
+            # model's `verdict_summary` to `summary` (see that file's result
+            # assembly and the note at scripts/primary_review_pass.py), and all
+            # three writers persist it under that name:
+            # `pipeline_runner._write_terminal` / `._write_real_terminal` and the
+            # AWS Step Functions persist Lambda (infra/lambda/persist/handler.py).
+            # Nothing has EVER written an attribute called `verdict_summary` --
+            # confirmed against the full history -- so this read returned None on
+            # every real review from the day the field shipped, and no test caught
+            # it because every fixture hand-seeds a row with the reader's key
+            # instead of going through a writer.
+            "verdict_summary": item.get("summary"),
+            # Issue #563: disclosure that stage 1 accepted one or more pending
+            # tracked changes (single or multi-cluster/multi-author) into the
+            # operative draft before review -- names the paragraph heading and
+            # cluster/author counts, never silent. Absent-on-the-row -> None
+            # here, same faithful-projection convention as every other field.
+            "normalization_notes": item.get("normalization_notes"),
+            "reason": reason,
+            # Issue #100: a structured sub-classification of `reason` --
+            # currently only "suspicious_control_characters", the one branch of
+            # `reason == "unnormalizable_input"` that is NOT about a tracked
+            # change and so must not get the tracked-change copy. Read off the
+            # persisted analysis artifact's `analysis_report` the SAME way
+            # `issues`/`critic_delta` above are (`normalize_input.
+            # build_unnormalizable_report` is the only writer, via
+            # `pipeline_runner._ANALYSIS_FIELDS`'s `analysis_report` entry --
+            # never a second DynamoDB column) -- absent (never a null
+            # placeholder) whenever there is no artifact, no `analysis_report`
+            # on it, or the refusal has no sub-classification, all of which the
+            # frontend's default `unnormalizable_input` copy already fits.
+            "reason_detail": (
+                (analysis.get("analysis_report") or {}).get("reason_detail")
+                if analysis is not None
+                else None
+            ),
+            # Target-agnostic stage-failure taxonomy (issue #258): the specific
+            # pipeline stage a failure occurred in, when
+            # `record_stage_failure` has written one.
+            "failing_stage": item.get("failing_stage"),
+            # Live progress (issue #447): which of the review spine's four
+            # user-visible sub-stages (primary_pass / critic_pass /
+            # reconciliation / redline -- scripts/review_spine.py's
+            # PROGRESS_STAGES) is running RIGHT NOW, written by
+            # pipeline_runner._write_progress_stage as each one starts. None on a
+            # review that has not reached the spine yet, on one whose runner
+            # predates this field, and on any deployment target that does not
+            # report progress -- the UI falls back to its honest indeterminate
+            # treatment rather than inventing a step. Same faithful-projection
+            # convention as every field above: this is a read of the row, never a
+            # computation of pipeline state (and emphatically never elapsed
+            # time).
+            "progress_stage": item.get("progress_stage"),
+            "message": STATUS_USER_MESSAGES.get(status_value),
+            "has_output": bool(item.get("output_s3_key")),
+            # Issue #449: whether the INPUT document is still identifiable from
+            # this row (the pointer, never the key itself -- same discipline as
+            # `has_output` directly above). False for every review created before
+            # the pointer was recorded; that is a truthful "not recorded", not a
+            # claim that the document is gone.
+            "has_input": bool(item.get("upload_s3_key")),
+            # Issue #499 ("Butter it"): whether a cover-note draft is already
+            # cached on this row -- a boolean pointer, never the draft text
+            # itself, same discipline as `has_output`/`has_input` above. Lets
+            # the UI show "cached, free to view" without a billed round trip
+            # just to find out.
+            "has_cover_note_draft": bool(item.get("cover_note_draft")),
+            "playbook_id": item.get("playbook_id"),
+            # Issue #449: WHICH MODELS RAN THIS REVIEW. Written at terminal-write
+            # time by pipeline_runner._write_real_terminal from the bundle metadata
+            # the spine actually resolved its primary/critic calls from. None for a
+            # review that predates the field, for the mock pipeline (which invokes
+            # no model at all), and for one that failed before the spine ran -- and
+            # deliberately NOT back-filled from today's configured model: a review
+            # run last week under a different model must never be relabelled with
+            # the one configured now (this gets sharper once an admin can change
+            # models). "Not recorded" is the honest answer; a guess is not.
+            "primary_model_id": item.get("primary_model_id"),
+            "critic_model_id": item.get("critic_model_id"),
+            # Issue #508/#514: what the PROVIDER said it served, beside what was
+            # asked for. Absent on every review predating the field, on the mock
+            # pipeline, and wherever the provider omitted it -- and absent is NOT
+            # a mismatch, which the reader-side comparison has to honour or the
+            # whole history of the product reads as suspicious.
+            "served_primary_model_id": item.get("served_primary_model_id"),
+            "served_critic_model_id": item.get("served_critic_model_id"),
+            # Issue #431: the per-review free-text guidance this review was
+            # submitted with, so the Review tab can show back (read-only) which
+            # instructions governed it. None for a review submitted without any
+            # -- and for every review created before that field was recorded --
+            # the same faithful-projection convention as every field above.
+            "toaster_guidance": item.get("toaster_guidance"),
+            # Issue #520: None on a review predating the field -- which is the
+            # honest answer, not a back-filled "external" that would claim the
+            # review was submitted under a mode nobody chose.
+            "notes_mode": item.get("notes_mode"),
+            # Issue #54: same convention -- None on a review predating the field
+            # or submitted at the default, never a back-filled "medium".
+            "markup_intensity": item.get("markup_intensity"),
+            # What this review cost: the estimate shown when it was submitted and
+            # the settled actual (`REVIEW_COST_ROW_FIELDS`). The detail route is
+            # owner-or-admin scoped above -- a non-owner gets the 404 before this
+            # projection exists -- and None means "not recorded" (a row from
+            # before the fields), never $0.00.
+            **{field: item.get(field) for field in REVIEW_COST_ROW_FIELDS},
+            "owner_sub": owner_sub,
+            "created_at": item.get("created_at"),
+            "updated_at": item.get("updated_at"),
+            # OPF §8 lineage (issue #287): admin/API visibility for a v2-bundle
+            # review's opf_content_hash / opf_section_digests_hash /
+            # opf_corpus_snapshot_hash. Absent-on-the-row -> None here too, same
+            # "faithful projection" convention as every other field above.
+            "opf_content_hash": item.get("opf_content_hash"),
+            "opf_section_digests_hash": item.get("opf_section_digests_hash"),
+            "opf_corpus_snapshot_hash": item.get("opf_corpus_snapshot_hash"),
+            # Issue #479 floor coverage: WHICH invariants were judged, which were
+            # violated, and which went unjudged. Projected alongside the lineage
+            # hashes above because the point of persisting the ids is that an
+            # operator looking at a quarantined row can see which invariant went
+            # unjudged, not merely that one did -- and a row-level attribute with
+            # no read surface cannot answer that. Absent-on-the-row -> None here,
+            # same faithful-projection convention as every other field.
+            "floor_judged_invariant_ids": item.get("floor_judged_invariant_ids"),
+            "floor_violated_invariant_ids": item.get("floor_violated_invariant_ids"),
+            "floor_unjudged_invariant_ids": item.get("floor_unjudged_invariant_ids"),
+            # Issue #471: the `playbook_versions` admin-facing version + content
+            # hash that gated this submission -- populated for the live,
+            # non-OPF playbook too (unlike the OPF-only fields above). Absent-
+            # on-the-row -> None here, same faithful-projection convention.
+            "playbook_version": item.get("playbook_version"),
+            "playbook_content_hash": item.get("playbook_content_hash"),
+            # Issue #482 (epic #481): the standing-instructions version + text
+            # hash that governed this review, if any -- same faithful-
+            # projection convention as every field above.
+            "instructions_version": item.get("instructions_version"),
+            "instructions_content_hash": item.get("instructions_content_hash"),
+            # Issue #294: the review's governed Posture-version override, if
+            # any. Absent-on-the-row -> None here too, same "faithful
+            # projection" convention as the fields above.
+            "posture_version": item.get("posture_version"),
+            # OPF 0.3: the review POLICY (prescriptive rules) that governed this
+            # document, alongside the playbook (descriptive precedent) above --
+            # including whether those rules had been approved when they were
+            # applied, which a hash alone does not say.
+            "policy_version": item.get("policy_version"),
+            "policy_hash": item.get("policy_hash"),
+            "policy_approval_status": item.get("policy_approval_status"),
+            # Whether a stop has been asked for and not yet taken effect. The UI
+            # needs this to say "stopping…" instead of leaving the reviewer
+            # pressing a button that looks like it did nothing: cancellation is
+            # cooperative, so the gap between the request and the terminal write
+            # is real and must be visible rather than hidden.
+            "cancel_requested": bool(item.get("cancel_requested_at")),
+            # Issue #486: the reviewer's OPTIONAL disposition capture -- NOT an
+            # approval gate (owner correction 2026-08-02: a lightweight "what
+            # happened with this one" record for the negotiating-history / eval
+            # feedback loop, never something this product enforces or nags
+            # about). `record_disposition` never touches `status`/`decision`
+            # above; these five keys are a faithful projection of whatever the
+            # row currently holds -- None on a review with nothing recorded yet,
+            # same convention as every field above.
+            #
+            # The issue's "What to build" asks for the disposition as "(value,
+            # who, when)"; this projects value + when
+            # (`attorney_disposition_recorded_at`) but deliberately no "who" --
+            # this route is owner-scoped (a caller can only ever record a
+            # disposition on their OWN review, or as an admin acting on someone
+            # else's), so "who recorded this" is never in question for the
+            # common case the way it would be on a shared/team surface. The
+            # actual actor IS captured, in the one place cross-user visibility
+            # matters: `review_routes.post_review_disposition`'s audit row
+            # (`actor=caller_sub`). This is a decision, not a miss -- adding
+            # `attorney_disposition_by` here would duplicate what the audit
+            # trail already answers authoritatively.
+            "attorney_disposition": item.get("attorney_disposition"),
+            "attorney_disposition_reason_codes": item.get("attorney_disposition_reason_codes"),
+            "attorney_disposition_topic_ids": item.get("attorney_disposition_topic_ids"),
+            "attorney_disposition_note": item.get("attorney_disposition_note"),
+            "attorney_disposition_recorded_at": item.get("attorney_disposition_recorded_at"),
+            "legal_triage_status": item.get("legal_triage_status"),
+        }
+    )
 
 
 class ReviewNotCancellableError(Exception):
@@ -4965,9 +4967,7 @@ _DIAGNOSTIC_NON_FAILURE_STATUSES = frozenset({REVIEW_STATUS_SUCCESS_TERMINAL, "S
 # The safety property of this route does not come from which ROWS are
 # selected -- it comes from `_RECENT_FAILURE_FIELDS` below, which is what
 # bounds the CONTENT that leaves the backend.
-DIAGNOSTIC_FAILURE_STATUSES = frozenset(
-    REVIEW_STATUSES_TERMINAL - _DIAGNOSTIC_NON_FAILURE_STATUSES
-)
+DIAGNOSTIC_FAILURE_STATUSES = frozenset(REVIEW_STATUSES_TERMINAL - _DIAGNOSTIC_NON_FAILURE_STATUSES)
 
 # Default and hard ceiling on how many rows the route will return. The cap is
 # not advisory: a caller-supplied `limit` is clamped into [1, MAX], so no
@@ -5068,9 +5068,7 @@ def _resolve_failure_reason(item: dict[str, Any]) -> Any:
     exactly the fields listed there, and the disclosure decision is unchanged
     -- every one of these values is an issue-#442 controlled token.
     """
-    return (
-        item.get("reason") or item.get("quarantine_reason") or item.get("analysis_report_reason")
-    )
+    return item.get("reason") or item.get("quarantine_reason") or item.get("analysis_report_reason")
 
 
 def list_recent_failures(
@@ -5137,9 +5135,7 @@ def list_recent_failures(
         # see it, since they store plain ints.
         json_safe(
             {
-                field: (
-                    _resolve_failure_reason(item) if field == "reason" else item.get(field)
-                )
+                field: (_resolve_failure_reason(item) if field == "reason" else item.get(field))
                 for field in _RECENT_FAILURE_FIELDS
             }
         )

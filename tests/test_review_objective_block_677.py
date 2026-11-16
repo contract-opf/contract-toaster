@@ -13,6 +13,7 @@ this was never a misbinding; it was a conformity objective doing what it said.
 These are PROMPT PINS: what the assembled prompt says, not what a model does
 with it. Model behaviour is measured live on #677, not asserted here.
 """
+
 from __future__ import annotations
 
 import sys
@@ -95,7 +96,9 @@ class TestCriticDuties(unittest.TestCase):
         """Issue #687: critic duty 2 specifically bars narrowing or mutualising."""
         duties = pp._CRITIC_TASKING_DUTIES_1_TO_3
         self.assertIn("narrowing, balancing, or mutualising a term that runs in our favour", duties)
-        self.assertIn("the counterparty has already agreed to it, whatever the drafting argument", duties)
+        self.assertIn(
+            "the counterparty has already agreed to it, whatever the drafting argument", duties
+        )
 
 
 class TestBindingAndRefusedAsks(unittest.TestCase):
@@ -123,8 +126,12 @@ class TestBindingAndRefusedAsks(unittest.TestCase):
     def test_a_refused_ask_renders_as_a_refusal_never_as_an_option(self) -> None:
         """Nothing beside wording we turned down may read as endorsement:
         it is rendered as refused, never with the signed-variant facts."""
-        entry = {"text": "SYNTHETIC refused wording", "n_deals": 2, "label": None,
-                 "ref": {"document_id": "deal-a", "version": 2, "clause_path": "1"}}
+        entry = {
+            "text": "SYNTHETIC refused wording",
+            "n_deals": 2,
+            "label": None,
+            "ref": {"document_id": "deal-a", "version": 2, "clause_path": "1"},
+        }
         refused = "\n".join(opf_prompt._fmt_refused_ask(entry, False, "test"))
         self.assertIn("refused in 2 deals", refused)
         for endorsement in ("signed in", "reached from our standard", "signed as proposed"):

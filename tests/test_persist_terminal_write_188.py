@@ -81,8 +81,14 @@ class FakeReviewsTable:
         if initial:
             self.items[initial["review_id"]] = dict(initial)
 
-    def update_item(self, Key, UpdateExpression, ConditionExpression=None,
-                     ExpressionAttributeNames=None, ExpressionAttributeValues=None):
+    def update_item(
+        self,
+        Key,
+        UpdateExpression,
+        ConditionExpression=None,
+        ExpressionAttributeNames=None,
+        ExpressionAttributeValues=None,
+    ):
         key = Key["review_id"]
         vals = ExpressionAttributeValues or {}
         current = self.items.get(key, {}).get("status")
@@ -195,8 +201,9 @@ class TestPersistTerminalWrite(unittest.TestCase):
         self.assertNotIn("output_s3_key", row)
 
     def test_error_row_is_not_clobbered(self) -> None:
-        reviews = FakeReviewsTable({"review_id": REVIEW_ID, "status": "ERROR",
-                                    "failing_stage": "redline"})
+        reviews = FakeReviewsTable(
+            {"review_id": REVIEW_ID, "status": "ERROR", "failing_stage": "redline"}
+        )
         event = {
             "review_id": REVIEW_ID,
             "decision": "REQUEST_CHANGE",

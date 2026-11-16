@@ -156,7 +156,10 @@ def check_4_policy_only_with_zero_rules_raises() -> list[str]:
     failures = []
     for name, policy in (
         ("no policy at all", None),
-        ("policy with an empty rules list", {"playbook_id": "acme-university", "version": 1, "rules": []}),
+        (
+            "policy with an empty rules list",
+            {"playbook_id": "acme-university", "version": 1, "rules": []},
+        ),
     ):
         try:
             _resolve_policy_only(policy=policy if policy is not None else {"rules": []})
@@ -203,17 +206,31 @@ def check_5_cache_breakpoint_on_last_static_block() -> list[str]:
             )
     for index, block in enumerate(blocks):
         if block.get("type") != "text" or not isinstance(block.get("text"), str):
-            failures.append(f"  [5] block[{index}] is not an Anthropic-shaped text block: {block!r}")
+            failures.append(
+                f"  [5] block[{index}] is not an Anthropic-shaped text block: {block!r}"
+            )
     return failures
 
 
 def main() -> int:
     checks = [
         ("1", "policy-only composes NO digest block", check_1_policy_only_composes_no_digest_block),
-        ("2", "lineage states the absence positively", check_2_lineage_states_the_absence_positively),
-        ("3", "undeclared policy-only raises, never degrades", check_3_undeclared_policy_only_raises),
+        (
+            "2",
+            "lineage states the absence positively",
+            check_2_lineage_states_the_absence_positively,
+        ),
+        (
+            "3",
+            "undeclared policy-only raises, never degrades",
+            check_3_undeclared_policy_only_raises,
+        ),
         ("4", "policy-only with zero rules raises", check_4_policy_only_with_zero_rules_raises),
-        ("5", "cache breakpoint on the last static block", check_5_cache_breakpoint_on_last_static_block),
+        (
+            "5",
+            "cache breakpoint on the last static block",
+            check_5_cache_breakpoint_on_last_static_block,
+        ),
     ]
 
     overall_pass = True

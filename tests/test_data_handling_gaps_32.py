@@ -44,13 +44,14 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DATA_HANDLING = REPO_ROOT / "docs" / "data-handling.md"
-THREAT_MODEL  = REPO_ROOT / "docs" / "threat-model.md"
-INFRA_DIR     = REPO_ROOT / "infra"
+THREAT_MODEL = REPO_ROOT / "docs" / "threat-model.md"
+INFRA_DIR = REPO_ROOT / "infra"
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _read(path: Path) -> str:
     if not path.exists():
@@ -70,6 +71,7 @@ def _find_ts_sources() -> list[Path]:
 # ---------------------------------------------------------------------------
 # Check 1 — "Derived corpus artifacts" classification row in data-handling.md
 # ---------------------------------------------------------------------------
+
 
 def check_1_derived_artifacts_row() -> list[str]:
     """data-handling.md must have a classification entry for derived corpus artifacts."""
@@ -102,8 +104,9 @@ def check_1_derived_artifacts_row() -> list[str]:
         )
 
     # Must reference the corpus key domain (the CMK that encrypts these stores).
-    if not re.search(r"corpus.*key|corpus.*cmk|corpus.*domain|corpus key domain",
-                     window, re.IGNORECASE):
+    if not re.search(
+        r"corpus.*key|corpus.*cmk|corpus.*domain|corpus key domain", window, re.IGNORECASE
+    ):
         failures.append(
             "  docs/data-handling.md: derived-corpus-artifacts entry does not "
             "reference the corpus key domain (CMK encryption)."
@@ -130,7 +133,7 @@ def check_1_derived_artifacts_row() -> list[str]:
 
 # Minimum required subprocessors named.
 _REQUIRED_SUBPROCESSORS = [
-    ("AWS",    re.compile(r"\bAWS\b|Amazon Web Services")),
+    ("AWS", re.compile(r"\bAWS\b|Amazon Web Services")),
     ("Google", re.compile(r"\bGoogle\b")),
     ("GitHub", re.compile(r"\bGitHub\b")),
 ]
@@ -178,6 +181,7 @@ def check_2_subprocessor_section() -> list[str]:
 # Check 3 — AV implementation named in threat-model.md
 # ---------------------------------------------------------------------------
 
+
 def check_3_av_implementation_named() -> list[str]:
     """threat-model.md AV control must name a concrete implementation."""
     failures: list[str] = []
@@ -192,9 +196,7 @@ def check_3_av_implementation_named() -> list[str]:
         re.IGNORECASE | re.DOTALL,
     )
     if not section_match:
-        failures.append(
-            "  docs/threat-model.md: missing 'Hostile file uploads' section."
-        )
+        failures.append("  docs/threat-model.md: missing 'Hostile file uploads' section.")
         return failures
 
     section = section_match.group(1)
@@ -205,13 +207,13 @@ def check_3_av_implementation_named() -> list[str]:
     # The gap: the current text just says "antivirus-scanned" with no named tool.
     av_implementation_pattern = re.compile(
         r"(?:"
-        r"ClamAV|clam.?av"                          # common in-account scanner
-        r"|Lambda.*scan|scan.*Lambda"               # Lambda-based in-account
-        r"|in.account.*scan|scan.*in.account"       # explicit in-account wording
-        r"|telemetry.*disabled|disabled.*telemetry" # telemetry-disabled cloud scan
+        r"ClamAV|clam.?av"  # common in-account scanner
+        r"|Lambda.*scan|scan.*Lambda"  # Lambda-based in-account
+        r"|in.account.*scan|scan.*in.account"  # explicit in-account wording
+        r"|telemetry.*disabled|disabled.*telemetry"  # telemetry-disabled cloud scan
         r"|GC.approved.*subprocessor|subprocessor.*GC.approved"  # explicit approval
-        r"|named.*AV.*vendor|AV.*vendor.*named"    # named AV vendor
-        r"|in.process.*scan|scan.*in.process"       # in-process wording
+        r"|named.*AV.*vendor|AV.*vendor.*named"  # named AV vendor
+        r"|in.process.*scan|scan.*in.process"  # in-process wording
         r")",
         re.IGNORECASE,
     )
@@ -231,15 +233,14 @@ def check_3_av_implementation_named() -> list[str]:
 # Check 4 — Infra: corpus key covers S3 Vectors + clause-text store
 # ---------------------------------------------------------------------------
 
+
 def check_4_corpus_key_covers_vector_store() -> list[str]:
     """infra/ sources must confirm corpus key covers S3 Vectors + clause-text store."""
     failures: list[str] = []
 
     ts_files = _find_ts_sources()
     if not ts_files:
-        failures.append(
-            "  infra/: no TypeScript source files found under infra/lib or infra/bin."
-        )
+        failures.append("  infra/: no TypeScript source files found under infra/lib or infra/bin.")
         return failures
 
     all_ts = "\n".join(f.read_text(encoding="utf-8") for f in ts_files)
@@ -277,6 +278,7 @@ def check_4_corpus_key_covers_vector_store() -> list[str]:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> int:
     checks = [

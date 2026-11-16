@@ -93,7 +93,10 @@ def _run_synth(context_args: list[str]) -> subprocess.CompletedProcess:
     if not node_modules.is_dir():
         print("  (node_modules absent — running npm install first …)")
         install = subprocess.run(
-            ["npm", "install"], cwd=INFRA, capture_output=True, text=True  # noqa: S607
+            ["npm", "install"],  # noqa: S607
+            cwd=INFRA,
+            capture_output=True,
+            text=True,
         )
         if install.returncode != 0:
             raise RuntimeError(
@@ -133,6 +136,7 @@ def _resources_of_type(template: dict, cfn_type: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 # MINIMAL profile checks
 # ---------------------------------------------------------------------------
+
 
 def check_minimal() -> list[str]:
     print("\n--- profile=minimal ---")
@@ -250,6 +254,7 @@ def check_minimal() -> list[str]:
 # HARDENED (default) profile checks — must remain byte-for-byte unchanged.
 # ---------------------------------------------------------------------------
 
+
 def check_hardened_unchanged() -> list[str]:
     print("\n--- profile=hardened (default; no --context profile=… passed) ---")
     failures: list[str] = []
@@ -351,6 +356,7 @@ def check_hardened_unchanged() -> list[str]:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> int:
     print("Minimal deploy profile structural gate (issue #231)")

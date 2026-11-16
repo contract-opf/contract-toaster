@@ -64,8 +64,9 @@ const DOCUMENT_ESTIMATE = {
 
 describe('parseCostEstimate', () => {
   it('reads the figure, its range, the basis and the sample', () => {
-    expect(parseCostEstimate({ ...DOCUMENT_ESTIMATE, estimate_basis: 'measured', sample_size: 12 }))
-      .toEqual({ cents: 80, lowCents: 60, highCents: 110, basis: 'measured', sampleSize: 12 });
+    expect(
+      parseCostEstimate({ ...DOCUMENT_ESTIMATE, estimate_basis: 'measured', sample_size: 12 }),
+    ).toEqual({ cents: 80, lowCents: 60, highCents: 110, basis: 'measured', sampleSize: 12 });
   });
 
   it('is no estimate for anything that is not a positive number of cents', () => {
@@ -105,8 +106,9 @@ describe('parseCostEstimate', () => {
   });
 
   it('ignores a basis outside the closed vocabulary', () => {
-    expect(parseCostEstimate({ ...DOCUMENT_ESTIMATE, estimate_basis: 'anthropic/claude' })?.basis)
-      .toBeNull();
+    expect(
+      parseCostEstimate({ ...DOCUMENT_ESTIMATE, estimate_basis: 'anthropic/claude' })?.basis,
+    ).toBeNull();
   });
 });
 
@@ -208,7 +210,10 @@ describe('fetchCostEstimate', () => {
   });
 
   it('never throws: a failed read, a non-2xx and a malformed body are all null', async () => {
-    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('offline'))));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new Error('offline'))),
+    );
     expect(await fetchCostEstimate('nda', 100)).toBeNull();
     stub({}, false);
     expect(await fetchCostEstimate('nda', 100)).toBeNull();
@@ -323,9 +328,8 @@ describe('the projected cost', () => {
 
   it('settles with no estimate to compare when none was captured', () => {
     expect(
-      toReviewModel(
-        baseState({ capturedReviewCostUsdCents: null, actualReviewCostUsdCents: 95 }),
-      ).cost,
+      toReviewModel(baseState({ capturedReviewCostUsdCents: null, actualReviewCostUsdCents: 95 }))
+        .cost,
     ).toEqual({ kind: 'settled', cents: 95, settlementComplete: true, failed: false });
   });
 
@@ -374,9 +378,9 @@ describe('the console copy', () => {
     expect(costNote({ kind: 'settled', cents: 95, settlementComplete: true })).toBe(
       'Final cost $0.95.',
     );
-    expect(
-      costNote({ kind: 'settled', cents: 55, settlementComplete: true, failed: true }),
-    ).toBe('Final cost $0.55. This review failed; that is what the attempt still cost.');
+    expect(costNote({ kind: 'settled', cents: 55, settlementComplete: true, failed: true })).toBe(
+      'Final cost $0.55. This review failed; that is what the attempt still cost.',
+    );
     expect(costNote({ kind: 'settled', cents: 0, settlementComplete: true, failed: true })).toBe(
       'Final cost $0.00. This review failed; that is what the attempt still cost.',
     );
@@ -436,7 +440,9 @@ describe('the rendered console', () => {
       '$0.80',
     );
     expect(screen.getByTestId('review-cost-range').textContent).toBe('Typically $0.60–$1.10.');
-    expect(document.body.textContent).toContain('Based on this document and the active model policy.');
+    expect(document.body.textContent).toContain(
+      'Based on this document and the active model policy.',
+    );
     const text = (document.body.textContent ?? '').toLowerCase();
     expect(text).not.toContain('up to');
     expect(text).not.toContain('maximum');
@@ -472,9 +478,12 @@ describe('the rendered console', () => {
   });
 
   it('shows a failed review that made no model call as a real $0.00', () => {
-    renderConsole({ kind: 'settled', cents: 0, settlementComplete: true, failed: true }, {
-      status: 'ERROR',
-    });
+    renderConsole(
+      { kind: 'settled', cents: 0, settlementComplete: true, failed: true },
+      {
+        status: 'ERROR',
+      },
+    );
     expect(screen.getByTestId('review-cost-estimate').querySelector('output')?.textContent).toBe(
       '$0.00',
     );
@@ -512,13 +521,16 @@ describe('History rows', () => {
   });
 
   function stubList(rows: HistoryRow[]): void {
-    // eslint-disable-next-line @typescript-eslint/require-await
-    vi.stubGlobal('fetch', vi.fn(async () => ({
-      ok: true,
-      status: 200,
+    vi.stubGlobal(
+      'fetch',
       // eslint-disable-next-line @typescript-eslint/require-await
-      json: async () => ({ reviews: rows }),
-    })));
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        // eslint-disable-next-line @typescript-eslint/require-await
+        json: async () => ({ reviews: rows }),
+      })),
+    );
   }
 
   it('shows estimated against actual, just the actual, and nothing, as each row warrants', async () => {

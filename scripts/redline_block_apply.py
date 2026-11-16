@@ -411,6 +411,7 @@ def _xml_illegal_detail(text: str) -> Optional[str]:  # noqa: UP045
         f"(first at offset {found[0]}), so it cannot be written into the document"
     )
 
+
 # The whole-block ops this module compiles, bound to the single definition
 # in `block_transcript` (the module that owns the transcript vocabulary and
 # normalizes an incoming op to exactly these names).
@@ -1487,9 +1488,7 @@ def _retag_run_as_deleted(run: ET.Element) -> None:
             element.tag = replacement
 
 
-def _delete_runs_in(
-    container: ET.Element, allocate, author: str, timestamp_iso: str
-) -> list[int]:
+def _delete_runs_in(container: ET.Element, allocate, author: str, timestamp_iso: str) -> list[int]:
     """Wrap every run under `container` in a `<w:del>`, deepest wrappers
     included, and return the revision ids created.
 
@@ -1844,9 +1843,7 @@ def inject_issue_footnotes(
             for revision_id in spec["revision_ids"]
             if int(revision_id) in ins_by_id
         ]
-        target = (
-            ins_by_id[min(owned, key=lambda rid: ins_position[rid])] if owned else None
-        )
+        target = ins_by_id[min(owned, key=lambda rid: ins_position[rid])] if owned else None
         if target is None:
             # No insertion of this issue's survived into the document (a
             # delete-only edit). Nothing to hang a reference on; skip rather
@@ -2210,7 +2207,9 @@ def apply_block_transcript(
         target_block_id = _block_op_block_id(block_op)
         unsafe = _xml_illegal_detail(edit.get("insert_text") or "")
         if unsafe is not None:
-            failures.append(_failure(edit, target_block_id, REASON_INSERT_TEXT_NOT_XML_SAFE, unsafe))
+            failures.append(
+                _failure(edit, target_block_id, REASON_INSERT_TEXT_NOT_XML_SAFE, unsafe)
+            )
             continue
         from_start = (
             block_op["op"] == OP_INSERT_BLOCK_AFTER
@@ -2430,7 +2429,9 @@ def apply_block_transcript(
     phase_one_ids: set[int] = set()
 
     def record(
-        edit: dict[str, Any], revision_ids, specs: Optional[list[dict[str, Any]]] = None  # noqa: UP045
+        edit: dict[str, Any],
+        revision_ids,
+        specs: Optional[list[dict[str, Any]]] = None,  # noqa: UP045
     ) -> None:
         # `specs` is what actually LANDED in the document, for the projection
         # gate. It is the edit itself unless issue #97 cut the edit at a tab,
@@ -2631,9 +2632,7 @@ def apply_block_transcript(
             # Only the replacements that ACTUALLY applied moved anything;
             # one that failed closed left the paragraph exactly as it was.
             done = [
-                edit
-                for edit in replacement_work.get(paragraph_index, [])
-                if edit.get("_applied")
+                edit for edit in replacement_work.get(paragraph_index, []) if edit.get("_applied")
             ]
             for edit in sorted(
                 insertion_work[paragraph_index], key=lambda e: e["local_start"], reverse=True
@@ -2735,9 +2734,7 @@ def apply_block_transcript(
                     continue
                 # `"start"` inserts BEFORE the first block's first `<w:p>`;
                 # every other anchor inserts after its LAST one.
-                position = list(parent).index(anchor_paragraph) + (
-                    0 if op["insert_before"] else 1
-                )
+                position = list(parent).index(anchor_paragraph) + (0 if op["insert_before"] else 1)
             else:
                 parent, previous = cursor
                 position = list(parent).index(previous) + 1
@@ -2820,11 +2817,7 @@ def apply_block_transcript(
         docx_bytes,
         working_bytes,
         proven,
-        revision_ids={
-            revision_id
-            for ids in revision_ids_by_issue.values()
-            for revision_id in ids
-        },
+        revision_ids={revision_id for ids in revision_ids_by_issue.values() for revision_id in ids},
         applied_edits=applied_edit_specs,
     )
     if projection_report["status"] != "verified":
@@ -2833,8 +2826,7 @@ def apply_block_transcript(
             None,
             REASON_PROJECTION_VERIFICATION_FAILED,
             "; ".join(
-                f"[{entry['proof']}] {entry['detail']}"
-                for entry in projection_report["failures"]
+                f"[{entry['proof']}] {entry['detail']}" for entry in projection_report["failures"]
             ),
         )
         # Say WHICH proof rejected the document, structurally, not only in

@@ -638,9 +638,7 @@ def _normalize_paragraph(paragraph: dict) -> dict:
     # more than one pending cluster/author, nor a pending change inside a
     # field code, fail closed on their own any more.
 
-    inside_field_code = [
-        rev for rev in pending_tracked_changes if rev.get("inside_field_code")
-    ]
+    inside_field_code = [rev for rev in pending_tracked_changes if rev.get("inside_field_code")]
 
     # ACCEPT-ALL. Per issue #199, the pending counterparty revision IS the
     # proposal under review; the downstream standard-form diff recovers what
@@ -741,10 +739,7 @@ def _normalize_paragraph(paragraph: dict) -> dict:
             if len(quoted) == 1:
                 note += f" The field now resolves to {quoted[0]}."
             else:
-                note += (
-                    f" The fields now resolve to "
-                    f"{', '.join(quoted[:-1])} and {quoted[-1]}."
-                )
+                note += f" The fields now resolve to {', '.join(quoted[:-1])} and {quoted[-1]}."
     elif len(pending_tracked_changes) > 1:
         authors = {rev.get("author") for rev in pending_tracked_changes}
         note = (
@@ -790,9 +785,7 @@ def _normalize_paragraph(paragraph: dict) -> dict:
             }
         )
 
-    return _disclose_paragraph_marks(
-        {"normalizable": True, "clean_text": clean_text, "note": note}
-    )
+    return _disclose_paragraph_marks({"normalizable": True, "clean_text": clean_text, "note": note})
 
 
 def normalize(document: dict) -> dict:
@@ -907,8 +900,7 @@ def build_unnormalizable_report(normalize_result: dict) -> dict:
         "report_type": "analysis_report",
         "reason": "unnormalizable_input",
         "fail_closed_path": (
-            "The normalization pass could not produce a clean, unambiguous "
-            "document body."
+            "The normalization pass could not produce a clean, unambiguous document body."
         ),
         "changes_not_applied": [],
         "normalization_notes": normalize_result.get("normalization_notes", ""),

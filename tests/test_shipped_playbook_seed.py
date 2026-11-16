@@ -137,8 +137,14 @@ class FakeReviewsTable:
     def __init__(self, status: str = "PENDING"):
         self.item: dict[str, Any] = {"review_id": REVIEW_ID, "status": status}
 
-    def update_item(self, Key, UpdateExpression, ConditionExpression=None,
-                     ExpressionAttributeNames=None, ExpressionAttributeValues=None):
+    def update_item(
+        self,
+        Key,
+        UpdateExpression,
+        ConditionExpression=None,
+        ExpressionAttributeNames=None,
+        ExpressionAttributeValues=None,
+    ):
         names = ExpressionAttributeNames or {}
         values = ExpressionAttributeValues or {}
         cur_status = self.item.get("status")
@@ -173,8 +179,9 @@ class FakePlaybooksTable:
     def put_item(self, Item, ConditionExpression=None):  # noqa: ARG002 - audit writes are conditional (W6.1); moto covers the condition
         self.items[Item["playbook_id"]] = dict(Item)
 
-    def update_item(self, Key, UpdateExpression, ExpressionAttributeNames=None,
-                    ExpressionAttributeValues=None):
+    def update_item(
+        self, Key, UpdateExpression, ExpressionAttributeNames=None, ExpressionAttributeValues=None
+    ):
         """`playbook_versions.rename_playbook` / `remove_playbook` set the
         catalog override attributes (`display_name`, `removed`) on this row,
         and `sample_playbooks.seed_shipped_playbook` writes
@@ -246,7 +253,9 @@ class FakePlaybookVersionsTable:
         item = self.items.get((Key["playbook_id"], Key["version"]))
         return {"Item": item} if item else {}
 
-    def update_item(self, Key, UpdateExpression, ExpressionAttributeNames=None, ExpressionAttributeValues=None):
+    def update_item(
+        self, Key, UpdateExpression, ExpressionAttributeNames=None, ExpressionAttributeValues=None
+    ):
         key = (Key["playbook_id"], Key["version"])
         item = self.items.setdefault(key, dict(Key))
         names = ExpressionAttributeNames or {}
@@ -529,9 +538,7 @@ class TestShippedPlaybookIsRealContent(unittest.TestCase):
         raw = playbook_registry.load_registry()["playbooks"]
         self.assertNotIn("bundled_sample", raw[PLAYBOOK_ID])
         self.assertNotIn("bundled_sample", json.dumps(raw))
-        self.assertFalse(
-            hasattr(playbook_registry.resolve_playbook(PLAYBOOK_ID), "bundled_sample")
-        )
+        self.assertFalse(hasattr(playbook_registry.resolve_playbook(PLAYBOOK_ID), "bundled_sample"))
 
     def test_sample_validates_against_the_runtime_schema(self):
         doc = playbook_validation.load_and_validate_playbook(PLAYBOOK_ID)
@@ -640,7 +647,9 @@ class TestFreshDeploySeed(unittest.TestCase):
         as the admin-editable `notes` that `GET /api/playbooks` reads."""
         ddb = FakeDDB(FakeReviewsTable())
         entry = playbook_registry.resolve_playbook(PLAYBOOK_ID)
-        self.assertTrue(entry.seed_notes, "registry entry must carry seed_notes to prove anything here")
+        self.assertTrue(
+            entry.seed_notes, "registry entry must carry seed_notes to prove anything here"
+        )
 
         result = _seed(ddb)
 
@@ -686,8 +695,7 @@ class TestFreshDeploySeed(unittest.TestCase):
         self.assertEqual(
             reviews_module._read_active_release_bundle_hash(PLAYBOOK_ID, ddb),
             seed_active_bundle.compute_seed_hash(PLAYBOOK_ID),
-            "FRESH DEPLOY ACTIVE: False -- the bootstrap did not leave the "
-            "shipped playbook active",
+            "FRESH DEPLOY ACTIVE: False -- the bootstrap did not leave the shipped playbook active",
         )
         self.assertEqual(
             ddb._playbook_versions.items[(PLAYBOOK_ID, sample_playbooks._SEED_VERSION)]["status"],
@@ -864,15 +872,11 @@ class TestSeededPlaybookRenameAndRemove(unittest.TestCase):
     reaches the catalog."""
 
     def _catalog(self, ddb):
-        return review_routes._load_playbook_catalog(
-            review_routes.PLAYBOOK_REGISTRY_PATH, ddb
-        )
+        return review_routes._load_playbook_catalog(review_routes.PLAYBOOK_REGISTRY_PATH, ddb)
 
     def _entry(self, ddb, playbook_id=None):
         target = playbook_id or PLAYBOOK_ID
-        return next(
-            (row for row in self._catalog(ddb) if row["playbook_id"] == target), None
-        )
+        return next((row for row in self._catalog(ddb) if row["playbook_id"] == target), None)
 
     def test_rename_overrides_the_shipped_display_name_in_the_catalog(self):
         ddb = FakeDDB(FakeReviewsTable())
@@ -952,13 +956,9 @@ class TestSeededPlaybookRenameAndRemove(unittest.TestCase):
             ddb._playbook_versions.items[(PLAYBOOK_ID, "1.1.0")]["status"], pv.STATUS_ACTIVE
         )
 
-        pv.rollback_playbook_version(
-            PLAYBOOK_ID, sample_playbooks._SEED_VERSION, "admin-1", ddb
-        )
+        pv.rollback_playbook_version(PLAYBOOK_ID, sample_playbooks._SEED_VERSION, "admin-1", ddb)
         self.assertEqual(
-            ddb._playbook_versions.items[(PLAYBOOK_ID, sample_playbooks._SEED_VERSION)][
-                "status"
-            ],
+            ddb._playbook_versions.items[(PLAYBOOK_ID, sample_playbooks._SEED_VERSION)]["status"],
             pv.STATUS_ACTIVE,
         )
 
@@ -1028,9 +1028,10 @@ class TestSeededPlaybookRunsRealReviews(unittest.TestCase):
         docx_bytes = _build_docx_bytes()
         s3 = FakeS3({f"uploads/user-1/{REVIEW_ID}/in.docx": docx_bytes})
 
-        with patch.object(pr, "_settle_reservation") as settle, patch.object(
-            pr, "_load_playbook_bundle"
-        ) as load_bundle:
+        with (
+            patch.object(pr, "_settle_reservation") as settle,
+            patch.object(pr, "_load_playbook_bundle") as load_bundle,
+        ):
             pr.run_real_pipeline(
                 REVIEW_ID,
                 _payload("some-hash-that-was-never-activated"),

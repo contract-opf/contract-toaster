@@ -58,7 +58,9 @@ WHEN = "2026-01-01T00:00:00Z"
 
 
 def _two_edit_transcript(bad_insert: str) -> tuple[bytes, dict]:
-    doc = docx(heading("1. Fees") + p(r("Pay in 30 days.")) + heading("2. Term") + p(r("Lasts 12 months.")))
+    doc = docx(
+        heading("1. Fees") + p(r("Pay in 30 days.")) + heading("2. Term") + p(r("Lasts 12 months."))
+    )
     block_map = stage.build_block_map(stage.extract_and_normalize(doc)["paragraphs"])
     patches = [
         {
@@ -90,7 +92,10 @@ def test_an_xml_illegal_insert_fails_only_its_own_edit() -> None:
         doc, proven = _two_edit_transcript(bad)
         result = rba.apply_block_transcript(doc, proven, author=AUTHOR, timestamp_iso=WHEN)
         assert result["docx_bytes"] is not None, (repr(bad), result["failures"])
-        assert [a.get("issue_key") for a in result["applied"]] == ["good"], (repr(bad), result["applied"])
+        assert [a.get("issue_key") for a in result["applied"]] == ["good"], (
+            repr(bad),
+            result["applied"],
+        )
         assert [(f["issue_key"], f["reason"]) for f in result["failures"]] == [
             ("bad", rba.REASON_INSERT_TEXT_NOT_XML_SAFE)
         ], (repr(bad), result["failures"])
@@ -102,15 +107,28 @@ def test_xml_legal_but_awkward_text_still_lands() -> None:
     for fine in ("45 <b> & co", "45 ]]>", "45\ttabbed", "45 \u00e9\u20ac\U0001f600"):
         doc, proven = _two_edit_transcript(fine)
         result = rba.apply_block_transcript(doc, proven, author=AUTHOR, timestamp_iso=WHEN)
-        assert result["docx_bytes"] is not None and not result["failures"], (repr(fine), result["failures"])
+        assert result["docx_bytes"] is not None and not result["failures"], (
+            repr(fine),
+            result["failures"],
+        )
 
 
 def test_an_xml_illegal_block_insert_fails_only_itself() -> None:
     doc = docx(heading("1. Fees") + p(r("Pay in 30 days.")))
     block_map = stage.build_block_map(stage.extract_and_normalize(doc)["paragraphs"])
     ops = [
-        {"op": "insert_block_after", "anchor_block_id": "p0001", "new_text": "New\x01 clause.", "issue_key": "bad"},
-        {"op": "insert_block_after", "anchor_block_id": "p0001", "new_text": "A clean clause.", "issue_key": "good"},
+        {
+            "op": "insert_block_after",
+            "anchor_block_id": "p0001",
+            "new_text": "New\x01 clause.",
+            "issue_key": "bad",
+        },
+        {
+            "op": "insert_block_after",
+            "anchor_block_id": "p0001",
+            "new_text": "A clean clause.",
+            "issue_key": "good",
+        },
     ]
     proven = bt.validate_block_patches([], ops, block_map)
     assert proven["status"] == "proven", proven["failures"]
@@ -136,7 +154,8 @@ HDR_CT = "application/vnd.openxmlformats-officedocument.wordprocessingml.header+
 def _package(body: str, parts: dict[str, tuple[str, str, str]]) -> bytes:
     """`parts`: rId -> (part file under word/, relationship kind, text)."""
     rels = "".join(
-        f'<Relationship Id="{rid}" Type="{REL}/{kind}" Target="{name}"/>' for rid, (name, kind, _t) in parts.items()
+        f'<Relationship Id="{rid}" Type="{REL}/{kind}" Target="{name}"/>'
+        for rid, (name, kind, _t) in parts.items()
     )
     overrides = "".join(
         f'<Override PartName="/word/{name}" ContentType="{HDR_CT.replace("header", kind)}"/>'
@@ -144,7 +163,9 @@ def _package(body: str, parts: dict[str, tuple[str, str, str]]) -> bytes:
     )
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("[Content_Types].xml", CONTENT_TYPES.replace("</Types>", overrides + "</Types>"))
+        zf.writestr(
+            "[Content_Types].xml", CONTENT_TYPES.replace("</Types>", overrides + "</Types>")
+        )
         zf.writestr("_rels/.rels", PACKAGE_RELS)
         zf.writestr(
             "word/_rels/document.xml.rels",
@@ -152,7 +173,10 @@ def _package(body: str, parts: dict[str, tuple[str, str, str]]) -> bytes:
         )
         for name, kind, text in parts.values():
             tag = "hdr" if kind == "header" else "ftr"
-            zf.writestr(f"word/{name}", f"<?xml version=\"1.0\"?><w:{tag} {W_R}><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:{tag}>")
+            zf.writestr(
+                f"word/{name}",
+                f'<?xml version="1.0"?><w:{tag} {W_R}><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:{tag}>',
+            )
         zf.writestr(
             "word/document.xml",
             f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document {W_R}><w:body>{body}</w:body></w:document>',
@@ -184,7 +208,9 @@ def test_the_qa_repro_wires_no_second_default_header() -> None:
         "<w:p><w:r><w:t>Section two text.</w:t></w:r></w:p>"
         '<w:sectPr><w:headerReference w:type="default" r:id="rId9"/><w:pgSz w:w="12240" w:h="15840"/></w:sectPr>'
     )
-    sections, parts = _marked(_package(body, {"rId9": ("header2.xml", "header", "SYNTHETIC HEADER")}))
+    sections, parts = _marked(
+        _package(body, {"rId9": ("header2.xml", "header", "SYNTHETIC HEADER")})
+    )
     assert len(sections) == 2, sections
     for section in sections:
         assert _default_refs(section, "header") == ["rId9"], section
@@ -205,7 +231,9 @@ def test_only_sections_that_show_no_header_are_wired() -> None:
         "<w:r><w:t>Two.</w:t></w:r></w:p>"
         "<w:p><w:r><w:t>Three.</w:t></w:r></w:p><w:sectPr/>"
     )
-    sections, parts = _marked(_package(body, {"rId5": ("header7.xml", "header", "SECTION TWO HEADER")}))
+    sections, parts = _marked(
+        _package(body, {"rId5": ("header7.xml", "header", "SECTION TWO HEADER")})
+    )
     assert len(sections) == 3, sections
     new_rids = _default_refs(sections[0], "header")
     assert len(new_rids) == 1 and new_rids != ["rId5"], sections[0]

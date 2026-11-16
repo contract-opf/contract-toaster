@@ -66,7 +66,9 @@ function postureMessages(code: string, rules: Linter.RulesRecord): Linter.LintMe
   );
   const fatal = messages.filter((m) => m.fatal);
   expect(fatal, `probe failed to parse: ${code}`).toEqual([]);
-  return messages.filter((m) => m.ruleId !== null && (POSTURE_RULES as readonly string[]).includes(m.ruleId));
+  return messages.filter(
+    (m) => m.ruleId !== null && (POSTURE_RULES as readonly string[]).includes(m.ruleId),
+  );
 }
 
 // Every one of these slips past SETITEM_RE (or is not a setItem at all) and
@@ -77,12 +79,12 @@ const STORAGE_BYPASSES: Record<string, string> = {
   'template-literal key': 'globalThis[`sessionStorage`].setItem("k", "v");',
   'optional-chained': `window?.localStorage?.setItem('k', 'v');`,
   'aliased object': `const s = window.sessionStorage; s.setItem('k', 'v');`,
-  'destructured': `const { localStorage: ls } = window; ls.setItem('k', 'v');`,
+  destructured: `const { localStorage: ls } = window; ls.setItem('k', 'v');`,
   'computed key built at runtime': `const k = 'local' + 'Storage'; window[k].setItem('a', 'b');`,
   'Reflect over window': `Reflect.get(window, 'local' + 'Storage');`,
   'Storage.prototype': `Storage.prototype.setItem.call(null, 'k', 'v');`,
   'aliased Storage': `const S = Storage; S.prototype.setItem('k', 'v');`,
-  'IndexedDB': `window.indexedDB.open('db');`,
+  IndexedDB: `window.indexedDB.open('db');`,
   'document.cookie': `document.cookie = 'a=b';`,
   'bracketed cookie': `document['cookie'] = 'a=b';`,
   'aliased document cookie': `const d = document; d.cookie = 'a=b';`,
@@ -161,7 +163,9 @@ describe('eslint posture rules — the per-file overrides do not widen', () => {
   it('inflightReview.ts gets sessionStorage, and not localStorage', async () => {
     const rules = await postureRulesFor('src/inflightReview.ts');
     expect(postureMessages(`window.sessionStorage.setItem('k', 'v');`, rules)).toEqual([]);
-    expect(postureMessages(`window.localStorage.setItem('k', 'v');`, rules).length).toBeGreaterThan(0);
+    expect(postureMessages(`window.localStorage.setItem('k', 'v');`, rules).length).toBeGreaterThan(
+      0,
+    );
   });
 
   it('a storage test file loses only the storage rules — HTML sinks still fail', async () => {
@@ -177,7 +181,10 @@ describe('eslint posture rules — the per-file overrides do not widen', () => {
     // STORAGE_TEST_FILES: no glob may have widened the overrides to them.
     for (const probe of ['src/lastPlaybookExtra.ts', 'src/__tests__/some-new.test.tsx']) {
       const rules = await postureRulesFor(probe);
-      expect(postureMessages(`window.localStorage.setItem('k', 'v');`, rules).length, probe).toBeGreaterThan(0);
+      expect(
+        postureMessages(`window.localStorage.setItem('k', 'v');`, rules).length,
+        probe,
+      ).toBeGreaterThan(0);
     }
   });
 
@@ -189,7 +196,10 @@ describe('eslint posture rules — the per-file overrides do not widen', () => {
       .map((f) => f.replace(/^src\//, ''))
       .sort();
 
-    const postureSource = fs.readFileSync(path.join(testsDir, 'security-posture.test.tsx'), 'utf-8');
+    const postureSource = fs.readFileSync(
+      path.join(testsDir, 'security-posture.test.tsx'),
+      'utf-8',
+    );
     const block = /const ALLOWED_SETITEM_FILES = \[([\s\S]*?)\];/.exec(postureSource);
     expect(block, 'ALLOWED_SETITEM_FILES not found in security-posture.test.tsx').not.toBeNull();
     const testAllowed = [...(block as RegExpExecArray)[1].matchAll(/'([^']+)'/g)]

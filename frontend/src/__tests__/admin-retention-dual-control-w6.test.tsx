@@ -176,7 +176,9 @@ describe('AdminRetention W6.7 — the pending reduction', () => {
     expect(callsTo(fetchMock, 'POST', '/api/admin/retention/pending/p-1/confirm')).toHaveLength(0);
     fireEvent.click(confirm); // confirm
     await waitFor(() => {
-      expect(callsTo(fetchMock, 'POST', '/api/admin/retention/pending/p-1/confirm')).toHaveLength(1);
+      expect(callsTo(fetchMock, 'POST', '/api/admin/retention/pending/p-1/confirm')).toHaveLength(
+        1,
+      );
     });
   });
 });

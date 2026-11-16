@@ -99,7 +99,9 @@ class FakeSfnClient:
         if name in self.started_names:
             raise self.exceptions.ExecutionAlreadyExists()
         self.started_names.add(name)
-        return {"executionArn": f"{stateMachineArn.replace(':stateMachine:', ':execution:')}:{name}"}
+        return {
+            "executionArn": f"{stateMachineArn.replace(':stateMachine:', ':execution:')}:{name}"
+        }
 
 
 def real_eiaa_content_hash() -> str:
@@ -130,6 +132,7 @@ def real_eiaa_content_hash() -> str:
 # uses real moto (see ActiveBundleResolverTestBase) because it only touches
 # get_item/put_item/update_item shapes moto handles fine.
 # ---------------------------------------------------------------------------
+
 
 class FakeTable:
     """A tiny in-memory stand-in for a boto3 DynamoDB Table resource."""
@@ -253,6 +256,7 @@ class ActiveBundleResolverTestBase(unittest.TestCase):
 
 # -- (1) resolver resolves + records the hash exactly as submit_review expects --
 
+
 class TestResolverReadsPlaybooksTable(ActiveBundleResolverTestBase):
     def test_resolver_reads_the_playbooks_table_attribute_directly(self):
         """The resolver must read playbooks.active_release_bundle_hash --
@@ -310,6 +314,7 @@ class TestResolverComposesWithSubmitReview(unittest.TestCase):
 
 # -- (2) no active bundle -> 503 "no active playbook", nothing faked --------
 
+
 class TestNoActiveBundleRefusal(ActiveBundleResolverTestBase):
     def test_refuses_with_503_no_active_playbook_when_table_empty(self):
         sfn = FakeSfnClient()
@@ -346,6 +351,7 @@ class TestNoActiveBundleRefusal(ActiveBundleResolverTestBase):
 
 
 # -- (3) pipeline verify step actually verifies ------------------------------
+
 
 class TestPipelineVerifyStep(ActiveBundleResolverTestBase):
     def test_verify_passes_through_on_matching_hash(self):
@@ -420,6 +426,7 @@ class TestPipelineVerifyStep(ActiveBundleResolverTestBase):
 
 
 # -- (4) seeded hash matches scripts/canonicalize.py -------------------------
+
 
 class TestSeededHashMatchesCanonicalize(ActiveBundleResolverTestBase):
     def test_seed_active_bundle_hash_matches_canonicalize_content_hash(self):

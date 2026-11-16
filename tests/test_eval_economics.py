@@ -68,6 +68,7 @@ def read(path: Path) -> str:
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
+
 def eval_economics_section(text: str) -> str:
     """Extract the CI Budget / Eval Economics section from evaluation.md.
 
@@ -83,6 +84,7 @@ def eval_economics_section(text: str) -> str:
 
 
 # ── Check 1: explicit per-run CI dollar ceiling ───────────────────────────────
+
 
 def check_ci_per_run_budget() -> list[str]:
     """
@@ -103,6 +105,7 @@ def check_ci_per_run_budget() -> list[str]:
 
 
 # ── Check 2: monthly CI budget cap ───────────────────────────────────────────
+
 
 def check_ci_monthly_budget() -> list[str]:
     """
@@ -125,6 +128,7 @@ def check_ci_monthly_budget() -> list[str]:
 
 
 # ── Check 3: production ledger separation stated ─────────────────────────────
+
 
 def check_ci_separate_from_production_ledger() -> list[str]:
     """
@@ -151,6 +155,7 @@ def check_ci_separate_from_production_ledger() -> list[str]:
 
 
 # ── Check 4: every-change tier with case-count cap ───────────────────────────
+
 
 def check_every_change_tier() -> list[str]:
     """
@@ -186,6 +191,7 @@ def check_every_change_tier() -> list[str]:
 
 # ── Check 5: release-candidate trigger for full stochastic run ───────────────
 
+
 def check_release_candidate_trigger() -> list[str]:
     """
     evaluation.md must name a release-candidate trigger for the full
@@ -205,6 +211,7 @@ def check_release_candidate_trigger() -> list[str]:
 
 
 # ── Check 6: quarterly recertification trigger ───────────────────────────────
+
 
 def check_quarterly_recert_trigger() -> list[str]:
     """
@@ -226,6 +233,7 @@ def check_quarterly_recert_trigger() -> list[str]:
 
 # ── Check 7: gold-set growth policy — candidate tier ─────────────────────────
 
+
 def check_growth_policy_candidate_tier() -> list[str]:
     """
     evaluation.md must describe a 'candidate' tier for new gold cases
@@ -234,7 +242,10 @@ def check_growth_policy_candidate_tier() -> list[str]:
     failures = []
     text = read(EVALUATION)
     # Accept 'candidate tier', 'candidate pool', 'candidate status', 'enter as candidate'
-    pattern = re.compile(r"candidate[^\n]{0,50}tier|tier[^\n]{0,50}candidate|candidate.*pool|candidate.*cases?", re.IGNORECASE)
+    pattern = re.compile(
+        r"candidate[^\n]{0,50}tier|tier[^\n]{0,50}candidate|candidate.*pool|candidate.*cases?",
+        re.IGNORECASE,
+    )
     if not pattern.search(text):
         failures.append(
             "  docs/evaluation.md does not describe a 'candidate' tier for new gold\n"
@@ -246,6 +257,7 @@ def check_growth_policy_candidate_tier() -> list[str]:
 
 
 # ── Check 8: every-change tier case count cap (growth policy) ────────────────
+
 
 def check_growth_policy_tier_cap() -> list[str]:
     """
@@ -273,6 +285,7 @@ def check_growth_policy_tier_cap() -> list[str]:
 
 # ── Check 9: gold-set growth policy — Legal retirement/pruning ───────────────
 
+
 def check_growth_policy_retirement() -> list[str]:
     """
     evaluation.md must mention that Legal periodically retires or prunes
@@ -292,6 +305,7 @@ def check_growth_policy_retirement() -> list[str]:
 
 
 # ── Check 10: per-run cost estimate stated ────────────────────────────────────
+
 
 def check_per_run_cost_stated() -> list[str]:
     """
@@ -319,6 +333,7 @@ def check_per_run_cost_stated() -> list[str]:
 
 # ── Check 11: wall-clock time stated ─────────────────────────────────────────
 
+
 def check_wall_clock_stated() -> list[str]:
     """
     evaluation.md must state expected eval wall-clock time for a full run
@@ -344,6 +359,7 @@ def check_wall_clock_stated() -> list[str]:
 
 
 # ── Check 12: harness refuses on budget exceeded (not silent truncation) ─────
+
 
 def check_harness_refuses_on_budget_exceeded() -> list[str]:
     """
@@ -372,32 +388,41 @@ def check_harness_refuses_on_budget_exceeded() -> list[str]:
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
+
 def main() -> int:
     checks = [
-        ("1",  "Per-run CI eval dollar ceiling stated in evaluation.md",
-         check_ci_per_run_budget),
-        ("2",  "Monthly CI eval budget cap stated in evaluation.md",
-         check_ci_monthly_budget),
-        ("3",  "CI eval budget stated as SEPARATE from production $20/day ledger",
-         check_ci_separate_from_production_ledger),
-        ("4",  "Every-change gate tier defined with case-count cap",
-         check_every_change_tier),
-        ("5",  "Release-candidate trigger defined for full stochastic run",
-         check_release_candidate_trigger),
-        ("6",  "Quarterly recertification trigger defined",
-         check_quarterly_recert_trigger),
-        ("7",  "Gold-set growth policy: candidate tier described",
-         check_growth_policy_candidate_tier),
-        ("8",  "Gold-set growth policy: every-change tier cap stated",
-         check_growth_policy_tier_cap),
-        ("9",  "Gold-set growth policy: Legal retirement/pruning mentioned",
-         check_growth_policy_retirement),
-        ("10", "Expected per-run cost for full stochastic run stated",
-         check_per_run_cost_stated),
-        ("11", "Expected eval wall-clock time stated",
-         check_wall_clock_stated),
-        ("12", "Harness refuses (not silently truncates) on CI budget exceeded",
-         check_harness_refuses_on_budget_exceeded),
+        ("1", "Per-run CI eval dollar ceiling stated in evaluation.md", check_ci_per_run_budget),
+        ("2", "Monthly CI eval budget cap stated in evaluation.md", check_ci_monthly_budget),
+        (
+            "3",
+            "CI eval budget stated as SEPARATE from production $20/day ledger",
+            check_ci_separate_from_production_ledger,
+        ),
+        ("4", "Every-change gate tier defined with case-count cap", check_every_change_tier),
+        (
+            "5",
+            "Release-candidate trigger defined for full stochastic run",
+            check_release_candidate_trigger,
+        ),
+        ("6", "Quarterly recertification trigger defined", check_quarterly_recert_trigger),
+        (
+            "7",
+            "Gold-set growth policy: candidate tier described",
+            check_growth_policy_candidate_tier,
+        ),
+        ("8", "Gold-set growth policy: every-change tier cap stated", check_growth_policy_tier_cap),
+        (
+            "9",
+            "Gold-set growth policy: Legal retirement/pruning mentioned",
+            check_growth_policy_retirement,
+        ),
+        ("10", "Expected per-run cost for full stochastic run stated", check_per_run_cost_stated),
+        ("11", "Expected eval wall-clock time stated", check_wall_clock_stated),
+        (
+            "12",
+            "Harness refuses (not silently truncates) on CI budget exceeded",
+            check_harness_refuses_on_budget_exceeded,
+        ),
     ]
 
     overall_pass = True

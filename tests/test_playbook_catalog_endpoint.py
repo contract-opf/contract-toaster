@@ -144,11 +144,11 @@ class PlaybookCatalogEndpointTestBase(unittest.TestCase):
         self.app = FastAPI()
         self.app.include_router(review_routes.router)
         self.app.dependency_overrides[review_routes.get_dynamodb_resource] = lambda: self.ddb
-        self.app.dependency_overrides[review_routes.get_playbook_registry_path] = (
-            lambda: self.registry_path
+        self.app.dependency_overrides[review_routes.get_playbook_registry_path] = lambda: (
+            self.registry_path
         )
-        self.app.dependency_overrides[review_routes.get_active_user_row] = (
-            lambda: _caller_row("attorney-1")
+        self.app.dependency_overrides[review_routes.get_active_user_row] = lambda: _caller_row(
+            "attorney-1"
         )
         self.client = TestClient(self.app)
 
@@ -342,8 +342,8 @@ class RealCatalogShipsExactlyOneSampleTest(unittest.TestCase):
         self.app = FastAPI()
         self.app.include_router(review_routes.router)
         self.app.dependency_overrides[review_routes.get_dynamodb_resource] = lambda: self.ddb
-        self.app.dependency_overrides[review_routes.get_active_user_row] = (
-            lambda: _caller_row("attorney-1")
+        self.app.dependency_overrides[review_routes.get_active_user_row] = lambda: _caller_row(
+            "attorney-1"
         )
         self.client = TestClient(self.app)
 

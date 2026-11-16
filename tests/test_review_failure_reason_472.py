@@ -118,6 +118,7 @@ TOKENS_REQUIRING_UI_COPY = NEW_TOKENS + (reviews.RUNNER_RESTARTED_REASON,)  # no
 # Offline fakes (same shape as tests/test_review_failure_reason_442.py)
 # ---------------------------------------------------------------------------
 
+
 class FakeReviewsTable:
     """Generic-enough SET interpreter to apply whatever UpdateExpression
     record_stage_failure / _fail_review emits."""
@@ -125,8 +126,14 @@ class FakeReviewsTable:
     def __init__(self, status: str = "PENDING"):
         self.item: dict[str, Any] = {"review_id": REVIEW_ID, "status": status}
 
-    def update_item(self, Key, UpdateExpression, ConditionExpression=None,
-                    ExpressionAttributeNames=None, ExpressionAttributeValues=None):
+    def update_item(
+        self,
+        Key,
+        UpdateExpression,
+        ConditionExpression=None,
+        ExpressionAttributeNames=None,
+        ExpressionAttributeValues=None,
+    ):
         names = ExpressionAttributeNames or {}
         values = ExpressionAttributeValues or {}
         set_clause = UpdateExpression.split("SET", 1)[1]
@@ -206,6 +213,7 @@ class NoCallHttpClient:
 # 1. The pre-call no-key case
 # ---------------------------------------------------------------------------
 
+
 class TestMissingKeyClassifiedPreCall(unittest.TestCase):
     def test_build_client_raises_model_key_missing_not_a_bare_value_error(self) -> None:
         with patch.dict("os.environ", {}, clear=True):
@@ -222,9 +230,7 @@ class TestMissingKeyClassifiedPreCall(unittest.TestCase):
         401/403 on a key that WAS sent) must never collapse into the same
         token -- they are different admin fixes."""
         missing = pr.classify_failure_reason(mc.ModelKeyMissingError("no key"))
-        rejected = pr.classify_failure_reason(
-            mc.ModelInvocationError("opaque", status_code=401)
-        )
+        rejected = pr.classify_failure_reason(mc.ModelInvocationError("opaque", status_code=401))
         self.assertNotEqual(missing, rejected)
         self.assertEqual(missing, "model_key_missing")
         self.assertEqual(rejected, "model_key_rejected")
@@ -241,17 +247,21 @@ class TestMissingKeyClassifiedPreCall(unittest.TestCase):
             os.environ["UPLOADS_BUCKET"] = "uploads-test"
             os.environ["OUTPUTS_BUCKET"] = "outputs-test"
             os.environ["PLAYBOOKS_TABLE"] = "playbooks-test"
-            with patch.object(pr, "_settle_reservation"), \
-                 patch.object(pr, "_load_playbook_bundle", return_value={}), \
-                 patch.object(
-                     pr,
-                     "_bundle_with_openrouter_model_ids",
-                     side_effect=lambda bundle, dynamodb_resource=None: bundle,
-                 ), \
-                 patch.object(pr, "_fetch_upload_bytes", return_value=b"docx"):
+            with (
+                patch.object(pr, "_settle_reservation"),
+                patch.object(pr, "_load_playbook_bundle", return_value={}),
+                patch.object(
+                    pr,
+                    "_bundle_with_openrouter_model_ids",
+                    side_effect=lambda bundle, dynamodb_resource=None: bundle,
+                ),
+                patch.object(pr, "_fetch_upload_bytes", return_value=b"docx"),
+            ):
                 pr.run_real_pipeline(
-                    REVIEW_ID, _payload(),
-                    dynamodb_resource=FakeDDB(reviews_table), s3_client=s3,
+                    REVIEW_ID,
+                    _payload(),
+                    dynamodb_resource=FakeDDB(reviews_table),
+                    s3_client=s3,
                     # model_client deliberately NOT injected: exercises the
                     # real _build_openrouter_client call site.
                 )
@@ -264,6 +274,7 @@ class TestMissingKeyClassifiedPreCall(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # 2. Timeouts
 # ---------------------------------------------------------------------------
+
 
 class TestTimeoutClassified(unittest.TestCase):
     def test_invoke_raises_model_timeout_error_on_a_real_timeout(self) -> None:
@@ -315,13 +326,17 @@ class TestTimeoutClassified(unittest.TestCase):
                 pass
 
         client = mc.OpenRouterModelClient(
-            api_key="sk-test", http_client=BoomClient(), max_retries=0,
+            api_key="sk-test",
+            http_client=BoomClient(),
+            max_retries=0,
             sleep_fn=lambda _seconds: None,
         )
         with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelInvocationError) as ctx:
                 client.invoke(
-                    model_id=PRIMARY_MODEL_ID, system_prompt="s", user_prompt="u",
+                    model_id=PRIMARY_MODEL_ID,
+                    system_prompt="s",
+                    user_prompt="u",
                     max_output_tokens=10,
                 )
         self.assertNotIsInstance(ctx.exception, mc.ModelTimeoutError)
@@ -334,6 +349,7 @@ class TestTimeoutClassified(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # 3. Taxonomy + copy for both new tokens
 # ---------------------------------------------------------------------------
+
 
 class TestNewTokenTaxonomyAndCopy(unittest.TestCase):
     def test_both_tokens_are_deliberate_operator_errors(self) -> None:
@@ -369,9 +385,7 @@ class TestRunnerRestartedToken62(unittest.TestCase):
 
     def test_it_is_a_deliberate_operator_error(self) -> None:
         self.assertEqual(reviews.RUNNER_RESTARTED_REASON, "runner_restarted")
-        self.assertIn(
-            reviews.RUNNER_RESTARTED_REASON, reviews.STAGE_FAILURE_REASON_STATUS
-        )
+        self.assertIn(reviews.RUNNER_RESTARTED_REASON, reviews.STAGE_FAILURE_REASON_STATUS)
         self.assertEqual(
             reviews.STAGE_FAILURE_REASON_STATUS[reviews.RUNNER_RESTARTED_REASON],
             "ERROR",
@@ -389,14 +403,13 @@ class TestRunnerRestartedToken62(unittest.TestCase):
 # 4. failed_at
 # ---------------------------------------------------------------------------
 
+
 class TestFailedAtStamped(unittest.TestCase):
     def setUp(self) -> None:
         self.ddb = FakeDDB(FakeReviewsTable(status="RUNNING"))
 
     def test_record_stage_failure_stamps_failed_at(self) -> None:
-        reviews.record_stage_failure(
-            REVIEW_ID, "run_review", "model_timeout", self.ddb
-        )
+        reviews.record_stage_failure(REVIEW_ID, "run_review", "model_timeout", self.ddb)
         item = self.ddb._reviews.item
         self.assertIn("failed_at", item)
         self.assertTrue(str(item["failed_at"]).isdigit())
@@ -438,7 +451,9 @@ class TestFailedAtStamped(unittest.TestCase):
         table = FakeReviewsTable(status="RUNNING")
         ddb = FakeDDB(table)
         pr._write_real_terminal(
-            REVIEW_ID, {"status": "OK", "decision": "ACCEPT"}, output_s3_key=None,
+            REVIEW_ID,
+            {"status": "OK", "decision": "ACCEPT"},
+            output_s3_key=None,
             dynamodb_resource=ddb,
         )
         self.assertNotIn("failed_at", table.item)

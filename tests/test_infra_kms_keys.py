@@ -64,6 +64,7 @@ def _assert(condition: bool, label: str, detail: str = "") -> list[str]:
 # Check A — Separate CMKs for each data class
 # ---------------------------------------------------------------------------
 
+
 def check_a_per_class_keys() -> list[str]:
     print("\nCheck A: Separate CMKs for all five data classes …")
     failures: list[str] = []
@@ -118,11 +119,11 @@ def check_a_per_class_keys() -> list[str]:
 # each per-data-class KMS key in the synthesized CloudFormation template.
 # These match the Output logical IDs produced by KmsKeysStack (CfnOutputs).
 _KEY_CLASS_FRAGMENTS: dict[str, list[str]] = {
-    "uploads":  ["UploadsKey", "uploads-KmsKeyArn", "uploadskey", "uploadsKey"],
-    "outputs":  ["OutputsKey", "outputs-KmsKeyArn", "outputskey", "outputsKey"],
-    "corpus":   ["CorpusKey",  "corpus-KmsKeyArn",  "corpuskey",  "corpusKey"],
-    "audit":    ["AuditKey",   "audit-KmsKeyArn",   "auditkey",   "auditKey"],
-    "dynamodb": ["DynamodbKey","dynamodb-KmsKeyArn","dynamodbkey","dynamodbKey"],
+    "uploads": ["UploadsKey", "uploads-KmsKeyArn", "uploadskey", "uploadsKey"],
+    "outputs": ["OutputsKey", "outputs-KmsKeyArn", "outputskey", "outputsKey"],
+    "corpus": ["CorpusKey", "corpus-KmsKeyArn", "corpuskey", "corpusKey"],
+    "audit": ["AuditKey", "audit-KmsKeyArn", "auditkey", "auditKey"],
+    "dynamodb": ["DynamodbKey", "dynamodb-KmsKeyArn", "dynamodbkey", "dynamodbKey"],
 }
 
 # KMS actions that constitute "decrypt" access.
@@ -248,8 +249,7 @@ def check_b_narrow_key_policies() -> list[str]:
         resources = tmpl.get("Resources", {})
         for _logical_id, resource in resources.items():
             rtype = resource.get("Type", "")
-            if rtype not in ("AWS::IAM::Policy", "AWS::IAM::Role",
-                             "AWS::IAM::ManagedPolicy"):
+            if rtype not in ("AWS::IAM::Policy", "AWS::IAM::Role", "AWS::IAM::ManagedPolicy"):
                 continue
             props = resource.get("Properties", {})
             doc = props.get("PolicyDocument") or props.get("AssumeRolePolicyDocument")
@@ -278,9 +278,7 @@ def check_b_narrow_key_policies() -> list[str]:
     violations: list[str] = []
     for principal, classes in principal_classes.items():
         if len(classes) > 1:
-            violations.append(
-                f"principal '{principal}' has kms:Decrypt on: {sorted(classes)}"
-            )
+            violations.append(f"principal '{principal}' has kms:Decrypt on: {sorted(classes)}")
 
     if violations:
         detail = (
@@ -288,7 +286,9 @@ def check_b_narrow_key_policies() -> list[str]:
             "data class. Each data class must use a DISTINCT IAM principal.\n"
             + "\n".join(f"         {v}" for v in violations)
         )
-        failures += _assert(False, "No single IAM principal decrypts >1 data-class key (AC B)", detail)
+        failures += _assert(
+            False, "No single IAM principal decrypts >1 data-class key (AC B)", detail
+        )
     else:
         failures += _assert(
             True,
@@ -301,6 +301,7 @@ def check_b_narrow_key_policies() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check C — Break-glass permissions differ per key (audit tighter)
 # ---------------------------------------------------------------------------
+
 
 def check_c_breakglass_differs() -> list[str]:
     print("\nCheck C: Break-glass permissions differ per key (audit tighter) …")
@@ -335,6 +336,7 @@ def check_c_breakglass_differs() -> list[str]:
 # Check D — S3 Vectors / clause-text store covered under corpus key
 # ---------------------------------------------------------------------------
 
+
 def check_d_vectors_corpus_coverage() -> list[str]:
     print("\nCheck D: S3 Vectors / clause-text store covered under corpus key domain …")
     failures: list[str] = []
@@ -364,6 +366,7 @@ def check_d_vectors_corpus_coverage() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check E — DataStack props accept per-class keys
 # ---------------------------------------------------------------------------
+
 
 def check_e_data_stack_props() -> list[str]:
     print("\nCheck E: DataStack props accept per-class keys …")
@@ -398,6 +401,7 @@ def check_e_data_stack_props() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check F — cdk synth runs cleanly
 # ---------------------------------------------------------------------------
+
 
 def check_f_cdk_synth() -> list[str]:
     print("\nCheck F: cdk synth runs cleanly with per-class keys …")
@@ -442,6 +446,7 @@ def check_f_cdk_synth() -> list[str]:
 # Check G — Guard: per-class key ARNs exported as CfnOutputs
 # ---------------------------------------------------------------------------
 
+
 def check_g_cfn_outputs() -> list[str]:
     print("\nCheck G: Per-class key ARNs exported as CfnOutputs …")
     failures: list[str] = []
@@ -475,6 +480,7 @@ def check_g_cfn_outputs() -> list[str]:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> int:
     print("Per-data-class KMS keys structural gate (issue #70)")
     print("=" * 60)
@@ -490,10 +496,7 @@ def main() -> int:
 
     print("\n" + "=" * 60)
     if all_failures:
-        print(
-            f"\nFAIL: {len(all_failures)} check(s) failed.\n"
-            "See output above for details."
-        )
+        print(f"\nFAIL: {len(all_failures)} check(s) failed.\nSee output above for details.")
         return 1
 
     print("\nPASS: all per-data-class KMS keys structural checks passed.")

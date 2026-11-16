@@ -26,9 +26,7 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 os.environ.setdefault("USERS_TABLE", "contract-toaster-users-download-test")
-os.environ.setdefault(
-    "PLAYBOOK_VERSIONS_TABLE", "contract-toaster-playbook-versions-download-test"
-)
+os.environ.setdefault("PLAYBOOK_VERSIONS_TABLE", "contract-toaster-playbook-versions-download-test")
 os.environ.setdefault("AUDIT_TABLE", "contract-toaster-audit-download-test")
 os.environ.setdefault("UPLOADS_BUCKET", "contract-toaster-uploads-download-test")
 
@@ -103,9 +101,7 @@ class TestPlaybookVersionDownload(unittest.TestCase):
         _put_user(self.users_table, NON_ADMIN_SUB, is_admin=False)
 
         self.client = TestClient(backend_main.app)
-        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = (
-            lambda: self.ddb
-        )
+        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = lambda: self.ddb
         backend_main.app.dependency_overrides[backend_main.get_s3_client] = lambda: self.s3
 
     def tearDown(self):
@@ -113,9 +109,11 @@ class TestPlaybookVersionDownload(unittest.TestCase):
         self._mock_aws.stop()
 
     def _authenticate_as(self, sub: str) -> None:
-        backend_main.app.dependency_overrides[backend_main.get_current_user] = (
-            lambda: {"sub": sub, "email": f"{sub}@example.com", "token_use": "access"}
-        )
+        backend_main.app.dependency_overrides[backend_main.get_current_user] = lambda: {
+            "sub": sub,
+            "email": f"{sub}@example.com",
+            "token_use": "access",
+        }
 
     def _download_url(self, playbook_id: str = PLAYBOOK_ID, version: str = VERSION) -> str:
         return f"/api/admin/playbooks/{playbook_id}/versions/{version}/download"

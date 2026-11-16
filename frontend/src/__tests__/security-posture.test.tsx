@@ -27,11 +27,7 @@ import App from '../App';
 import AdminUsers from '../AdminUsers';
 import AdminRetention from '../AdminRetention';
 import ReviewSubmission from '../ReviewSubmission';
-import {
-  DEFAULT_PLAYBOOKS,
-  findReviewResult,
-  pressSubmit,
-} from './support/consoleSurface';
+import { DEFAULT_PLAYBOOKS, findReviewResult, pressSubmit } from './support/consoleSurface';
 
 // A hostile string that would execute if it were ever parsed as HTML
 // (e.g. via dangerouslySetInnerHTML or an unescaped template). If any of
@@ -109,7 +105,12 @@ const RETENTION_SETTINGS_OK = {
 describe('token posture — App.tsx (app code only; Amplify mocked)', () => {
   it('app code never copies the (mocked) Amplify session token into localStorage or sessionStorage', async () => {
     stubFetch({
-      '/version': { version: '0.0.1', commit: 'abcdef1234567890', image_digest: 'sha256:x', uptime_seconds: 1 },
+      '/version': {
+        version: '0.0.1',
+        commit: 'abcdef1234567890',
+        image_digest: 'sha256:x',
+        uptime_seconds: 1,
+      },
       // Admin panels only mount once GET /api/me resolves is_admin: true
       // (#234/#235) — this test renders the whole App, admin panels
       // included, so it needs an admin identity to reach them.
@@ -385,9 +386,9 @@ describe('storage content posture (issues #489, #58)', () => {
 
     writeLastPlaybookId('eiaa');
     expect(window.localStorage.getItem(LAST_PLAYBOOK_STORAGE_KEY)).toBe('eiaa');
-    expect(
-      looksLikeAToken(window.localStorage.getItem(LAST_PLAYBOOK_STORAGE_KEY) as string),
-    ).toBe(false);
+    expect(looksLikeAToken(window.localStorage.getItem(LAST_PLAYBOOK_STORAGE_KEY) as string)).toBe(
+      false,
+    );
   });
 
   it('the last-selected browning (lastBrowning.ts) persists only the level, never a token', async () => {
@@ -396,9 +397,9 @@ describe('storage content posture (issues #489, #58)', () => {
 
     writeLastBrowning('dark');
     expect(window.localStorage.getItem(LAST_BROWNING_STORAGE_KEY)).toBe('dark');
-    expect(
-      looksLikeAToken(window.localStorage.getItem(LAST_BROWNING_STORAGE_KEY) as string),
-    ).toBe(false);
+    expect(looksLikeAToken(window.localStorage.getItem(LAST_BROWNING_STORAGE_KEY) as string)).toBe(
+      false,
+    );
   });
 
   it('the last-selected notes mode (lastNotesMode.ts) persists only the mode, never a token', async () => {
@@ -460,9 +461,8 @@ describe('storage content posture (issues #489, #58)', () => {
     const { LAST_PLAYBOOK_STORAGE_KEY, writeLastPlaybookId } = await import('../lastPlaybook');
     const { LAST_BROWNING_STORAGE_KEY, writeLastBrowning } = await import('../lastBrowning');
     const { LAST_NOTES_MODE_STORAGE_KEY, writeLastNotesMode } = await import('../lastNotesMode');
-    const { INFLIGHT_REVIEW_STORAGE_KEY, writeInflightReviewId } = await import(
-      '../inflightReview'
-    );
+    const { INFLIGHT_REVIEW_STORAGE_KEY, writeInflightReviewId } =
+      await import('../inflightReview');
 
     setMuted(true);
     writeLastPlaybookId('sample-agreement');

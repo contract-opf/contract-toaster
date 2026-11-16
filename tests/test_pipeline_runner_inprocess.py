@@ -70,8 +70,14 @@ class FakeReviewsTable:
     def __init__(self, status: str = "PENDING"):
         self.item = {"review_id": REVIEW_ID, "status": status}
 
-    def update_item(self, Key, UpdateExpression, ConditionExpression=None,
-                     ExpressionAttributeNames=None, ExpressionAttributeValues=None):
+    def update_item(
+        self,
+        Key,
+        UpdateExpression,
+        ConditionExpression=None,
+        ExpressionAttributeNames=None,
+        ExpressionAttributeValues=None,
+    ):
         names = ExpressionAttributeNames or {}
         vals = ExpressionAttributeValues or {}
         _validate_placeholders(UpdateExpression, ConditionExpression, names, vals)
@@ -82,7 +88,7 @@ class FakeReviewsTable:
             raise _conditional()
         if not UpdateExpression.startswith("SET "):
             raise _validation(f"unsupported UpdateExpression: {UpdateExpression!r}")
-        for assignment in UpdateExpression[len("SET "):].split(","):
+        for assignment in UpdateExpression[len("SET ") :].split(","):
             field_token, _, value_token = assignment.partition("=")
             field = names.get(field_token.strip(), field_token.strip())
             self.item[field] = vals[value_token.strip()]
@@ -146,7 +152,8 @@ class TestInProcessClient(unittest.TestCase):
             runner=lambda rid, payload: seen.append((rid, payload)), pool=SyncPool()
         )
         out = client.start_execution(
-            stateMachineArn="sm", name="exec-1",
+            stateMachineArn="sm",
+            name="exec-1",
             input='{"review_id": "r1", "playbook_id": "eiaa"}',
         )
         self.assertEqual(out["executionArn"], "inprocess:exec-1")
@@ -267,9 +274,7 @@ class TestSettleReservation(unittest.TestCase):
         return self.boto_ddb
 
     def _released(self, idempotency_key: str):
-        row = self.submissions.get_item(
-            Key={"idempotency_key": idempotency_key}
-        ).get("Item") or {}
+        row = self.submissions.get_item(Key={"idempotency_key": idempotency_key}).get("Item") or {}
         return row.get("reservation_released")
 
     def test_calls_settle_spend_with_review_and_reservation_id(self) -> None:
@@ -302,8 +307,12 @@ class TestSettleReservation(unittest.TestCase):
 
     def test_already_released_is_noop(self) -> None:
         ddb = self._ddb_with(
-            {"idempotency_key": "i", "review_id": REVIEW_ID, "spend_reservation_id": "r",
-             "reservation_released": True}
+            {
+                "idempotency_key": "i",
+                "review_id": REVIEW_ID,
+                "spend_reservation_id": "r",
+                "reservation_released": True,
+            }
         )
         with patch.object(pr.reviews, "settle_spend", side_effect=AssertionError("must not call")):
             pr._settle_reservation(REVIEW_ID, ddb)

@@ -46,7 +46,10 @@ STATUS_TOKENS = ("SHIPPED", "STUBBED", "PLANNED")
 # (W11) found every one stale and moved the ledger to heading anchors, which
 # check_anchors_exist() below proves are real.
 REQUIRED_CAPABILITIES = [
-    ("playbook upload / version-history / rollback", "RUNBOOK.md#rolling-back-a-bad-playbook-or-prompt"),
+    (
+        "playbook upload / version-history / rollback",
+        "RUNBOOK.md#rolling-back-a-bad-playbook-or-prompt",
+    ),
     ("release-bundle deactivation", "RUNBOOK.md#suspending-intake-deactivate-without-a-successor"),
     ("admin UI corpus upload", "RUNBOOK.md#adding-a-document-to-the-corpus"),
     ("audit-log viewer / CSV export", "RUNBOOK.md#viewing-the-audit-log"),
@@ -104,9 +107,7 @@ def check_legend_defines_all_statuses() -> list[str]:
         return ["  (skipped — no ledger file)"]
     for token in STATUS_TOKENS:
         if token not in text:
-            failures.append(
-                f"  Ledger does not use the status token '{token}' anywhere."
-            )
+            failures.append(f"  Ledger does not use the status token '{token}' anywhere.")
     return failures
 
 
@@ -129,8 +130,7 @@ def check_capabilities_covered_with_status() -> list[str]:
         row = _capability_row(text, line_ref)
         if row is None:
             failures.append(
-                f"  Ledger does not cover '{label}' (expected a row citing "
-                f"{line_ref})."
+                f"  Ledger does not cover '{label}' (expected a row citing {line_ref})."
             )
             continue
         if not any(token in row for token in STATUS_TOKENS):
@@ -152,7 +152,7 @@ def _script_has_cli_entrypoint(path: Path) -> bool:
     if not path.exists():
         return False
     text = path.read_text(encoding="utf-8")
-    return '__main__' in text and ('argparse' in text or 'sys.argv' in text)
+    return "__main__" in text and ("argparse" in text or "sys.argv" in text)
 
 
 def check_demo_critical_steps_cli_or_planned() -> list[str]:
@@ -168,9 +168,7 @@ def check_demo_critical_steps_cli_or_planned() -> list[str]:
     for line_ref in DEMO_CRITICAL_LINE_REFS:
         row = _capability_row(text, line_ref)
         if row is None:
-            failures.append(
-                f"  No ledger row for demo-critical {line_ref}."
-            )
+            failures.append(f"  No ledger row for demo-critical {line_ref}.")
             continue
 
         if "PLANNED" in row or "STUBBED" in row:
@@ -253,12 +251,21 @@ def main() -> int:
     checks = [
         ("1", "Implementation-status ledger file exists", check_ledger_exists),
         ("2", "Legend defines SHIPPED / STUBBED / PLANNED", check_legend_defines_all_statuses),
-        ("3", "All six RUNBOOK capabilities covered with a status",
-         check_capabilities_covered_with_status),
-        ("4", "Demo-critical steps (playbook seed, corpus upload) are CLI- or route-backed, PLANNED, or STUBBED",
-         check_demo_critical_steps_cli_or_planned),
-        ("5", "scripts/docs-lint.py wires an equivalent CI check",
-         check_docs_lint_wires_ledger_check),
+        (
+            "3",
+            "All six RUNBOOK capabilities covered with a status",
+            check_capabilities_covered_with_status,
+        ),
+        (
+            "4",
+            "Demo-critical steps (playbook seed, corpus upload) are CLI- or route-backed, PLANNED, or STUBBED",
+            check_demo_critical_steps_cli_or_planned,
+        ),
+        (
+            "5",
+            "scripts/docs-lint.py wires an equivalent CI check",
+            check_docs_lint_wires_ledger_check,
+        ),
         ("6", "Every cited RUNBOOK anchor names a real heading", check_anchors_exist),
     ]
 

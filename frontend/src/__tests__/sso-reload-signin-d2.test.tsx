@@ -28,7 +28,10 @@ function b64url(value: unknown): string {
   return btoa(JSON.stringify(value)).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
 }
 
-function mintJwt(claims: Record<string, string | number>): { toString: () => string; payload: Record<string, string | number> } {
+function mintJwt(claims: Record<string, string | number>): {
+  toString: () => string;
+  payload: Record<string, string | number>;
+} {
   const exp = Math.floor(Date.now() / 1000) + 3600;
   const payload = { exp, iat: exp - 3600, ...claims };
   const jwt = `${b64url({ alg: 'RS256', kid: 'test' })}.${b64url(payload)}.c2lnbmF0dXJl`;

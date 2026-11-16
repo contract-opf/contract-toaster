@@ -375,9 +375,7 @@ OUTPUT_BUDGET_TOKENS_PER_DOCUMENT_TOKEN = 2.5
 OUTPUT_BUDGET_WIDEN_STEP_TOKENS = OUTPUT_BUDGET_FLOOR_TOKENS
 
 
-def openrouter_model_max_output_tokens(
-    model_id: str, policy: dict[str, Any] | None = None
-) -> int:
+def openrouter_model_max_output_tokens(model_id: str, policy: dict[str, Any] | None = None) -> int:
     """The per-model output-token cap (issue #658) for `model_id`, read from
     model-policy/openrouter.json's optional `max_output_tokens` field on
     `models.primary`, `models.critic`, `models.preflight`, `models.cover_note`
@@ -454,9 +452,7 @@ def widen_output_budget(current: int, ceiling: int) -> int:
     return min(current + OUTPUT_BUDGET_WIDEN_STEP_TOKENS, int(ceiling))
 
 
-def openrouter_content_budget_ceiling(
-    model_id: str, policy: dict[str, Any] | None = None
-) -> int:
+def openrouter_content_budget_ceiling(model_id: str, policy: dict[str, Any] | None = None) -> int:
     """The largest CONTENT budget one request for `model_id` may ask for
     (QA W8 item 4): the model's declared output cap minus the reasoning
     allowance `OpenRouterModelClient.invoke` adds on top of the content
@@ -622,9 +618,7 @@ class OpenRouterModelPolicyViolation(ValueError):
     OPENROUTER_{PRIMARY,CRITIC,PREFLIGHT}_MODEL_ID override env var."""
 
 
-def enforce_openrouter_policy_model_id(
-    model_id: str, policy: dict[str, Any] | None = None
-) -> None:
+def enforce_openrouter_policy_model_id(model_id: str, policy: dict[str, Any] | None = None) -> None:
     """Runtime assertion (issue #269): the model_id an OpenRouterModelClient
     is about to invoke must equal the policy-pinned primary or critic model
     id in model-policy/openrouter.json, OR an entry on that file's
@@ -1573,7 +1567,9 @@ class _CancelledMidStream(Exception):
     caller's control-flow signal, not a transport failure."""
 
     def __init__(
-        self, original: BaseException, partial: "_StreamedCompletion | None" = None  # noqa: UP037
+        self,
+        original: BaseException,
+        partial: "_StreamedCompletion | None" = None,  # noqa: UP037
     ) -> None:
         super().__init__("cancelled mid-stream")
         self.original = original
@@ -1648,9 +1644,7 @@ def _accumulate_openrouter_stream(
                 "OpenRouter streamed a chunk that is not valid JSON."
             ) from exc
         if not isinstance(chunk, dict):
-            raise ModelInvocationError(
-                "OpenRouter streamed a chunk that is not a JSON object."
-            )
+            raise ModelInvocationError("OpenRouter streamed a chunk that is not a JSON object.")
 
         # Response-side provenance (issue #514) rides on every chunk; keep the
         # last non-empty value rather than the first, so a provider that
@@ -1896,7 +1890,10 @@ class OpenRouterModelClient:
         return usage
 
     def _count_cancelled_stream(
-        self, model_id: str, payload: dict[str, Any], cancelled: "_CancelledMidStream"  # noqa: UP037
+        self,
+        model_id: str,
+        payload: dict[str, Any],
+        cancelled: "_CancelledMidStream",  # noqa: UP037
     ) -> None:
         """Count a stream the caller stopped part-way (QA W8 item 1) and
         attach that usage to the caller's own exception as `usage`.
@@ -1983,9 +1980,7 @@ class OpenRouterModelClient:
         uniform jitter, for the `attempt_index`-th retry (0-based)."""
         import random  # lazy: only needed on the retry path
 
-        base = min(
-            self._backoff_base_seconds * (2**attempt_index), self._backoff_max_seconds
-        )
+        base = min(self._backoff_base_seconds * (2**attempt_index), self._backoff_max_seconds)
         jitter = random.uniform(0, self._backoff_jitter_seconds)  # noqa: S311
         return base + jitter
 
@@ -2066,7 +2061,9 @@ class OpenRouterModelClient:
         # answer. The content budget gives way, never the reasoning
         # allowance, which is what keeps the content from being starved.
         declared_output_cap = openrouter_model_max_output_tokens(model_id, policy)
-        content_budget = max(1, min(int(max_output_tokens), declared_output_cap - reasoning_allowance))
+        content_budget = max(
+            1, min(int(max_output_tokens), declared_output_cap - reasoning_allowance)
+        )
         max_tokens = min(content_budget + reasoning_allowance, declared_output_cap)
 
         # Issue #568: capability-gated pass-through-or-flatten for a
@@ -2165,9 +2162,9 @@ class OpenRouterModelClient:
         # `response_format` key at all, byte-identical to a call that never
         # passed `output_schema` in the first place. Reuses the SAME
         # already-loaded `policy` (no second file read).
-        if output_schema is not None and openrouter_model_capabilities(
-            model_id, policy
-        ).get("structured_outputs", False):
+        if output_schema is not None and openrouter_model_capabilities(model_id, policy).get(
+            "structured_outputs", False
+        ):
             payload["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {
@@ -2206,9 +2203,7 @@ class OpenRouterModelClient:
                 # still arrives as an ordinary (short) body, so it is read
                 # eagerly here, before the context closes, which is what makes
                 # `.json()` legal for the classification branches below.
-                with client.stream(
-                    "POST", url, json=payload, headers=headers
-                ) as response:
+                with client.stream("POST", url, json=payload, headers=headers) as response:
                     status = getattr(response, "status_code", None)
                     if status == 200:
                         streamed = _accumulate_openrouter_stream(
@@ -2251,8 +2246,7 @@ class OpenRouterModelClient:
 
                 if isinstance(exc, httpx.TimeoutException):
                     raise ModelTimeoutError(
-                        f"OpenRouter request timed out after {attempts_allowed} "
-                        "attempt(s)."
+                        f"OpenRouter request timed out after {attempts_allowed} attempt(s)."
                     ) from exc
                 raise ModelInvocationError(
                     f"OpenRouter request failed at transport level: {type(exc).__name__}"
@@ -2352,9 +2346,7 @@ class OpenRouterModelClient:
             # `status_code` carries the status structurally (issue #442) so the
             # runner can classify 402/401/403/429/404/503 without parsing this
             # message; the number itself never leaves the backend.
-            raise ModelInvocationError(
-                f"OpenRouter returned HTTP {status}.", status_code=status
-            )
+            raise ModelInvocationError(f"OpenRouter returned HTTP {status}.", status_code=status)
 
         # Unreachable: attempts_allowed >= 1, and every branch above either
         # returns or raises before the loop can run out.
@@ -2535,8 +2527,7 @@ class LiveBedrockModelClient:
                     "(read timeout; botocore transport retries exhausted)."
                 ) from exc
             raise ModelInvocationError(
-                f"Bedrock InvokeModel failed at transport/service level: "
-                f"{type(exc).__name__}"
+                f"Bedrock InvokeModel failed at transport/service level: {type(exc).__name__}"
             ) from exc
 
         try:

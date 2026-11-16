@@ -127,9 +127,7 @@ def _compile(
         rationale_by_issue={ISSUE_KEY: "Synthetic rationale."},
     )
     if result["failures"] or not result["docx_bytes"]:
-        failures.append(
-            f"[{label}] the compiler delivered no document: {result['failures']!r}"
-        )
+        failures.append(f"[{label}] the compiler delivered no document: {result['failures']!r}")
         return None, None
     return result["docx_bytes"], proven
 

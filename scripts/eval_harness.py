@@ -333,6 +333,7 @@ def build_document(clauses: list[dict[str, Any]]) -> tuple[bytes, list[dict[str,
 # Gold-case loading
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class GoldCase:
     """A single gold fixture. Only fixtures carrying `"schema": "llm-native-
@@ -398,6 +399,7 @@ def build_fake_model_client(
 # Comparator / scorer -- drives the REAL LLM-native pipeline
 # (scripts/review_spine.py::run_review), offline, via FakeBedrockClient.
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class CaseResult:
@@ -471,9 +473,7 @@ def score_case(case: GoldCase, playbook: dict[str, Any]) -> CaseResult:
     fake_client = build_fake_model_client(playbook, case.model_responses)
 
     try:
-        result = review_spine.run_review(
-            docx_bytes, playbook, fake_client, review_id=case.case_id
-        )
+        result = review_spine.run_review(docx_bytes, playbook, fake_client, review_id=case.case_id)
     except Exception as exc:  # noqa: BLE001
         # run_review is documented to fail closed to an ERROR-status
         # result (with a reason token) for an EXPECTED bad outcome, but a fixture
@@ -535,8 +535,7 @@ def score_case(case: GoldCase, playbook: dict[str, Any]) -> CaseResult:
     if "decision" in expected and result.get("decision") != expected["decision"]:
         passed = False
         reasons.append(
-            f"decision mismatch: expected {expected['decision']!r}, got "
-            f"{result.get('decision')!r}"
+            f"decision mismatch: expected {expected['decision']!r}, got {result.get('decision')!r}"
         )
 
     findings = result.get("findings") or []
@@ -681,9 +680,7 @@ def aggregate_metrics(results: list[CaseResult]) -> GoldSetMetrics:
     )
 
 
-def check_floors(
-    metrics: GoldSetMetrics, floors: dict[str, float] | None = None
-) -> list[str]:
+def check_floors(metrics: GoldSetMetrics, floors: dict[str, float] | None = None) -> list[str]:
     """Every way `metrics` misses the documented floor, as one line each;
     empty when the gold set meets it."""
     floors = REGRESSION_FLOORS if floors is None else floors
@@ -710,6 +707,7 @@ def score_all(
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
 
 def run_harness_gate_for_playbook(entry, quiet: bool = False) -> bool:
     """Run the eval-harness gate (score every gold fixture in this entry's

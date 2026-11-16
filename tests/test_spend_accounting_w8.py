@@ -163,9 +163,7 @@ class TestBilledFailuresAreCounted(unittest.TestCase):
         self.assertEqual(client.cumulative_usage["input_tokens"], 30_000)
         self.assertEqual(client.cumulative_usage["output_tokens"], 20_000)
         self.assertEqual(client.usage_by_model[OPUS_5]["output_tokens"], 20_000)
-        self.assertEqual(
-            mc.reported_usage_from_failure(ctx.exception)["input_tokens"], 30_000
-        )
+        self.assertEqual(mc.reported_usage_from_failure(ctx.exception)["input_tokens"], 30_000)
 
     def test_an_empty_200_is_counted_and_its_usage_rides_on_the_exception(self) -> None:
         http = ors.WireStreamHttpClient(
@@ -295,9 +293,15 @@ class TestTruncateThenSucceedSettlesBothAttempts(ssa.MotoSubmissionsMixin, unitt
             }
         )
 
-        with patch.dict("os.environ", {"OPENROUTER_PRIMARY_MODEL_ID": "", "OPENROUTER_CRITIC_MODEL_ID": ""}):
+        with patch.dict(
+            "os.environ", {"OPENROUTER_PRIMARY_MODEL_ID": "", "OPENROUTER_CRITIC_MODEL_ID": ""}
+        ):
             pr.run_real_pipeline(
-                dts.REVIEW_ID, dts._payload(), dynamodb_resource=ddb, s3_client=s3, model_client=client
+                dts.REVIEW_ID,
+                dts._payload(),
+                dynamodb_resource=ddb,
+                s3_client=s3,
+                model_client=client,
             )
 
         self.assertEqual(len(http.calls), 3, "setup: truncated primary, primary retry, critic")
@@ -381,23 +385,21 @@ class TestPricedPerRole(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def test_live_settlement_prices_the_critic_models_tokens_at_the_critic_rate(self) -> None:
-        client = _PerModelClient({"cheap/reviewer": self.PRIMARY, "dear/critic": self.CRITIC_AND_FLOOR})
+        client = _PerModelClient(
+            {"cheap/reviewer": self.PRIMARY, "dear/critic": self.CRITIC_AND_FLOOR}
+        )
         model_ids = {"primary_model_id": "cheap/reviewer", "critic_model_id": "dear/critic"}
-        expected = _cents(
-            [(self.PRIMARY, 1.0, 2.0), (self.CRITIC_AND_FLOOR, 10.0, 50.0)]
-        )
-        all_at_reviewer_rate = _cents(
-            [(self.PRIMARY, 1.0, 2.0), (self.CRITIC_AND_FLOOR, 1.0, 2.0)]
-        )
+        expected = _cents([(self.PRIMARY, 1.0, 2.0), (self.CRITIC_AND_FLOOR, 10.0, 50.0)])
+        all_at_reviewer_rate = _cents([(self.PRIMARY, 1.0, 2.0), (self.CRITIC_AND_FLOOR, 1.0, 2.0)])
         self.assertNotEqual(expected, all_at_reviewer_rate)
         self.assertEqual(pr._actual_cents_from_client(client, None, model_ids), expected)
 
     def test_an_unknown_model_is_priced_in_the_dearer_slot(self) -> None:
-        client = _PerModelClient({"cheap/reviewer": self.PRIMARY, "off/policy": self.CRITIC_AND_FLOOR})
-        model_ids = {"primary_model_id": "cheap/reviewer", "critic_model_id": "dear/critic"}
-        expected = _cents(
-            [(self.PRIMARY, 1.0, 2.0), (self.CRITIC_AND_FLOOR, 10.0, 50.0)]
+        client = _PerModelClient(
+            {"cheap/reviewer": self.PRIMARY, "off/policy": self.CRITIC_AND_FLOOR}
         )
+        model_ids = {"primary_model_id": "cheap/reviewer", "critic_model_id": "dear/critic"}
+        expected = _cents([(self.PRIMARY, 1.0, 2.0), (self.CRITIC_AND_FLOOR, 10.0, 50.0)])
         self.assertEqual(pr._actual_cents_from_client(client, None, model_ids), expected)
 
     def test_a_client_without_a_per_model_split_keeps_the_grand_total(self) -> None:
@@ -494,7 +496,11 @@ class TestFloorJudgeIsReserved(ssa.MotoSubmissionsMixin, unittest.TestCase):
 
     def test_the_top_up_is_added_recorded_and_reversed_at_settlement(self) -> None:
         submissions = self.seed_submission(
-            {"idempotency_key": "idem-floor", "review_id": "r-floor", "spend_reservation_id": "res-f"}
+            {
+                "idempotency_key": "idem-floor",
+                "review_id": "r-floor",
+                "spend_reservation_id": "res-f",
+            }
         )
         base = reviews.compute_worst_case_reservation_usd_cents()
         daily = _TopUpDailySpendTable(_today(), base)
@@ -513,7 +519,11 @@ class TestFloorJudgeIsReserved(ssa.MotoSubmissionsMixin, unittest.TestCase):
 
     def test_cancel_and_recovery_settlement_reverse_the_top_up_too(self) -> None:
         submissions = self.seed_submission(
-            {"idempotency_key": "idem-floor-c", "review_id": "r-floor-c", "spend_reservation_id": "r"}
+            {
+                "idempotency_key": "idem-floor-c",
+                "review_id": "r-floor-c",
+                "spend_reservation_id": "r",
+            }
         )
         base = reviews.compute_worst_case_reservation_usd_cents()
         daily = _TopUpDailySpendTable(_today(), base)
@@ -566,9 +576,12 @@ class _TopUpDailySpendTable(ssa.FakeDailySpendTable):
 
     def update_item(self, Key, UpdateExpression, ExpressionAttributeValues=None, **kw):  # noqa: N803
         vals = ExpressionAttributeValues or {}
-        if UpdateExpression.startswith(
-            "SET reserved_usd_cents = if_not_exists(reserved_usd_cents, :zero) + :amount"
-        ) and "settled" not in UpdateExpression:
+        if (
+            UpdateExpression.startswith(
+                "SET reserved_usd_cents = if_not_exists(reserved_usd_cents, :zero) + :amount"
+            )
+            and "settled" not in UpdateExpression
+        ):
             item = self.items.setdefault(Key["spend_date"], dict(Key))
             item["reserved_usd_cents"] = item.get("reserved_usd_cents", 0) + vals[":amount"]
             return
@@ -675,11 +688,15 @@ class TestUnownedRowIsNeverRun(unittest.TestCase):
         before = copy.deepcopy(table.item)
         ddb = _WriteRecordingDDB(table)
         client = _RecordingClient()
-        with patch.object(pr.reviews, "record_stage_failure") as record_failure, patch.object(
-            pr, "_settle_reservation_safely"
-        ) as settle:
+        with (
+            patch.object(pr.reviews, "record_stage_failure") as record_failure,
+            patch.object(pr, "_settle_reservation_safely") as settle,
+        ):
             pr.run_real_pipeline(
-                dts.REVIEW_ID, dts._payload(), dynamodb_resource=ddb, s3_client=dts.FakeS3({}),
+                dts.REVIEW_ID,
+                dts._payload(),
+                dynamodb_resource=ddb,
+                s3_client=dts.FakeS3({}),
                 model_client=client,
             )
         self.assertEqual(client.calls, 0)
@@ -723,7 +740,9 @@ class TestFloorSkippedAfterFailedCritic(unittest.TestCase):
                 super().__init__()
                 self._passes = mc.FakeBedrockClient(
                     {
-                        fb._BUNDLE_PRIMARY_MODEL_ID: [fb._accept_response("No changes identified.")],
+                        fb._BUNDLE_PRIMARY_MODEL_ID: [
+                            fb._accept_response("No changes identified.")
+                        ],
                         fb._BUNDLE_CRITIC_MODEL_ID: ["not json"] * 6,
                     }
                 )
@@ -768,7 +787,9 @@ class _ScriptedPromptClient:
         self.prompts: list[str] = []
 
     def invoke(self, *, user_prompt: Any, **_kwargs: Any) -> str:
-        self.prompts.append(json.dumps(user_prompt) if not isinstance(user_prompt, str) else user_prompt)
+        self.prompts.append(
+            json.dumps(user_prompt) if not isinstance(user_prompt, str) else user_prompt
+        )
         nxt = self._script.pop(0)
         if isinstance(nxt, type) and issubclass(nxt, Exception):
             raise nxt("truncated (finish_reason='length', HTTP 200).", status_code=200)
@@ -795,7 +816,9 @@ class TestTruncationRetryResetsTheCorrection(unittest.TestCase):
         )
         self.assertEqual(result["status"], "OK")
         self.assertEqual(len(client.prompts), 3)
-        self.assertNotEqual(client.prompts[1], client.prompts[0], "setup: attempt 2 carried a correction")
+        self.assertNotEqual(
+            client.prompts[1], client.prompts[0], "setup: attempt 2 carried a correction"
+        )
         self.assertEqual(client.prompts[2], client.prompts[0])
 
     def test_the_critic_retry_after_a_truncation_sends_no_stale_correction(self) -> None:
@@ -813,7 +836,9 @@ class TestTruncationRetryResetsTheCorrection(unittest.TestCase):
         )
         self.assertEqual(result["status"], "OK")
         self.assertEqual(len(client.prompts), 3)
-        self.assertNotEqual(client.prompts[1], client.prompts[0], "setup: attempt 2 carried a correction")
+        self.assertNotEqual(
+            client.prompts[1], client.prompts[0], "setup: attempt 2 carried a correction"
+        )
         self.assertEqual(client.prompts[2], client.prompts[0])
 
 
@@ -822,7 +847,9 @@ class TestTruncatedAttemptIsLedgeredWithItsUsage(unittest.TestCase):
         class _Truncating:
             def invoke(self, **_kwargs: Any) -> str:
                 raise mc.ModelOutputTruncatedError(
-                    "truncated", status_code=200, usage={"input_tokens": 9_000, "output_tokens": 5_000}
+                    "truncated",
+                    status_code=200,
+                    usage={"input_tokens": 9_000, "output_tokens": 5_000},
                 )
 
         records: list[Any] = []

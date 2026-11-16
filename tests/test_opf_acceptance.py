@@ -91,10 +91,13 @@ def test_a_precedent_text_inside_another_clauses_standard_part_is_not_a_leak() -
     clause_a, clause_b = doc["digest"]["clauses"][0], doc["digest"]["clauses"][1]
     assert clause_a["taxonomy_id"] != clause_b["taxonomy_id"]
     record = next(
-        r for r in doc["evidence"]["precedent"]
+        r
+        for r in doc["evidence"]["precedent"]
         if r["taxonomy_id"] == clause_a["taxonomy_id"] and r.get("refused_asks")
     )
-    shared = "Synthetic shared wording of our own standard, long enough to exceed a digest summary. " * 4
+    shared = (
+        "Synthetic shared wording of our own standard, long enough to exceed a digest summary. " * 4
+    )
     assert len(shared) > opf_acceptance._DIGEST_SUMMARY_MAX_CHARS
     record["refused_asks"][0]["text"] = shared
     clause_b["our_standard"]["parts"][0]["text"] = f"Lead-in sentence. {shared}Trailing sentence."
@@ -103,9 +106,13 @@ def test_a_precedent_text_inside_another_clauses_standard_part_is_not_a_leak() -
     leaked = opf_acceptance._wholesale_evidence_in(doc, prompt)
     assert leaked == 0, f"our own standard wording counted as {leaked} leaked precedent value(s)"
 
-    clause_b["our_standard"]["parts"][0]["text"] = "A standard part that no longer carries the shared wording."
+    clause_b["our_standard"]["parts"][0]["text"] = (
+        "A standard part that no longer carries the shared wording."
+    )
     leaked = opf_acceptance._wholesale_evidence_in(doc, f"{prompt}\n{shared}")
-    assert leaked == 1, f"the same text with no standard part carrying it counted {leaked}, expected 1"
+    assert leaked == 1, (
+        f"the same text with no standard part carrying it counted {leaked}, expected 1"
+    )
 
 
 def test_stage_reports_only_the_named_stage() -> None:
@@ -147,10 +154,16 @@ def test_preserve_stage_fails_loudly_when_its_gate_is_broken() -> None:
         tmp_path = Path(tmp)
         cases = {
             "a missing file": tmp_path / "does_not_exist.py",
-            "an import error": _gate(tmp_path, "import module_that_does_not_exist\nSHAPES = {'A': 1}\n"),
+            "an import error": _gate(
+                tmp_path, "import module_that_does_not_exist\nSHAPES = {'A': 1}\n"
+            ),
             "no run shapes": _gate(tmp_path, "SHAPES = {}\ndef run_all():\n    return []\n"),
-            "run_all raising": _gate(tmp_path, "SHAPES = {'A': 1}\ndef run_all():\n    raise RuntimeError('boom')\n"),
-            "a reported failure": _gate(tmp_path, "SHAPES = {'A': 1}\ndef run_all():\n    return ['[A] [anchors] lost']\n"),
+            "run_all raising": _gate(
+                tmp_path, "SHAPES = {'A': 1}\ndef run_all():\n    raise RuntimeError('boom')\n"
+            ),
+            "a reported failure": _gate(
+                tmp_path, "SHAPES = {'A': 1}\ndef run_all():\n    return ['[A] [anchors] lost']\n"
+            ),
         }
         for label, path in cases.items():
             status, detail = opf_acceptance.run_preserve_gate(path)

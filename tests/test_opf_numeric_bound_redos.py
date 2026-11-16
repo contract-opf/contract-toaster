@@ -159,7 +159,9 @@ class TestRuntimeBound(unittest.TestCase):
         self.assertLess(elapsed, hard_ledger.NUMERIC_BOUND_TIMEOUT_S + 2.0)
 
     def test_c_safe_pattern_still_decides(self) -> None:
-        entry = {"condition": {"type": "numeric_bound", "pattern": r"([0-9]+) years", "min": 1, "max": 5}}
+        entry = {
+            "condition": {"type": "numeric_bound", "pattern": r"([0-9]+) years", "min": 1, "max": 5}
+        }
         self.assertTrue(hard_ledger.evaluate_predicate(entry, "This runs for 3 years."))
         self.assertFalse(hard_ledger.evaluate_predicate(entry, "This runs for 9 years."))
         self.assertFalse(hard_ledger.evaluate_predicate(entry, "No term is stated."))

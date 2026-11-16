@@ -240,15 +240,24 @@ describe('AdminUsers — Add user is mode-appropriate (#474)', () => {
         method: 'POST',
         suffix: '/api/users',
         status: 200,
-        body: { cognito_sub: 'local:newbie', username: 'newbie', is_admin: false, status: 'active' },
+        body: {
+          cognito_sub: 'local:newbie',
+          username: 'newbie',
+          is_admin: false,
+          status: 'active',
+        },
       },
     ]);
     render(<AdminUsers />);
     await screen.findByTestId('user-row-sub-reviewer');
 
     fireEvent.click(screen.getByTestId('admin-users-add-toggle'));
-    fireEvent.change(screen.getByTestId('admin-users-add-username'), { target: { value: 'newbie' } });
-    fireEvent.change(screen.getByTestId('admin-users-add-password'), { target: { value: 'correct-horse' } });
+    fireEvent.change(screen.getByTestId('admin-users-add-username'), {
+      target: { value: 'newbie' },
+    });
+    fireEvent.change(screen.getByTestId('admin-users-add-password'), {
+      target: { value: 'correct-horse' },
+    });
     fireEvent.click(screen.getByTestId('admin-users-add-submit'));
 
     await waitFor(() => {
@@ -279,7 +288,12 @@ describe('AdminUsers — Add user is mode-appropriate (#474)', () => {
         method: 'POST',
         suffix: '/api/users',
         status: 200,
-        body: { cognito_sub: 'pending-sso:new@example.com', email: 'new@example.com', is_admin: false, status: 'active' },
+        body: {
+          cognito_sub: 'pending-sso:new@example.com',
+          email: 'new@example.com',
+          is_admin: false,
+          status: 'active',
+        },
       },
     ]);
     render(<AdminUsers />);
@@ -361,7 +375,7 @@ describe('AdminUsers — Remove is a distinct hard delete (#474)', () => {
     });
   });
 
-  it('is disabled on the caller\'s own row, regardless of other active admins', async () => {
+  it("is disabled on the caller's own row, regardless of other active admins", async () => {
     const secondAdmin = { ...ADMIN_ROW, cognito_sub: 'sub-admin-2', email: 'admin2@example.com' };
     stubRoutes([ADMIN_ROW, secondAdmin], 'sso');
     // /api/me resolves to sub-admin-1 so isSelf is true for that row.
@@ -374,8 +388,12 @@ describe('AdminUsers — Remove is a distinct hard delete (#474)', () => {
         const pathname = new URL(url, 'http://localhost').pathname;
         const method = (init?.method ?? 'GET').toUpperCase();
         if (method === 'GET' && pathname === '/api/users') {
-          // eslint-disable-next-line @typescript-eslint/require-await
-          return { ok: true, status: 200, json: async () => ({ users: [ADMIN_ROW, secondAdmin] }) } as Response;
+          return {
+            ok: true,
+            status: 200,
+            // eslint-disable-next-line @typescript-eslint/require-await
+            json: async () => ({ users: [ADMIN_ROW, secondAdmin] }),
+          } as Response;
         }
         if (method === 'GET' && pathname === '/api/users/sync-status') {
           // eslint-disable-next-line @typescript-eslint/require-await
@@ -386,12 +404,21 @@ describe('AdminUsers — Remove is a distinct hard delete (#474)', () => {
             ok: true,
             status: 200,
             // eslint-disable-next-line @typescript-eslint/require-await
-            json: async () => ({ setting_id: 'global', auth_mode: 'sso', default_auth_mode: 'sso', auth_mode_options: [] }),
+            json: async () => ({
+              setting_id: 'global',
+              auth_mode: 'sso',
+              default_auth_mode: 'sso',
+              auth_mode_options: [],
+            }),
           } as Response;
         }
         if (method === 'GET' && pathname === '/api/me') {
-          // eslint-disable-next-line @typescript-eslint/require-await
-          return { ok: true, status: 200, json: async () => ({ cognito_sub: 'sub-admin-1' }) } as Response;
+          return {
+            ok: true,
+            status: 200,
+            // eslint-disable-next-line @typescript-eslint/require-await
+            json: async () => ({ cognito_sub: 'sub-admin-1' }),
+          } as Response;
         }
         // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: false, status: 404, json: async () => ({}) } as Response;

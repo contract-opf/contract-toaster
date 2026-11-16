@@ -358,8 +358,7 @@ def test_property_changes_and_moves_do_not_survive_materialization(failures: lis
     left = _revision_markup_counts(materialized)
     if left:
         failures.append(
-            f"the operative draft still carries the counterparty's own "
-            f"revision markup: {left!r}"
+            f"the operative draft still carries the counterparty's own revision markup: {left!r}"
         )
     if report["accepted"] != before:
         failures.append(
@@ -526,8 +525,7 @@ def test_unrecognized_revision_markup_is_reported_and_left_in_place(failures: li
 
     if report["unapplied"].get("cellIns") != 1:
         failures.append(
-            f"an unrecognised revision kind must be reported; got "
-            f"unapplied={report['unapplied']!r}"
+            f"an unrecognised revision kind must be reported; got unapplied={report['unapplied']!r}"
         )
     note = stage.accepted_revision_disclosure(report)
     if not note or "cellIns" not in note:
@@ -586,9 +584,7 @@ def test_delivered_redline_carries_no_counterparty_formatting_revision(failures:
         failures.append(f"the delivered redline still carries formatting/move markup: {left!r}")
 
     authors = {
-        el.get(_w("author"))
-        for el in _document_root(delivered).iter()
-        if el.get(_w("author"))
+        el.get(_w("author")) for el in _document_root(delivered).iter() if el.get(_w("author"))
     }
     if authors != {"contract-toaster"}:
         failures.append(

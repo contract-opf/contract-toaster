@@ -316,9 +316,7 @@ def _document_paragraph_texts(docx_bytes: bytes) -> list:
     with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zf:
         root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
     return [
-        "".join(
-            el.text or "" for el in p.iter() if el.tag in (_qn("t"), _qn("delText"))
-        )
+        "".join(el.text or "" for el in p.iter() if el.tag in (_qn("t"), _qn("delText")))
         for p in root.iter(_qn("p"))
     ]
 
@@ -667,9 +665,7 @@ def test_an_insert_at_start_also_suppresses_the_placeholder(failures: list) -> N
         return
     want = [(_TERM_HEADING, _SHORT_TERM), (_INDEMNITY_HEADING, _INDEMNITY_BODY)]
     if accepted != want:
-        failures.append(
-            f"[{case}] the accepted document reads {accepted!r}, expected {want!r}"
-        )
+        failures.append(f"[{case}] the accepted document reads {accepted!r}, expected {want!r}")
 
 
 def test_a_sibling_block_under_one_heading_suppresses_the_placeholder(
@@ -792,15 +788,13 @@ def test_one_heading_paragraph_heads_exactly_one_block(failures: list) -> None:
         )
     if len(by_heading) != 2:
         failures.append(
-            f"[{case}] expected two heading paragraphs in the fixture, got "
-            f"{sorted(by_heading)!r}"
+            f"[{case}] expected two heading paragraphs in the fixture, got {sorted(by_heading)!r}"
         )
     # The preamble carries no heading paragraph at all -- the other branch of
     # the same field, seeded here so it is never only the happy variant.
     if norm["paragraphs"][0].get("heading_p_index") is not None:
         failures.append(
-            f"[{case}] the preamble block claims a heading paragraph: "
-            f"{norm['paragraphs'][0]!r}"
+            f"[{case}] the preamble block claims a heading paragraph: {norm['paragraphs'][0]!r}"
         )
 
 
@@ -842,9 +836,7 @@ def test_a_block_with_no_heading_paragraph_is_deleted_alone(failures: list) -> N
         return
     want = [(_TERM_HEADING, _TERM_BODY)]
     if accepted != want:
-        failures.append(
-            f"[{case}] the accepted document reads {accepted!r}, expected {want!r}"
-        )
+        failures.append(f"[{case}] the accepted document reads {accepted!r}, expected {want!r}")
     deleted = _deleted_paragraph_flags(out)
     if deleted != [True, False, False]:
         failures.append(
@@ -1010,9 +1002,7 @@ def test_a_heading_whose_live_text_moved_gets_no_placeholder(failures: list) -> 
         (_INDEMNITY_HEADING + _HEADING_AMENDMENT, ""),
     ]
     if accepted != want:
-        failures.append(
-            f"[{case}] the accepted document reads {accepted!r}, expected {want!r}"
-        )
+        failures.append(f"[{case}] the accepted document reads {accepted!r}, expected {want!r}")
 
 
 def test_a_multi_paragraph_clause_gets_one_placeholder(failures: list) -> None:
@@ -1058,9 +1048,7 @@ def test_a_multi_paragraph_clause_gets_one_placeholder(failures: list) -> None:
         return
     want = [(_TERM_HEADING, _TERM_BODY), (_INDEMNITY_HEADING, PLACEHOLDER)]
     if accepted != want:
-        failures.append(
-            f"[{case}] the accepted document reads {accepted!r}, expected {want!r}"
-        )
+        failures.append(f"[{case}] the accepted document reads {accepted!r}, expected {want!r}")
 
 
 # ---------------------------------------------------------------------------

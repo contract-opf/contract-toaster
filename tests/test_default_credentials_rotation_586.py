@@ -108,27 +108,31 @@ class MainAppRotationEnforcementTest(unittest.TestCase):
         )
 
         self.users_table = self.ddb.Table(os.environ["USERS_TABLE"])
-        self.users_table.put_item(Item={
-            "cognito_sub": ADMIN_SUB, "email": ADMIN["email"],
-            "status": "active", "is_admin": True,
-        })
+        self.users_table.put_item(
+            Item={
+                "cognito_sub": ADMIN_SUB,
+                "email": ADMIN["email"],
+                "status": "active",
+                "is_admin": True,
+            }
+        )
 
         demo_auth.seed_demo_users(self.ddb)
         demo_auth.set_auth_mode(demo_auth.AUTH_MODE_BOTH, ADMIN, self.ddb)
 
         self.client = TestClient(backend_main.app)
-        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = (
-            lambda: self.ddb
-        )
+        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = lambda: self.ddb
 
     def tearDown(self):
         backend_main.app.dependency_overrides.clear()
         self._mock_aws.stop()
 
     def _sign_in_as(self, cognito_sub: str) -> None:
-        backend_main.app.dependency_overrides[backend_main.get_current_user] = (
-            lambda: {"sub": cognito_sub, "email": "", "token_use": "access"}
-        )
+        backend_main.app.dependency_overrides[backend_main.get_current_user] = lambda: {
+            "sub": cognito_sub,
+            "email": "",
+            "token_use": "access",
+        }
 
     def test_admin_route_refused_while_seeded_admin_unrotated(self):
         """The privileged action (listing users) SUCCEEDS today only because
@@ -263,9 +267,11 @@ class ReviewRoutesRotationEnforcementTest(unittest.TestCase):
         self._mock_aws.stop()
 
     def _sign_in_as(self, cognito_sub: str) -> None:
-        self.app.dependency_overrides[review_routes.get_current_user] = (
-            lambda: {"sub": cognito_sub, "email": "", "token_use": "access"}
-        )
+        self.app.dependency_overrides[review_routes.get_current_user] = lambda: {
+            "sub": cognito_sub,
+            "email": "",
+            "token_use": "access",
+        }
 
     def test_playbooks_route_refused_while_seeded_user_unrotated(self):
         self._sign_in_as(demo_auth.local_user_sub("user"))
@@ -276,10 +282,12 @@ class ReviewRoutesRotationEnforcementTest(unittest.TestCase):
     def test_playbooks_route_succeeds_for_a_rotated_password_row(self):
         """Positive control: a non-seeded / already-rotated password row is
         never gated."""
-        self.users_table.put_item(Item={
-            **_password_user_row("attorney"),
-            "password_hash": "deadbeef$deadbeef",  # never verifies against any seed default
-        })
+        self.users_table.put_item(
+            Item={
+                **_password_user_row("attorney"),
+                "password_hash": "deadbeef$deadbeef",  # never verifies against any seed default
+            }
+        )
         self._sign_in_as(demo_auth.local_user_sub("attorney"))
         response = self.client.get("/api/playbooks")
         self.assertEqual(response.status_code, 200, response.text)

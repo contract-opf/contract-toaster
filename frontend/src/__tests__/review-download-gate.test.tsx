@@ -22,11 +22,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
-import {
-  DEFAULT_PLAYBOOKS,
-  findReviewResult,
-  pressSubmit,
-} from './support/consoleSurface';
+import { DEFAULT_PLAYBOOKS, findReviewResult, pressSubmit } from './support/consoleSurface';
 
 vi.mock('aws-amplify/auth', () => ({
   // eslint-disable-next-line @typescript-eslint/require-await
@@ -149,9 +145,7 @@ describe('download affordance — ReviewSubmission.tsx', () => {
     fireEvent.click(screen.getByTestId('review-download-button'));
 
     // Clicking download must fetch the scoped presigned-URL endpoint...
-    await waitFor(() =>
-      expect(fetchedPaths(fetchMock)).toContain('/api/reviews/rev-42/output'),
-    );
+    await waitFor(() => expect(fetchedPaths(fetchMock)).toContain('/api/reviews/rev-42/output'));
     // ...and hand the returned URL to the browser via a clicked anchor whose
     // href is the presigned URL — never window.location.assign, so the SPA
     // itself never navigates away.

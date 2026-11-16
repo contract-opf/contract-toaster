@@ -99,7 +99,7 @@ def _function_body(src: str, name: str) -> str | None:
     m = re.search(rf"^def {re.escape(name)}\(", src, re.MULTILINE)
     if not m:
         return None
-    rest = src[m.end():]
+    rest = src[m.end() :]
     end = re.search(r"^(?:def |class )", rest, re.MULTILINE)
     return rest[: end.start()] if end else rest
 
@@ -154,15 +154,12 @@ def check_reader_matches_writer(reader_name: str | None) -> list[str]:
     for fn in WRITER_OUTPUT_FUNCTIONS:
         if fn not in by_function:
             failures += fail(
-                f"could not locate pipeline_runner.py::{fn}() at all "
-                "(function renamed or removed?)"
+                f"could not locate pipeline_runner.py::{fn}() at all (function renamed or removed?)"
             )
             continue
         names = by_function[fn]
         if not names:
-            failures += fail(
-                f'pipeline_runner.py::{fn}() has no os.environ["..."] read'
-            )
+            failures += fail(f'pipeline_runner.py::{fn}() has no os.environ["..."] read')
             continue
         for name in sorted(set(names)):
             if name != reader_name:
@@ -192,8 +189,7 @@ def check_deploy_targets(reader_name: str | None) -> list[str]:
             continue
         if reader_name not in names:
             failures += fail(
-                f"{rel}'s x-resource-names block has no {reader_name!r} key "
-                f"(has: {sorted(names)})"
+                f"{rel}'s x-resource-names block has no {reader_name!r} key (has: {sorted(names)})"
             )
         else:
             failures += ok(f"{rel} sets {reader_name!r} = {names[reader_name]!r}")

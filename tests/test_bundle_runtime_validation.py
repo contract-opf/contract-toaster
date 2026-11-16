@@ -222,10 +222,14 @@ class SyntheticRegistryTestBase(unittest.TestCase):
 
 # -- (1) AC1: an invalid (schema-violating) playbook cannot become active --
 
+
 class TestInvalidSchemaBundleFailsClosed(SyntheticRegistryTestBase):
     def test_resolve_refuses_when_active_bundle_is_schema_invalid(self):
         self.playbooks_table.put_item(
-            Item={"playbook_id": self.BAD_SCHEMA_ID, "active_release_bundle_hash": "sha256:whatever"}
+            Item={
+                "playbook_id": self.BAD_SCHEMA_ID,
+                "active_release_bundle_hash": "sha256:whatever",
+            }
         )
 
         with self.assertRaises(HTTPException) as ctx:
@@ -236,7 +240,10 @@ class TestInvalidSchemaBundleFailsClosed(SyntheticRegistryTestBase):
 
     def test_resolve_and_submit_review_also_refuses(self):
         self.playbooks_table.put_item(
-            Item={"playbook_id": self.BAD_SCHEMA_ID, "active_release_bundle_hash": "sha256:whatever"}
+            Item={
+                "playbook_id": self.BAD_SCHEMA_ID,
+                "active_release_bundle_hash": "sha256:whatever",
+            }
         )
 
         with self.assertRaises(HTTPException) as ctx:
@@ -254,6 +261,7 @@ class TestInvalidSchemaBundleFailsClosed(SyntheticRegistryTestBase):
 
 
 # -- (2) AC2: missing our_standard on a covering topic is a hard error ----
+
 
 class TestMissingOurStandardFailsClosed(SyntheticRegistryTestBase):
     def test_resolve_refuses_when_covering_topic_has_no_standard_text(self):
@@ -286,6 +294,7 @@ class TestMissingOurStandardFailsClosed(SyntheticRegistryTestBase):
 
 # -- (3) AC3: valid bundles load exactly as before --------------------------
 
+
 class TestValidBundleUnaffected(unittest.TestCase):
     def setUp(self):
         self.ddb = _FakeDynamoDBResource()
@@ -317,6 +326,7 @@ class TestValidBundleUnaffected(unittest.TestCase):
 
 
 # -- (4) playbook_validation must import without jsonschema installed -------
+
 
 class TestPlaybookValidationStaysStdlibImportable(unittest.TestCase):
     """`scripts/playbook_validation.py` is reached from stdlib-only callers

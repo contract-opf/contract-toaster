@@ -128,7 +128,7 @@ SCHEMA = pp.load_output_schema()
 # ---------------------------------------------------------------------------
 
 REALISTIC_CRITIC_OBJECTION = (
-    "The first reviewer inserted the limiting phrase \"arising solely from the "
+    'The first reviewer inserted the limiting phrase "arising solely from the '
     "negligent acts of the Institution's own personnel\" into the indemnity at "
     "p0021, and that phrase narrows the indemnity further than the position "
     "requires. Read literally it excludes third-party tort claims brought "
@@ -146,7 +146,7 @@ REALISTIC_CRITIC_OBJECTION = (
 
 REALISTIC_RATIONALE_OBJECTION = (
     "The rationale offered for the issue at p0009 says the notice period "
-    "\"departs from the required position\", but the clause it points at sets a "
+    '"departs from the required position", but the clause it points at sets a '
     "thirty-day cure period, and the position governs the termination notice "
     "period rather than the cure period; the two are different mechanics in this "
     "agreement and the document keeps them in separate subsections. As written "
@@ -294,8 +294,14 @@ def _response(**overrides: Any) -> dict[str, Any]:
     return body
 
 
-def _critic_response(*, objection: str | None = None, contested: str | None = None) -> dict[str, Any]:
-    delta: dict[str, Any] = {"added_issues": [], "contested_replacements": [], "rationale_objections": []}
+def _critic_response(
+    *, objection: str | None = None, contested: str | None = None
+) -> dict[str, Any]:
+    delta: dict[str, Any] = {
+        "added_issues": [],
+        "contested_replacements": [],
+        "rationale_objections": [],
+    }
     if contested is not None:
         delta["contested_replacements"].append(
             {
@@ -309,12 +315,16 @@ def _critic_response(*, objection: str | None = None, contested: str | None = No
             }
         )
     if objection is not None:
-        delta["rationale_objections"].append({"section_ref": "12 Term and Termination", "objection": objection})
+        delta["rationale_objections"].append(
+            {"section_ref": "12 Term and Termination", "objection": objection}
+        )
     return _response(critic_delta=delta)
 
 
 def _final_result_critic_response(
-    *, disposition_reason: str = "Same issue, narrower wording.", override_reason: str = "Too narrow."
+    *,
+    disposition_reason: str = "Same issue, narrower wording.",
+    override_reason: str = "Too narrow.",
 ) -> dict[str, Any]:
     """A critic response carrying #137's audit arrays: one REVISE disposition
     and the override that records it, each with the given reason."""
@@ -382,9 +392,7 @@ def _states_budget(prompt: str, label: str, cap: int) -> bool:
 
 
 def test_realistic_critic_objection_validates(failures: list[str]) -> None:
-    pointer = (
-        "/definitions/CriticDelta/properties/contested_replacements/items/properties/critic_objection"
-    )
+    pointer = "/definitions/CriticDelta/properties/contested_replacements/items/properties/critic_objection"
     body = _critic_response(contested=REALISTIC_CRITIC_OBJECTION)
     error = _validates(body, SCHEMA)
     if error is not None:
@@ -486,7 +494,9 @@ def test_every_cap_is_stated_or_deliberately_unstated(failures: list[str]) -> No
     unstated = set(pp.LENGTH_BUDGETS_DELIBERATELY_UNSTATED)
     overlap = stated & unstated
     if overlap:
-        failures.append(f"pointers claimed as both stated and deliberately unstated: {sorted(overlap)}")
+        failures.append(
+            f"pointers claimed as both stated and deliberately unstated: {sorted(overlap)}"
+        )
     for pointer in _all_schema_cap_pointers(SCHEMA):
         if pointer not in stated and pointer not in unstated:
             failures.append(
@@ -502,7 +512,7 @@ def test_every_budget_pointer_resolves(failures: list[str]) -> None:
     ):
         if pp.schema_max_length(SCHEMA, pointer) is None:
             failures.append(
-                f"the budget for \"{label}\" points at {pointer}, which carries no maxLength in the "
+                f'the budget for "{label}" points at {pointer}, which carries no maxLength in the '
                 "active artifact -- the renderer silently omits that line, so the model is told "
                 "nothing"
             )
@@ -525,7 +535,7 @@ def test_primary_overlay_states_every_primary_budget(failures: list[str]) -> Non
         cap = pp.schema_max_length(SCHEMA, pointer)
         if cap is None or not _states_budget(overlay, label, cap):
             failures.append(
-                f"the OUTPUT CONTRACT block never tells the model that \"{label}\" is capped at "
+                f'the OUTPUT CONTRACT block never tells the model that "{label}" is capped at '
                 f"{cap} characters"
             )
 
@@ -541,12 +551,11 @@ def test_internal_notes_budget_is_gated_on_the_notes_mode(failures: list[str]) -
         cap = pp.schema_max_length(SCHEMA, pointer)
         if cap is None or not _states_budget(internal, label, cap):
             failures.append(
-                f"the internal-notes overlay never states the {cap}-character budget for "
-                f"\"{label}\""
+                f'the internal-notes overlay never states the {cap}-character budget for "{label}"'
             )
         if label in external:
             failures.append(
-                f"the external-notes overlay names \"{label}\", a field that mode never asks for"
+                f'the external-notes overlay names "{label}", a field that mode never asks for'
             )
 
 
@@ -558,7 +567,7 @@ def test_critic_tasking_states_the_critic_budgets(failures: list[str]) -> None:
         for label, pointer in pp._CRITIC_LENGTH_BUDGETS:
             cap = pp.schema_max_length(SCHEMA, pointer)
             if cap is None or not _states_budget(tasking, label, cap):
-                failures.append(f"{name} never states the {cap}-character budget for \"{label}\"")
+                failures.append(f'{name} never states the {cap}-character budget for "{label}"')
 
 
 def test_critic_budgets_reach_the_assembled_critic_prompt(failures: list[str]) -> None:
@@ -589,7 +598,7 @@ def test_shared_overlay_names_no_critic_only_field(failures: list[str]) -> None:
     for label in ("critic_objection", "critic_suggested_replacement", "critic_delta"):
         if label in overlay:
             failures.append(
-                f"the shared OUTPUT CONTRACT block names \"{label}\": that block tells every "
+                f'the shared OUTPUT CONTRACT block names "{label}": that block tells every '
                 "reader to include the listed top-level keys and ONLY those, so naming a "
                 "critic-only field there invites the PRIMARY pass to emit it"
             )
@@ -630,7 +639,9 @@ def test_in_budget_response_still_validates(failures: list[str]) -> None:
         json.dumps(_response(verdict_summary="A" * cap)), issue_provenance="model"
     )
     if not is_valid:
-        failures.append(f"a verdict_summary exactly at its {cap}-character budget was rejected: {error}")
+        failures.append(
+            f"a verdict_summary exactly at its {cap}-character budget was rejected: {error}"
+        )
 
 
 def test_retry_correction_carries_the_budget_and_forbids_dropping_work(failures: list[str]) -> None:
@@ -654,7 +665,7 @@ def test_retry_correction_carries_the_budget_and_forbids_dropping_work(failures:
     if "do not drop an issue" not in lowered:
         failures.append(
             "the retry correction does not forbid dropping an issue to fit: a model told only "
-            "\"too long\" can comply by saying less, which is a shorter response and a worse "
+            '"too long" can comply by saying less, which is a shorter response and a worse '
             "review"
         )
 

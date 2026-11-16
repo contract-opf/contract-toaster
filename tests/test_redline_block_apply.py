@@ -226,9 +226,7 @@ def _reopen(docx_bytes: bytes, tmp_dir: Path, name: str):
 # AC 1 + AC 4: two edits in one paragraph, footnotes anchored by revision id
 # ---------------------------------------------------------------------------
 
-_TWO_EDIT_TEXT = (
-    "The Term shall be sixty (60) days and the Notice Period shall be ten (10) days."
-)
+_TWO_EDIT_TEXT = "The Term shall be sixty (60) days and the Notice Period shall be ten (10) days."
 _TWO_EDIT_SEGMENTS = [
     {"op": "keep", "text": "The Term shall be "},
     {"op": "delete", "text": "sixty (60)", "issue_key": "TERM-1"},
@@ -305,9 +303,7 @@ def test_two_edits_in_one_paragraph(failures: list) -> None:
         return
     footnote_text_by_id = {}
     for fn in footnotes_root.findall(_qn("footnote")):
-        footnote_text_by_id[fn.get(_qn("id"))] = "".join(
-            t.text or "" for t in fn.iter(_qn("t"))
-        )
+        footnote_text_by_id[fn.get(_qn("id"))] = "".join(t.text or "" for t in fn.iter(_qn("t")))
 
     for issue_key, expected_insert in (("TERM-1", "thirty (30)"), ("NOTICE-1", "thirty (30)")):
         owned_ins = [ins_by_id[rid] for rid in by_issue[issue_key] if rid in ins_by_id]
@@ -347,8 +343,7 @@ def test_two_edits_in_one_paragraph(failures: list) -> None:
             t.text or "" for t in _body_paragraph(path.read_bytes(), 1).iter(_qn("t"))
         )
         expected_accepted = (
-            "The Term shall be thirty (30) days and the Notice Period shall be "
-            "thirty (30) days."
+            "The Term shall be thirty (30) days and the Notice Period shall be thirty (30) days."
         )
         if accepted != expected_accepted:
             failures.append(f"[{case}] accept_all text {accepted!r}")
@@ -464,9 +459,7 @@ def test_pure_insertion_splits_run_and_keeps_rpr(failures: list) -> None:
 # AC 3: occurrence disambiguation
 # ---------------------------------------------------------------------------
 
-_REPEATED_TEXT = (
-    "The Term shall be thirty (30) days. The Notice Period shall be thirty (30) days."
-)
+_REPEATED_TEXT = "The Term shall be thirty (30) days. The Notice Period shall be thirty (30) days."
 
 
 def test_occurrence_disambiguation_edits_the_second_match(failures: list) -> None:
@@ -514,8 +507,7 @@ def test_occurrence_disambiguation_edits_the_second_match(failures: list) -> Non
     )
     if "The Term shall be thirty (30) days." not in leading_plain:
         failures.append(
-            f"[{case}] the FIRST occurrence was not left untouched: plain text is "
-            f"{leading_plain!r}"
+            f"[{case}] the FIRST occurrence was not left untouched: plain text is {leading_plain!r}"
         )
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -528,9 +520,7 @@ def test_occurrence_disambiguation_edits_the_second_match(failures: list) -> Non
         accepted = "".join(
             t.text or "" for t in _body_paragraph(path.read_bytes(), 1).iter(_qn("t"))
         )
-        expected = (
-            "The Term shall be thirty (30) days. The Notice Period shall be sixty (60) days."
-        )
+        expected = "The Term shall be thirty (30) days. The Notice Period shall be sixty (60) days."
         if accepted != expected:
             failures.append(f"[{case}] accept_all text {accepted!r} != {expected!r}")
 
@@ -601,9 +591,7 @@ def test_both_occurrences_edited_needs_descending_order(failures: list) -> None:
         accepted = "".join(
             t.text or "" for t in _body_paragraph(path.read_bytes(), 1).iter(_qn("t"))
         )
-        want = (
-            "The Term shall be sixty (60) days. The Notice Period shall be ninety (90) days."
-        )
+        want = "The Term shall be sixty (60) days. The Notice Period shall be ninety (90) days."
         if accepted != want:
             failures.append(f"[{case}] accept_all text {accepted!r} != {want!r}")
 
@@ -681,10 +669,7 @@ def test_replacement_and_pure_insertion_in_one_paragraph(failures: list) -> None
         accepted = "".join(
             t.text or "" for t in _body_paragraph(path.read_bytes(), 1).iter(_qn("t"))
         )
-        want = (
-            "The Term shall be thirty (30) days and the Agreement shall not renew "
-            "automatically."
-        )
+        want = "The Term shall be thirty (30) days and the Agreement shall not renew automatically."
         if accepted != want:
             failures.append(f"[{case}] accept_all text {accepted!r} != {want!r}")
 
@@ -785,9 +770,7 @@ def test_insertions_at_both_paragraph_boundaries(failures: list) -> None:
 
 def test_delete_across_physical_paragraphs_fails_closed(failures: list) -> None:
     case = "delete_across_physical_paragraphs_fails_closed"
-    docx_bytes = _make_docx(
-        ["First physical paragraph.", "Second physical paragraph."]
-    )
+    docx_bytes = _make_docx(["First physical paragraph.", "Second physical paragraph."])
     proven, block_id = _prove(
         docx_bytes,
         [
@@ -871,8 +854,7 @@ def test_footnote_body_is_itself_tracked(failures: list) -> None:
     for rationale in _RATIONALES.values():
         if rationale in surviving:
             failures.append(
-                f"[{case}] rejecting all revisions still leaves {rationale!r} in the "
-                f"footnotes part"
+                f"[{case}] rejecting all revisions still leaves {rationale!r} in the footnotes part"
             )
 
 
@@ -1441,7 +1423,9 @@ def test_edit_crossing_a_tab_or_soft_break_is_cut_there_and_applies(failures: li
         docx_bytes = _tab_and_break_fixture(shape)
         proven, block_text = _prove_one_edit(docx_bytes, source, replacement)
         if proven["status"] != "proven":
-            failures.append(f"{label} must prove; got {proven['status']!r}: {proven.get('failures')!r}")
+            failures.append(
+                f"{label} must prove; got {proven['status']!r}: {proven.get('failures')!r}"
+            )
             continue
         result = redline_block_apply.apply_block_transcript(
             docx_bytes, proven, author=AUTHOR, timestamp_iso=TIMESTAMP
@@ -1459,12 +1443,12 @@ def test_edit_crossing_a_tab_or_soft_break_is_cut_there_and_applies(failures: li
         if not replacement and len(entry["revision_ids"]) < 2:
             failures.append(f"{label} two deleted pieces must each leave a revision: {entry!r}")
         if sorted(result["revision_ids_by_issue"]) != ["I1"]:
-            failures.append(f"{label} one issue group expected: {result['revision_ids_by_issue']!r}")
+            failures.append(
+                f"{label} one issue group expected: {result['revision_ids_by_issue']!r}"
+            )
         accepted = _accepted_block_text(result["docx_bytes"])
         if accepted != expect(block_text):
-            failures.append(
-                f"{label} accepting must give {expect(block_text)!r}; got {accepted!r}"
-            )
+            failures.append(f"{label} accepting must give {expect(block_text)!r}; got {accepted!r}")
         if replacement and accepted != block_text.replace(source, replacement, 1):
             failures.append(f"{label} accepted text must EQUAL the approved text; got {accepted!r}")
         raw = _raw_control_chars_in_w_t(result["docx_bytes"])
@@ -1555,14 +1539,18 @@ def test_replacement_not_reproducing_the_crossed_separator_fails_closed(failures
         docx_bytes = _tab_and_break_fixture(shape)
         proven, _ = _prove_one_edit(docx_bytes, source, replacement)
         if proven["status"] != "proven":
-            failures.append(f"{label} must prove; got {proven['status']!r}: {proven.get('failures')!r}")
+            failures.append(
+                f"{label} must prove; got {proven['status']!r}: {proven.get('failures')!r}"
+            )
             continue
         result = redline_block_apply.apply_block_transcript(
             docx_bytes, proven, author=AUTHOR, timestamp_iso=TIMESTAMP
         )
         got = [(f.get("reason"), f.get("issue_key")) for f in result["failures"]]
         if got != [(redline_block_apply.REASON_EDIT_NOT_APPLIED, "I1")]:
-            failures.append(f"{label} must fail closed as edit_not_applied; got {result['failures']!r}")
+            failures.append(
+                f"{label} must fail closed as edit_not_applied; got {result['failures']!r}"
+            )
             continue
         detail = result["failures"][0].get("detail") or ""
         if why not in detail:
@@ -1622,8 +1610,11 @@ def test_inserted_tab_and_break_are_written_as_run_children(failures: list) -> N
     if sorted(inserted) != sorted([_qn("tab"), _qn("br")]):
         failures.append(f"one <w:tab/> and one <w:br/> must be inserted; got {inserted!r}")
     expected = (
-        block_text[:word_at] + replacement + block_text[word_at + len(word) : at]
-        + "\nby wire" + block_text[at:]
+        block_text[:word_at]
+        + replacement
+        + block_text[word_at + len(word) : at]
+        + "\nby wire"
+        + block_text[at:]
     )
     accepted = _accepted_block_text(result["docx_bytes"])
     if accepted != expected:

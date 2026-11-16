@@ -118,9 +118,7 @@ def _active_output_schema_path(source: "str | None" = None) -> Path:
         chain.append(name)
 
     if name not in assignments:
-        raise RuntimeError(
-            f"could not resolve OUTPUT_SCHEMA_PATH in {PRIMARY_REVIEW_PASS_SRC}"
-        )
+        raise RuntimeError(f"could not resolve OUTPUT_SCHEMA_PATH in {PRIMARY_REVIEW_PASS_SRC}")
 
     _assert_every_binding_was_seen(tree, chain, seen_targets)
 
@@ -129,7 +127,9 @@ def _active_output_schema_path(source: "str | None" = None) -> Path:
     node = assignments[name]
     while isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
         if not isinstance(node.right, ast.Constant) or not isinstance(node.right.value, str):
-            raise RuntimeError(f"unexpected path component in OUTPUT_SCHEMA_PATH: {ast.dump(node.right)}")
+            raise RuntimeError(
+                f"unexpected path component in OUTPUT_SCHEMA_PATH: {ast.dump(node.right)}"
+            )
         parts.append(node.right.value)
         node = node.left
     if not (isinstance(node, ast.Name) and node.id == "REPO_ROOT") or not parts:
@@ -238,7 +238,8 @@ def _assert_every_binding_was_seen(
     ]
     if unseen:
         detail = ", ".join(
-            f"{name} at line {lineno} ({form})" for name, lineno, form in sorted(unseen, key=lambda b: b[1])
+            f"{name} at line {lineno} ({form})"
+            for name, lineno, form in sorted(unseen, key=lambda b: b[1])
         )
         raise RuntimeError(
             f"the parsed source binds a name on the OUTPUT_SCHEMA_PATH alias "
@@ -250,7 +251,9 @@ def _assert_every_binding_was_seen(
 
 ACTIVE_OUTPUT_SCHEMA_PATH = _active_output_schema_path()
 PLAYBOOK_SCHEMA_PATH = REPO_ROOT / "playbooks" / "schema.json"
-EIAA_PLAYBOOK_PATH = REPO_ROOT / "tests" / "fixtures" / "playbooks" / "synthetic-generic-v1.0.0.json"
+EIAA_PLAYBOOK_PATH = (
+    REPO_ROOT / "tests" / "fixtures" / "playbooks" / "synthetic-generic-v1.0.0.json"
+)
 
 # ---------------------------------------------------------------------------
 # Inline model-response fixtures (valid and invalid)
@@ -389,13 +392,21 @@ INVALID_SOURCE_QUOTE_WRONG_TYPE = {
 
 VALIDATOR_FIXTURES = [
     {"name": "valid_response", "obj": VALID_RESPONSE, "expect_valid": True},
-    {"name": "valid_response_with_source_quote", "obj": VALID_RESPONSE_WITH_SOURCE_QUOTE, "expect_valid": True},
+    {
+        "name": "valid_response_with_source_quote",
+        "obj": VALID_RESPONSE_WITH_SOURCE_QUOTE,
+        "expect_valid": True,
+    },
     {"name": "missing_decision", "obj": INVALID_MISSING_DECISION, "expect_valid": False},
     {"name": "wrong_decision_type", "obj": INVALID_WRONG_DECISION_TYPE, "expect_valid": False},
     {"name": "invalid_decision_value", "obj": INVALID_DECISION_VALUE, "expect_valid": False},
     {"name": "issue_missing_field", "obj": INVALID_ISSUE_MISSING_FIELD, "expect_valid": False},
     {"name": "replacement_too_long", "obj": INVALID_REPLACEMENT_TOO_LONG, "expect_valid": False},
-    {"name": "source_quote_wrong_type", "obj": INVALID_SOURCE_QUOTE_WRONG_TYPE, "expect_valid": False},
+    {
+        "name": "source_quote_wrong_type",
+        "obj": INVALID_SOURCE_QUOTE_WRONG_TYPE,
+        "expect_valid": False,
+    },
 ]
 
 
@@ -403,6 +414,7 @@ VALIDATOR_FIXTURES = [
 # Minimal JSON-Schema validator (stdlib only — no jsonschema package).
 # Supports: type, required, properties, enum, maxLength, items, $ref (local).
 # ---------------------------------------------------------------------------
+
 
 class ValidationError(Exception):
     pass
@@ -688,6 +700,7 @@ def check_resolver_self_check(failures: list) -> None:
 # Check 1: subset check
 # ---------------------------------------------------------------------------
 
+
 def check_subset(failures: list) -> None:
     """every_issue_includes ⊆ properties of the ACTIVE output contract's issues[]."""
     label = "SUBSET CHECK"
@@ -695,8 +708,7 @@ def check_subset(failures: list) -> None:
 
     if not ACTIVE_OUTPUT_SCHEMA_PATH.exists():
         failures.append(
-            f"{label}: {schema_name} does not exist. "
-            f"Author playbooks/{schema_name} to fix."
+            f"{label}: {schema_name} does not exist. Author playbooks/{schema_name} to fix."
         )
         return
 
@@ -708,7 +720,9 @@ def check_subset(failures: list) -> None:
 
     every_issue_includes = playbook.get("output_format", {}).get("every_issue_includes", [])
     if not every_issue_includes:
-        failures.append(f"{label}: output_format.every_issue_includes is empty or missing in playbook.")
+        failures.append(
+            f"{label}: output_format.every_issue_includes is empty or missing in playbook."
+        )
         return
 
     # Navigate to the issue object schema, resolving $ref if needed.
@@ -748,6 +762,7 @@ def check_subset(failures: list) -> None:
 # Check 2: bundle-composition check
 # ---------------------------------------------------------------------------
 
+
 def check_bundle_composition(failures: list) -> None:
     """release block in schema.json should require output_contract_hash."""
     label = "BUNDLE-COMPOSITION CHECK"
@@ -758,9 +773,7 @@ def check_bundle_composition(failures: list) -> None:
     # The release block's required fields live at:
     # properties.playbook.properties.release.required
     try:
-        release_required = (
-            schema["properties"]["playbook"]["properties"]["release"]["required"]
-        )
+        release_required = schema["properties"]["playbook"]["properties"]["release"]["required"]
     except (KeyError, TypeError) as e:
         failures.append(
             f"{label}: could not navigate schema.json to "
@@ -774,14 +787,13 @@ def check_bundle_composition(failures: list) -> None:
             f"fields in playbooks/schema.json. Current required: {release_required}"
         )
     else:
-        print(
-            f"  PASS {label}: 'output_contract_hash' is required in the release bundle."
-        )
+        print(f"  PASS {label}: 'output_contract_hash' is required in the release bundle.")
 
 
 # ---------------------------------------------------------------------------
 # Check 3: validator unit tests
 # ---------------------------------------------------------------------------
+
 
 def check_validator_fixtures(failures: list) -> None:
     """Run valid/invalid model-response fixtures against output-schema-v2.json."""
@@ -810,9 +822,7 @@ def check_validator_fixtures(failures: list) -> None:
             print(f"  PASS {label}: fixture '{name}' correctly classified as {status}.")
         else:
             if expect_valid:
-                failures.append(
-                    f"{label}: fixture '{name}' expected VALID but got errors: {errs}"
-                )
+                failures.append(f"{label}: fixture '{name}' expected VALID but got errors: {errs}")
             else:
                 failures.append(
                     f"{label}: fixture '{name}' expected INVALID but passed validation."
@@ -822,6 +832,7 @@ def check_validator_fixtures(failures: list) -> None:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> int:
     print("Output-contract schema gate (issue #4)\n")

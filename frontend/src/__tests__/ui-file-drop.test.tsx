@@ -43,9 +43,7 @@ describe('CtFileDrop', () => {
 
   it('emits ct-files with the selected file(s) on input change', () => {
     const onFiles = vi.fn();
-    render(
-      <CtFileDrop data-testid="fd" label="Upload" onFiles={onFiles} />,
-    );
+    render(<CtFileDrop data-testid="fd" label="Upload" onFiles={onFiles} />);
     const file = docxFile();
     fireEvent.change(screen.getByTestId('fd'), { target: { files: [file] } });
 

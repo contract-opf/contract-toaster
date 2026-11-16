@@ -82,9 +82,7 @@ def _find_ts_sources() -> list[Path]:
     for subdir in ("lib", "bin"):
         p = INFRA / subdir
         if p.is_dir():
-            sources.extend(
-                q for q in p.rglob("*.ts") if "node_modules" not in q.parts
-            )
+            sources.extend(q for q in p.rglob("*.ts") if "node_modules" not in q.parts)
     return sources
 
 
@@ -102,6 +100,7 @@ def _assert(condition: bool, label: str, detail: str = "") -> list[str]:
 # ---------------------------------------------------------------------------
 # Check A -- KB + S3 Vectors store defined, with a dedicated KB service role
 # ---------------------------------------------------------------------------
+
 
 def check_a_kb_and_vectors_defined() -> list[str]:
     print("\nCheck A: Bedrock Knowledge Base + S3 Vectors store defined in data-stack.ts ...")
@@ -144,6 +143,7 @@ def check_a_kb_and_vectors_defined() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check B -- Ingestion wiring: Bedrock DataSource targets the corpus bucket
 # ---------------------------------------------------------------------------
+
 
 def check_b_ingestion_wiring() -> list[str]:
     print("\nCheck B: Ingestion wiring -- Bedrock DataSource targets the corpus bucket ...")
@@ -222,6 +222,7 @@ def check_c_metadata_model() -> list[str]:
 # Check D -- Positive/negative separation
 # ---------------------------------------------------------------------------
 
+
 def check_d_positive_negative_separation() -> list[str]:
     print("\nCheck D: Positive/negative corpus separation ...")
     failures: list[str] = []
@@ -235,11 +236,19 @@ def check_d_positive_negative_separation() -> list[str]:
         )
 
     failures += _assert(
-        bool(re.search(r"corpus_polarity", text)) and bool(re.search(r"positive", text, re.IGNORECASE)) and bool(re.search(r"negative", text, re.IGNORECASE)),
+        bool(re.search(r"corpus_polarity", text))
+        and bool(re.search(r"positive", text, re.IGNORECASE))
+        and bool(re.search(r"negative", text, re.IGNORECASE)),
         "data-stack.ts documents corpus_polarity positive/negative separation",
     )
     failures += _assert(
-        bool(re.search(r"never\s+(?:be\s+)?commingl|not\s+commingl|separate\s+(?:corpora|index)", text, re.IGNORECASE)),
+        bool(
+            re.search(
+                r"never\s+(?:be\s+)?commingl|not\s+commingl|separate\s+(?:corpora|index)",
+                text,
+                re.IGNORECASE,
+            )
+        ),
         "data-stack.ts states rejected/negative examples are never commingled with positive precedent",
     )
 
@@ -277,6 +286,7 @@ def check_e_curation_fields() -> list[str]:
 # Check F -- Corpus versioning / activation still documented (issue #20)
 # ---------------------------------------------------------------------------
 
+
 def check_f_versioning_still_documented() -> list[str]:
     print("\nCheck F: Corpus versioning / activation / ingestion interlock still documented ...")
     failures: list[str] = []
@@ -287,7 +297,11 @@ def check_f_versioning_still_documented() -> list[str]:
     arch = _read(ARCHITECTURE_PATH)
 
     failures += _assert(
-        bool(re.search(r"physical\s+(?:store|KB|knowledge.?base)\s+(?:id|identifier)", arch, re.IGNORECASE)),
+        bool(
+            re.search(
+                r"physical\s+(?:store|KB|knowledge.?base)\s+(?:id|identifier)", arch, re.IGNORECASE
+            )
+        ),
         "ARCHITECTURE.md documents the physical store/KB ID pin (issue #20)",
     )
     failures += _assert(
@@ -295,7 +309,9 @@ def check_f_versioning_still_documented() -> list[str]:
         "ARCHITECTURE.md documents the ingestion interlock",
     )
     failures += _assert(
-        bool(re.search(r"content.?addressed\s+manifest|clause.?id\s+manifest", arch, re.IGNORECASE)),
+        bool(
+            re.search(r"content.?addressed\s+manifest|clause.?id\s+manifest", arch, re.IGNORECASE)
+        ),
         "ARCHITECTURE.md documents the content-addressed clause-id manifest per snapshot",
     )
 
@@ -403,7 +419,11 @@ def check_g_reconciled_least_privilege() -> list[str]:
     # (ARN-scoped, not action-name-wide) somewhere in the infra sources.
     all_ts = "\n".join(_read(f) for f in _find_ts_sources())
     failures += _assert(
-        bool(re.search(r"embedding.?model\s+ARN|embedding.?model.{0,40}scoped", all_ts, re.IGNORECASE)),
+        bool(
+            re.search(
+                r"embedding.?model\s+ARN|embedding.?model.{0,40}scoped", all_ts, re.IGNORECASE
+            )
+        ),
         "infra/ sources document the reconciled invariant: KB role's InvokeModel is scoped ONLY to the embedding-model ARN",
     )
 
@@ -427,6 +447,7 @@ def check_g_reconciled_least_privilege() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check H -- Private access only (no public exposure; VPC endpoint)
 # ---------------------------------------------------------------------------
+
 
 def check_h_private_access() -> list[str]:
     print("\nCheck H: KB / S3 Vectors store is private-only (IAM + VPC endpoint) ...")
@@ -455,6 +476,7 @@ def check_h_private_access() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check I -- cdk synth runs cleanly; empty-corpus / trivial-query documented
 # ---------------------------------------------------------------------------
+
 
 def check_i_cdk_synth() -> list[str]:
     print("\nCheck I: cdk synth runs cleanly with the KB + S3 Vectors resources ...")
@@ -504,6 +526,7 @@ def check_i_cdk_synth() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check J -- Idle cost sanity: no OpenSearch Serverless / OCU anywhere
 # ---------------------------------------------------------------------------
+
 
 def check_j_no_opensearch_serverless() -> list[str]:
     print("\nCheck J: Idle cost sanity -- no OpenSearch Serverless / OCU minimum in infra/ ...")

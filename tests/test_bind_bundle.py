@@ -93,7 +93,9 @@ def check_1_knowledge_profile_binds_and_validates() -> list[str]:
     try:
         jsonschema.validate(instance=bundle_doc, schema=_load_bundle_schema())
     except jsonschema.ValidationError as exc:
-        failures.append(f"  [1] bound bundle failed bundle.schema-v2.json validation: {exc.message}")
+        failures.append(
+            f"  [1] bound bundle failed bundle.schema-v2.json validation: {exc.message}"
+        )
 
     if bundle_doc.get("opf") != opf_doc:
         failures.append("  [1] bundle_doc['opf'] is not deep-equal to the input OPF document")
@@ -101,9 +103,13 @@ def check_1_knowledge_profile_binds_and_validates() -> list[str]:
     identity = opf_doc["identity"]
     lineage = bundle_doc.get("lineage", {})
     if lineage.get("opf_content_hash") != identity["content_hash"]:
-        failures.append("  [1] lineage.opf_content_hash does not match opf.identity.content_hash verbatim")
+        failures.append(
+            "  [1] lineage.opf_content_hash does not match opf.identity.content_hash verbatim"
+        )
     if lineage.get("opf_section_digests") != identity["section_digests"]:
-        failures.append("  [1] lineage.opf_section_digests does not match opf.identity.section_digests verbatim")
+        failures.append(
+            "  [1] lineage.opf_section_digests does not match opf.identity.section_digests verbatim"
+        )
 
     if bundle_doc.get("profile") != "knowledge":
         failures.append(f"  [1] profile == {bundle_doc.get('profile')!r}, expected 'knowledge'")
@@ -141,7 +147,9 @@ def check_2_precision_profile() -> list[str]:
             model_policy_path=MODEL_POLICY_PATH,
             precision=broken_precision,
         )
-        failures.append("  [2b] bind_bundle did not raise on a precision profile with a missing path")
+        failures.append(
+            "  [2b] bind_bundle did not raise on a precision profile with a missing path"
+        )
     except bind_bundle.BindBundleError:
         pass
     except Exception as exc:  # noqa: BLE001
@@ -165,7 +173,9 @@ def check_3_mismatched_playbook_id_and_missing_identity() -> list[str]:
         message = str(exc)
         for key in opf_load.agreement_type_keys(opf_doc):
             if key not in message:
-                failures.append(f"  [3a] error message does not name the OPF's actual key {key!r}: {message!r}")
+                failures.append(
+                    f"  [3a] error message does not name the OPF's actual key {key!r}: {message!r}"
+                )
     except Exception as exc:  # noqa: BLE001
         failures.append(f"  [3a] wrong exception type raised: {type(exc).__name__}: {exc}")
 
@@ -305,9 +315,13 @@ def check_6_committed_example_matches_bind_bundle() -> list[str]:
         failures.append(f"  [6] committed example failed schema validation: {exc.message}")
 
     if committed.get("profile") != "knowledge":
-        failures.append(f"  [6] committed example profile == {committed.get('profile')!r}, expected 'knowledge'")
+        failures.append(
+            f"  [6] committed example profile == {committed.get('profile')!r}, expected 'knowledge'"
+        )
     if "precision" in committed:
-        failures.append("  [6] committed example (knowledge profile) unexpectedly carries a 'precision' block")
+        failures.append(
+            "  [6] committed example (knowledge profile) unexpectedly carries a 'precision' block"
+        )
 
     opf_doc = _load_fixture()
     recomputed = bind_bundle.bind_bundle(
@@ -318,19 +332,41 @@ def check_6_committed_example_matches_bind_bundle() -> list[str]:
         approved_at=committed.get("activation", {}).get("approved_at"),
     )
     if recomputed != committed:
-        failures.append("  [6] committed example does not match a fresh bind_bundle() call with its own recorded inputs")
+        failures.append(
+            "  [6] committed example does not match a fresh bind_bundle() call with its own recorded inputs"
+        )
 
     return failures
 
 
 def main() -> int:
     checks = [
-        ("1", "knowledge-profile bind validates, embeds OPF, carries verbatim lineage", check_1_knowledge_profile_binds_and_validates),
+        (
+            "1",
+            "knowledge-profile bind validates, embeds OPF, carries verbatim lineage",
+            check_1_knowledge_profile_binds_and_validates,
+        ),
         ("2", "precision profile validates paths; missing path raises", check_2_precision_profile),
-        ("3", "mismatched playbook-id / missing identity raise with clear messages", check_3_mismatched_playbook_id_and_missing_identity),
-        ("4", "bundle hash deterministic across two runs", check_4_bundle_hash_stable_across_two_runs),
-        ("5", "CLI invocation writes a schema-valid bundle and prints its hash", check_5_cli_invocation),
-        ("6", "committed example (playbooks/bundles/synthetic-eiaa.bundle-v2.json) matches bind_bundle()", check_6_committed_example_matches_bind_bundle),
+        (
+            "3",
+            "mismatched playbook-id / missing identity raise with clear messages",
+            check_3_mismatched_playbook_id_and_missing_identity,
+        ),
+        (
+            "4",
+            "bundle hash deterministic across two runs",
+            check_4_bundle_hash_stable_across_two_runs,
+        ),
+        (
+            "5",
+            "CLI invocation writes a schema-valid bundle and prints its hash",
+            check_5_cli_invocation,
+        ),
+        (
+            "6",
+            "committed example (playbooks/bundles/synthetic-eiaa.bundle-v2.json) matches bind_bundle()",
+            check_6_committed_example_matches_bind_bundle,
+        ),
     ]
 
     overall_pass = True

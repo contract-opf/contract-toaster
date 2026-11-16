@@ -206,9 +206,7 @@ describe('preflight card — ReviewSubmission.tsx', () => {
     await screen.findByTestId('review-preflight-card');
     expect(screen.queryByTestId('review-preflight-match-likely')).toBeNull();
     expect(screen.queryByTestId('review-preflight-match-unlikely')).toBeNull();
-    expect(screen.getByTestId('review-preflight-type-side')).toHaveTextContent(
-      /Statement of Work/,
-    );
+    expect(screen.getByTestId('review-preflight-type-side')).toHaveTextContent(/Statement of Work/);
   });
 
   it('never disables or delays the Upload button, even while preflight is still pending', async () => {

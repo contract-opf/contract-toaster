@@ -83,8 +83,14 @@ class FakeReviewsTable:
             self.items[initial["review_id"]] = dict(initial)
         self.raise_error: ClientError | None = None
 
-    def update_item(self, Key, UpdateExpression, ConditionExpression=None,
-                     ExpressionAttributeNames=None, ExpressionAttributeValues=None):
+    def update_item(
+        self,
+        Key,
+        UpdateExpression,
+        ConditionExpression=None,
+        ExpressionAttributeNames=None,
+        ExpressionAttributeValues=None,
+    ):
         if self.raise_error is not None:
             raise self.raise_error
         key = Key["review_id"]

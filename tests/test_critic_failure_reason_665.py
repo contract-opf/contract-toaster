@@ -339,9 +339,7 @@ def test_an_unreadable_critic_is_a_different_token_from_a_schema_invalid_one(
     single "it kept returning something unreadable"."""
     critic_id = _critic_model_id()
     critic_result = _run_real_critic(
-        model_client=model_client.FakeBedrockClient(
-            {critic_id: [_unreadable_critic_body()] * 8}
-        )
+        model_client=model_client.FakeBedrockClient({critic_id: [_unreadable_critic_body()] * 8})
     )
     if not str(critic_result.get("last_error", "")).startswith("invalid_json:"):
         failures.append(
@@ -456,8 +454,7 @@ def test_a_truncated_critic_is_distinguishable_without_a_token_of_its_own(
     classified = pr.classify_failure_reason(raised)
     if classified != "model_output_truncated":
         failures.append(
-            f"[3b] a truncated critic must classify as 'model_output_truncated'; "
-            f"got {classified!r}"
+            f"[3b] a truncated critic must classify as 'model_output_truncated'; got {classified!r}"
         )
     critic_branch_tokens = {
         review_spine.REASON_CRITIC_RETRY_EXHAUSTED,
@@ -465,8 +462,7 @@ def test_a_truncated_critic_is_distinguishable_without_a_token_of_its_own(
     }
     if classified in critic_branch_tokens:
         failures.append(
-            "[3c] a truncated critic and a bounded-retry critic must not collapse "
-            "into one token"
+            "[3c] a truncated critic and a bounded-retry critic must not collapse into one token"
         )
 
 
@@ -567,9 +563,7 @@ def test_the_attempt_count_reaches_the_row_and_the_diagnostics_projection(
     pr._write_real_terminal(REVIEW_ID, result, None, FakeDDB(table))
 
     if table.item.get("reason") != review_spine.REASON_CRITIC_SCHEMA_INVALID:
-        failures.append(
-            f"[5a] the row must carry the token; got {table.item.get('reason')!r}"
-        )
+        failures.append(f"[5a] the row must carry the token; got {table.item.get('reason')!r}")
     if table.item.get("critic_attempts") != result.get("critic_attempts"):
         failures.append(
             f"[5b] the attempt count must land on the reviews ROW -- "
@@ -587,9 +581,7 @@ def test_the_attempt_count_reaches_the_row_and_the_diagnostics_projection(
 
     # A review that did NOT fail on the critic must not grow the field.
     clean = FakeReviewsTable()
-    pr._write_real_terminal(
-        REVIEW_ID, {"status": "OK", "decision": "ACCEPT"}, None, FakeDDB(clean)
-    )
+    pr._write_real_terminal(REVIEW_ID, {"status": "OK", "decision": "ACCEPT"}, None, FakeDDB(clean))
     if "critic_attempts" in clean.item:
         failures.append(
             "[5e] absent, never a null placeholder, on every other review -- same "

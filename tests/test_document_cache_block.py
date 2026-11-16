@@ -126,9 +126,7 @@ def _sample_anchored_clauses() -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-SAMPLE_PRECEDENT = [
-    {"clause_id": "syn-cap-1", "polarity": "positive", "text": "Cap at $150,000."}
-]
+SAMPLE_PRECEDENT = [{"clause_id": "syn-cap-1", "polarity": "positive", "text": "Cap at $150,000."}]
 
 
 def test_cached_content_has_exactly_one_cache_control_block_on_the_doc_block(
@@ -146,16 +144,24 @@ def test_cached_content_has_exactly_one_cache_control_block_on_the_doc_block(
         prompt_caching_enabled=True,
     )
     if not isinstance(content, list):
-        failures.append(f"[1a] Expected a list of content blocks when prompt_caching_enabled=True and under threshold; got {type(content).__name__}")
+        failures.append(
+            f"[1a] Expected a list of content blocks when prompt_caching_enabled=True and under threshold; got {type(content).__name__}"
+        )
         return
     cache_control_blocks = [b for b in content if "cache_control" in b]
     if len(cache_control_blocks) != 1:
-        failures.append(f"[1b] Expected exactly one cache_control block; found {len(cache_control_blocks)}")
+        failures.append(
+            f"[1b] Expected exactly one cache_control block; found {len(cache_control_blocks)}"
+        )
         return
     if content[0] is not cache_control_blocks[0]:
-        failures.append("[1c] The cache_control block must be positioned FIRST (before all pass-specific text).")
+        failures.append(
+            "[1c] The cache_control block must be positioned FIRST (before all pass-specific text)."
+        )
     if content[0].get("cache_control") != {"type": "ephemeral"}:
-        failures.append(f"[1d] Doc block must carry cache_control={{'type': 'ephemeral'}}; got {content[0].get('cache_control')!r}")
+        failures.append(
+            f"[1d] Doc block must carry cache_control={{'type': 'ephemeral'}}; got {content[0].get('cache_control')!r}"
+        )
     if SHORT_DOC_TEXT not in content[0]["text"]:
         failures.append("[1e] The FIRST block must carry the document text.")
     if "cache_control" in content[-1]:
@@ -172,10 +178,14 @@ def test_capability_false_byte_identical_to_legacy_assembler(failures: list[str]
     legacy = pp.assemble_user_prompt_primary(**kwargs)
     capability_false = pp.assemble_user_content_primary(**kwargs, prompt_caching_enabled=False)
     if capability_false != legacy:
-        failures.append("[2a] prompt_caching_enabled=False must reproduce assemble_user_prompt_primary's output byte-identically.")
+        failures.append(
+            "[2a] prompt_caching_enabled=False must reproduce assemble_user_prompt_primary's output byte-identically."
+        )
     default_call = pp.assemble_user_content_primary(**kwargs)
     if default_call != legacy:
-        failures.append("[2b] prompt_caching_enabled default (False) must also be byte-identical to the legacy assembler.")
+        failures.append(
+            "[2b] prompt_caching_enabled default (False) must also be byte-identical to the legacy assembler."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -187,10 +197,14 @@ def test_capability_false_byte_identical_to_legacy_assembler(failures: list[str]
 
 def test_doc_block_byte_identical_between_primary_and_critic_callers(failures: list[str]) -> None:
     if cp.pp is not pp:
-        failures.append("[4a] critic_review_pass.py must import primary_review_pass as pp (the shared module the doc-block builder lives in).")
+        failures.append(
+            "[4a] critic_review_pass.py must import primary_review_pass as pp (the shared module the doc-block builder lives in)."
+        )
         return
     if cp.pp.build_document_cached_user_content is not pp.build_document_cached_user_content:
-        failures.append("[4b] critic_review_pass.py must reach the SAME build_document_cached_user_content function object -- no per-module reimplementation.")
+        failures.append(
+            "[4b] critic_review_pass.py must reach the SAME build_document_cached_user_content function object -- no per-module reimplementation."
+        )
 
     primary_content = pp.build_document_cached_user_content(SHORT_DOC_TEXT, "PRIMARY INSTRUCTION")
     # Simulated critic-pass call: same doc_text, deliberately DIFFERENT
@@ -198,9 +212,13 @@ def test_doc_block_byte_identical_between_primary_and_critic_callers(failures: l
     critic_content = cp.pp.build_document_cached_user_content(SHORT_DOC_TEXT, "CRITIC INSTRUCTION")
 
     if primary_content[0] != critic_content[0]:
-        failures.append(f"[4c] Doc block must be byte-identical for the SAME doc_text regardless of caller/pass-specific text: {primary_content[0]!r} != {critic_content[0]!r}")
+        failures.append(
+            f"[4c] Doc block must be byte-identical for the SAME doc_text regardless of caller/pass-specific text: {primary_content[0]!r} != {critic_content[0]!r}"
+        )
     if primary_content[1] == critic_content[1]:
-        failures.append("[4d] Test fixture setup error: the two calls' pass-specific text should differ (proves block 0's identity isn't a tautology of identical inputs).")
+        failures.append(
+            "[4d] Test fixture setup error: the two calls' pass-specific text should differ (proves block 0's identity isn't a tautology of identical inputs)."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -219,7 +237,9 @@ def test_append_suffix_never_touches_the_cached_doc_block(failures: list[str]) -
         failures.append("[5c] The suffix must not leak into the doc block.")
     # Original list/blocks must not be mutated in place.
     if content[-1]["text"] == appended[-1]["text"]:
-        failures.append("[5d] append_user_content_suffix must not mutate its input in place (original block's text changed).")
+        failures.append(
+            "[5d] append_user_content_suffix must not mutate its input in place (original block's text changed)."
+        )
 
 
 def test_append_falsy_suffix_is_a_no_op_on_both_shapes(failures: list[str]) -> None:
@@ -285,7 +305,9 @@ def test_live_bedrock_capability_true_sends_content_array_with_cache_control(
     )
     body = runtime.last_body()
     if body["messages"][0]["content"] != CACHE_BLOCKS:
-        failures.append(f"[7a] Capability-True model must send the content-block array verbatim (cache_control intact); got {body['messages'][0]['content']!r}")
+        failures.append(
+            f"[7a] Capability-True model must send the content-block array verbatim (cache_control intact); got {body['messages'][0]['content']!r}"
+        )
 
 
 def test_live_bedrock_capability_false_flattens_list_content(failures: list[str]) -> None:
@@ -300,10 +322,14 @@ def test_live_bedrock_capability_false_flattens_list_content(failures: list[str]
     body = runtime.last_body()
     content = body["messages"][0]["content"]
     if not isinstance(content, str):
-        failures.append(f"[8a] Capability-False model must flatten list content to a plain string; got {type(content).__name__}")
+        failures.append(
+            f"[8a] Capability-False model must flatten list content to a plain string; got {type(content).__name__}"
+        )
         return
     if content != "DOC\n\nINSTRUCTION":
-        failures.append(f"[8b] Flattened content must join each block's text in order; got {content!r}")
+        failures.append(
+            f"[8b] Flattened content must join each block's text in order; got {content!r}"
+        )
     if "cache_control" in content:
         failures.append("[8c] Flattened content must not carry any trace of cache_control.")
 
@@ -324,7 +350,9 @@ def test_live_bedrock_capability_false_plain_string_byte_identical(failures: lis
         max_output_tokens=100,
     )
     if runtime_a.last_body() != runtime_b.last_body():
-        failures.append("[9a] A plain-string user_prompt must produce a byte-identical request regardless of the model's prompt_caching capability.")
+        failures.append(
+            "[9a] A plain-string user_prompt must produce a byte-identical request regardless of the model's prompt_caching capability."
+        )
 
 
 class FakeHttpResponse:
@@ -354,9 +382,7 @@ class FakeHttpClient:
 
 
 def _openrouter_response(content: str, usage: dict[str, Any] | None = None) -> FakeHttpResponse:
-    body: dict[str, Any] = {
-        "choices": [{"message": {"content": content}, "finish_reason": "stop"}]
-    }
+    body: dict[str, Any] = {"choices": [{"message": {"content": content}, "finish_reason": "stop"}]}
     if usage is not None:
         body["usage"] = usage
     return FakeHttpResponse(200, body)
@@ -391,8 +417,9 @@ def test_openrouter_capability_true_sends_content_array_with_cache_control(
     client = mc.OpenRouterModelClient(
         api_key="sk-test", http_client=http, max_retries=0, sleep_fn=lambda _s: None
     )
-    with patch.dict("os.environ", {}, clear=True), patch.object(
-        mc, "load_openrouter_policy", return_value=_SYNTHETIC_OPENROUTER_POLICY
+    with (
+        patch.dict("os.environ", {}, clear=True),
+        patch.object(mc, "load_openrouter_policy", return_value=_SYNTHETIC_OPENROUTER_POLICY),
     ):
         client.invoke(
             model_id="test/cache-capable",
@@ -403,7 +430,9 @@ def test_openrouter_capability_true_sends_content_array_with_cache_control(
     body = http.calls[0]["json"]
     user_message = [m for m in body["messages"] if m["role"] == "user"][0]  # noqa: RUF015
     if user_message["content"] != CACHE_BLOCKS:
-        failures.append(f"[10a] Capability-True OpenRouter model must send the content-block array verbatim; got {user_message['content']!r}")
+        failures.append(
+            f"[10a] Capability-True OpenRouter model must send the content-block array verbatim; got {user_message['content']!r}"
+        )
 
 
 def test_openrouter_capability_false_flattens_list_content(failures: list[str]) -> None:
@@ -411,8 +440,9 @@ def test_openrouter_capability_false_flattens_list_content(failures: list[str]) 
     client = mc.OpenRouterModelClient(
         api_key="sk-test", http_client=http, max_retries=0, sleep_fn=lambda _s: None
     )
-    with patch.dict("os.environ", {}, clear=True), patch.object(
-        mc, "load_openrouter_policy", return_value=_SYNTHETIC_OPENROUTER_POLICY
+    with (
+        patch.dict("os.environ", {}, clear=True),
+        patch.object(mc, "load_openrouter_policy", return_value=_SYNTHETIC_OPENROUTER_POLICY),
     ):
         client.invoke(
             model_id="test/no-cache",  # policy-pinned primary, no prompt_caching field
@@ -423,25 +453,29 @@ def test_openrouter_capability_false_flattens_list_content(failures: list[str]) 
     body = http.calls[0]["json"]
     user_message = [m for m in body["messages"] if m["role"] == "user"][0]  # noqa: RUF015
     if user_message["content"] != "DOC\n\nINSTRUCTION":
-        failures.append(f"[11a] Capability-False OpenRouter model must flatten list content; got {user_message['content']!r}")
+        failures.append(
+            f"[11a] Capability-False OpenRouter model must flatten list content; got {user_message['content']!r}"
+        )
 
 
 def test_fake_bedrock_client_mirrors_real_capability_gated_behavior(failures: list[str]) -> None:
-    caching_client = mc.FakeBedrockClient(
-        {"m": ["ok"]}, capabilities={"prompt_caching": True}
-    )
+    caching_client = mc.FakeBedrockClient({"m": ["ok"]}, capabilities={"prompt_caching": True})
     caching_client.invoke(
         model_id="m", system_prompt="s", user_prompt=CACHE_BLOCKS, max_output_tokens=1
     )
     if caching_client.calls[0]["user_prompt"] != CACHE_BLOCKS:
-        failures.append("[12a] FakeBedrockClient with prompt_caching=True must record the content-block list verbatim (cache_control intact).")
+        failures.append(
+            "[12a] FakeBedrockClient with prompt_caching=True must record the content-block list verbatim (cache_control intact)."
+        )
 
     plain_client = mc.FakeBedrockClient({"m": ["ok"]})  # default capabilities: all False
     plain_client.invoke(
         model_id="m", system_prompt="s", user_prompt=CACHE_BLOCKS, max_output_tokens=1
     )
     if plain_client.calls[0]["user_prompt"] != "DOC\n\nINSTRUCTION":
-        failures.append(f"[12b] FakeBedrockClient with prompt_caching=False (default) must flatten list content, mirroring the real clients; got {plain_client.calls[0]['user_prompt']!r}")
+        failures.append(
+            f"[12b] FakeBedrockClient with prompt_caching=False (default) must flatten list content, mirroring the real clients; got {plain_client.calls[0]['user_prompt']!r}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -469,14 +503,22 @@ def test_live_bedrock_captures_cache_usage_fields_when_present(failures: list[st
         max_output_tokens=100,
     )
     if client.last_usage is None:
-        failures.append("[13a] last_usage must be populated after a successful call with a usage block.")
+        failures.append(
+            "[13a] last_usage must be populated after a successful call with a usage block."
+        )
         return
     if client.last_usage.get("cache_read_input_tokens") != 300:
-        failures.append(f"[13b] cache_read_input_tokens must round-trip; got {client.last_usage.get('cache_read_input_tokens')!r}")
+        failures.append(
+            f"[13b] cache_read_input_tokens must round-trip; got {client.last_usage.get('cache_read_input_tokens')!r}"
+        )
     if client.last_usage.get("cache_creation_input_tokens") != 0:
-        failures.append(f"[13c] cache_creation_input_tokens must round-trip (even when 0, since the provider DID report it); got {client.last_usage.get('cache_creation_input_tokens')!r}")
+        failures.append(
+            f"[13c] cache_creation_input_tokens must round-trip (even when 0, since the provider DID report it); got {client.last_usage.get('cache_creation_input_tokens')!r}"
+        )
     if client.last_usage.get("input_tokens") != 500 or client.last_usage.get("output_tokens") != 40:
-        failures.append("[13d] Base input/output token counts must still be captured alongside the new cache fields.")
+        failures.append(
+            "[13d] Base input/output token counts must still be captured alongside the new cache fields."
+        )
 
 
 def test_live_bedrock_usage_absent_when_no_usage_block(failures: list[str]) -> None:
@@ -489,7 +531,9 @@ def test_live_bedrock_usage_absent_when_no_usage_block(failures: list[str]) -> N
         max_output_tokens=100,
     )
     if client.last_usage is not None:
-        failures.append(f"[14a] last_usage must stay None when the provider sends no usage block at all; got {client.last_usage!r}")
+        failures.append(
+            f"[14a] last_usage must stay None when the provider sends no usage block at all; got {client.last_usage!r}"
+        )
 
 
 def test_live_bedrock_second_call_does_not_inherit_first_calls_usage(failures: list[str]) -> None:
@@ -569,14 +613,20 @@ def test_openrouter_captures_cache_usage_fields_when_present(failures: list[str]
             max_output_tokens=100,
         )
     if client.last_usage.get("cache_read_input_tokens") != 300:
-        failures.append(f"[15a] cache_read_input_tokens must round-trip; got {client.last_usage.get('cache_read_input_tokens')!r}")
+        failures.append(
+            f"[15a] cache_read_input_tokens must round-trip; got {client.last_usage.get('cache_read_input_tokens')!r}"
+        )
     if client.last_usage.get("cache_creation_input_tokens") != 200:
-        failures.append(f"[15b] cache_creation_input_tokens must round-trip; got {client.last_usage.get('cache_creation_input_tokens')!r}")
+        failures.append(
+            f"[15b] cache_creation_input_tokens must round-trip; got {client.last_usage.get('cache_creation_input_tokens')!r}"
+        )
 
 
 def test_openrouter_usage_omits_cache_keys_when_absent(failures: list[str]) -> None:
     http = FakeHttpClient(
-        _openrouter_response('{"decision":"ACCEPT","issues":[]}', usage={"prompt_tokens": 10, "completion_tokens": 5})
+        _openrouter_response(
+            '{"decision":"ACCEPT","issues":[]}', usage={"prompt_tokens": 10, "completion_tokens": 5}
+        )
     )
     client = mc.OpenRouterModelClient(
         api_key="sk-test", http_client=http, max_retries=0, sleep_fn=lambda _s: None
@@ -589,15 +639,24 @@ def test_openrouter_usage_omits_cache_keys_when_absent(failures: list[str]) -> N
             max_output_tokens=100,
         )
     if "cache_read_input_tokens" in client.last_usage:
-        failures.append("[16a] cache_read_input_tokens must be OMITTED (never defaulted to 0) when the provider did not report it.")
+        failures.append(
+            "[16a] cache_read_input_tokens must be OMITTED (never defaulted to 0) when the provider did not report it."
+        )
     if "cache_creation_input_tokens" in client.last_usage:
-        failures.append("[16b] cache_creation_input_tokens must be OMITTED when the provider did not report it.")
+        failures.append(
+            "[16b] cache_creation_input_tokens must be OMITTED when the provider did not report it."
+        )
 
 
 def test_model_invocation_record_cache_fields_default_none(failures: list[str]) -> None:
     record = mc.ModelInvocationRecord(
-        review_id="r", pass_name="primary", model_id="m", attempt_number=1,
-        outcome="success", input_tokens_est=1, output_tokens_est=1,
+        review_id="r",
+        pass_name="primary",
+        model_id="m",
+        attempt_number=1,
+        outcome="success",
+        input_tokens_est=1,
+        output_tokens_est=1,
     )
     if record.cache_read_input_tokens is not None:
         failures.append("[17a] cache_read_input_tokens must default to None.")
@@ -610,7 +669,9 @@ class _UsageReportingClient:
     (including cache fields) after every call -- mirrors
     tests/test_model_invocation_ledger.py's own UsageReportingClient."""
 
-    def __init__(self, responses: dict[str, list[str]], usage_sequence: list[dict[str, Any]]) -> None:
+    def __init__(
+        self, responses: dict[str, list[str]], usage_sequence: list[dict[str, Any]]
+    ) -> None:
         self._inner = mc.FakeBedrockClient(responses)
         self._usage_sequence = list(usage_sequence)
         self.last_usage: dict[str, Any] | None = None
@@ -625,7 +686,12 @@ def test_run_primary_pass_ledgers_cache_usage_fields_when_reported(failures: lis
     client = _UsageReportingClient(
         {BEDROCK_PRIMARY_MODEL_ID: [_fixture("primary_request_change_valid.json")]},
         usage_sequence=[
-            {"input_tokens": 100, "output_tokens": 20, "cache_read_input_tokens": 80, "cache_creation_input_tokens": 0},
+            {
+                "input_tokens": 100,
+                "output_tokens": 20,
+                "cache_read_input_tokens": 80,
+                "cache_creation_input_tokens": 0,
+            },
         ],
     )
     ledger: list[mc.ModelInvocationRecord] = []
@@ -646,9 +712,13 @@ def test_run_primary_pass_ledgers_cache_usage_fields_when_reported(failures: lis
         return
     row = ledger[0]
     if row.cache_read_input_tokens != 80:
-        failures.append(f"[18c] Ledger row must carry cache_read_input_tokens from the client's last_usage; got {row.cache_read_input_tokens!r}")
+        failures.append(
+            f"[18c] Ledger row must carry cache_read_input_tokens from the client's last_usage; got {row.cache_read_input_tokens!r}"
+        )
     if row.cache_creation_input_tokens != 0:
-        failures.append(f"[18d] Ledger row must carry cache_creation_input_tokens (even 0, since it WAS reported); got {row.cache_creation_input_tokens!r}")
+        failures.append(
+            f"[18d] Ledger row must carry cache_creation_input_tokens (even 0, since it WAS reported); got {row.cache_creation_input_tokens!r}"
+        )
 
 
 def test_run_primary_pass_ledgers_none_when_client_has_no_last_usage(failures: list[str]) -> None:
@@ -666,9 +736,13 @@ def test_run_primary_pass_ledgers_none_when_client_has_no_last_usage(failures: l
         doc_text=SHORT_DOC_TEXT,
     )
     if ledger[0].cache_read_input_tokens is not None:
-        failures.append(f"[19a] cache_read_input_tokens must be None when the injected client has no last_usage attribute at all; got {ledger[0].cache_read_input_tokens!r}")
+        failures.append(
+            f"[19a] cache_read_input_tokens must be None when the injected client has no last_usage attribute at all; got {ledger[0].cache_read_input_tokens!r}"
+        )
     if ledger[0].cache_creation_input_tokens is not None:
-        failures.append(f"[19b] cache_creation_input_tokens must be None when the injected client has no last_usage attribute at all; got {ledger[0].cache_creation_input_tokens!r}")
+        failures.append(
+            f"[19b] cache_creation_input_tokens must be None when the injected client has no last_usage attribute at all; got {ledger[0].cache_creation_input_tokens!r}"
+        )
 
 
 def test_run_floor_pass_ledgers_cache_usage_fields_when_reported(failures: list[str]) -> None:
@@ -685,12 +759,19 @@ def test_run_floor_pass_ledgers_cache_usage_fields_when_reported(failures: list[
     client = _UsageReportingClient(
         {BEDROCK_PRIMARY_MODEL_ID: [verdict_response]},
         usage_sequence=[
-            {"input_tokens": 100, "output_tokens": 20, "cache_read_input_tokens": 80, "cache_creation_input_tokens": 0},
+            {
+                "input_tokens": 100,
+                "output_tokens": 20,
+                "cache_read_input_tokens": 80,
+                "cache_creation_input_tokens": 0,
+            },
         ],
     )
     ledger: list[mc.ModelInvocationRecord] = []
     judgment = fj.judge_floor_invariants(
-        invariants=[{"id": invariant_id, "statement": "statement text", "rationale": "rationale text"}],
+        invariants=[
+            {"id": invariant_id, "statement": "statement text", "rationale": "rationale text"}
+        ],
         review_context=SHORT_DOC_TEXT,
         model_client=client,
         model_id=BEDROCK_PRIMARY_MODEL_ID,
@@ -698,18 +779,26 @@ def test_run_floor_pass_ledgers_cache_usage_fields_when_reported(failures: list[
         ledger_write=ledger.append,
     )
     if judgment.fail_closed:
-        failures.append(f"[20a] Test fixture setup error: expected a valid verdict, got fail_closed with unjudged={judgment.unjudged!r}")
+        failures.append(
+            f"[20a] Test fixture setup error: expected a valid verdict, got fail_closed with unjudged={judgment.unjudged!r}"
+        )
         return
     if len(ledger) != 1:
         failures.append(f"[20b] Expected exactly one floor-pass ledger row; got {len(ledger)}")
         return
     row = ledger[0]
     if row.pass_name != "floor":
-        failures.append(f"[20c] Test fixture setup error: expected pass_name='floor'; got {row.pass_name!r}")
+        failures.append(
+            f"[20c] Test fixture setup error: expected pass_name='floor'; got {row.pass_name!r}"
+        )
     if row.cache_read_input_tokens != 80:
-        failures.append(f"[20d] Floor-pass ledger row must carry cache_read_input_tokens from the client's last_usage; got {row.cache_read_input_tokens!r}")
+        failures.append(
+            f"[20d] Floor-pass ledger row must carry cache_read_input_tokens from the client's last_usage; got {row.cache_read_input_tokens!r}"
+        )
     if row.cache_creation_input_tokens != 0:
-        failures.append(f"[20e] Floor-pass ledger row must carry cache_creation_input_tokens (even 0, since it WAS reported); got {row.cache_creation_input_tokens!r}")
+        failures.append(
+            f"[20e] Floor-pass ledger row must carry cache_creation_input_tokens (even 0, since it WAS reported); got {row.cache_creation_input_tokens!r}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -742,7 +831,9 @@ def test_run_primary_pass_capability_true_sends_cached_doc_block_stable_across_r
         doc_text=SHORT_DOC_TEXT,
     )
     if result["status"] != "OK" or result.get("attempts") != 2:
-        failures.append(f"[20a] Test fixture setup error: expected a retry-then-success OK result with 2 attempts; got {result.get('status')}/{result.get('attempts')}")
+        failures.append(
+            f"[20a] Test fixture setup error: expected a retry-then-success OK result with 2 attempts; got {result.get('status')}/{result.get('attempts')}"
+        )
         return
     if len(client.calls) != 2:
         failures.append(f"[20b] Expected exactly 2 invoke() calls; got {len(client.calls)}")
@@ -751,18 +842,30 @@ def test_run_primary_pass_capability_true_sends_cached_doc_block_stable_across_r
     attempt_1_prompt = client.calls[0]["user_prompt"]
     attempt_2_prompt = client.calls[1]["user_prompt"]
     if not isinstance(attempt_1_prompt, list) or not isinstance(attempt_2_prompt, list):
-        failures.append(f"[20c] Both attempts must send list content for a capability-True model; got {type(attempt_1_prompt).__name__} / {type(attempt_2_prompt).__name__}")
+        failures.append(
+            f"[20c] Both attempts must send list content for a capability-True model; got {type(attempt_1_prompt).__name__} / {type(attempt_2_prompt).__name__}"
+        )
         return
     if attempt_1_prompt[0] != attempt_2_prompt[0]:
-        failures.append("[20d] The cached doc block (block 0) must be BYTE-IDENTICAL across the retry -- a single byte of drift would silently zero the cache.")
+        failures.append(
+            "[20d] The cached doc block (block 0) must be BYTE-IDENTICAL across the retry -- a single byte of drift would silently zero the cache."
+        )
     if attempt_1_prompt[-1] == attempt_2_prompt[-1]:
-        failures.append("[20e] The retry correction must change the SECOND block between attempt 1 and attempt 2.")
+        failures.append(
+            "[20e] The retry correction must change the SECOND block between attempt 1 and attempt 2."
+        )
     if pp.RETRY_CORRECTION_HEADING in attempt_1_prompt[-1]["text"]:
-        failures.append("[20f] Attempt 1 (nothing to correct yet) must not carry the retry-correction heading.")
+        failures.append(
+            "[20f] Attempt 1 (nothing to correct yet) must not carry the retry-correction heading."
+        )
     if pp.RETRY_CORRECTION_HEADING not in attempt_2_prompt[-1]["text"]:
-        failures.append("[20g] Attempt 2 must carry the retry-correction heading, appended to the second block.")
+        failures.append(
+            "[20g] Attempt 2 must carry the retry-correction heading, appended to the second block."
+        )
     if pp.RETRY_CORRECTION_HEADING in attempt_2_prompt[0]["text"]:
-        failures.append("[20h] The retry correction must never be folded into the cached doc block (block 0).")
+        failures.append(
+            "[20h] The retry correction must never be folded into the cached doc block (block 0)."
+        )
 
 
 def test_run_primary_pass_capability_false_still_sends_plain_string(failures: list[str]) -> None:
@@ -787,7 +890,9 @@ def test_run_primary_pass_capability_false_still_sends_plain_string(failures: li
         doc_text=SHORT_DOC_TEXT,
     )
     if sent != expected:
-        failures.append("[21a] A capability-False model must receive the EXACT plain string assemble_user_prompt_primary has always produced -- byte-identical to today.")
+        failures.append(
+            "[21a] A capability-False model must receive the EXACT plain string assemble_user_prompt_primary has always produced -- byte-identical to today."
+        )
     if not isinstance(sent, str):
         failures.append(f"[21b] Expected a plain str; got {type(sent).__name__}")
 
@@ -829,13 +934,17 @@ def test_caching_path_never_emits_an_empty_text_block(failures: list[str]) -> No
         doc_text=SHORT_DOC_TEXT,
     )
     if result.get("attempts") != 2:
-        failures.append(f"[22a] Test fixture setup error: expected a retry (2 attempts); got {result.get('attempts')!r}")
+        failures.append(
+            f"[22a] Test fixture setup error: expected a retry (2 attempts); got {result.get('attempts')!r}"
+        )
         return
 
     for attempt_index, call in enumerate(client.calls, start=1):
         sent = call["user_prompt"]
         if not isinstance(sent, list):
-            failures.append(f"[22b] Attempt {attempt_index}: expected list content for a capability-True model; got {type(sent).__name__}")
+            failures.append(
+                f"[22b] Attempt {attempt_index}: expected list content for a capability-True model; got {type(sent).__name__}"
+            )
             continue
         empty = [i for i, block in enumerate(sent) if not (block.get("text") or "").strip()]
         if empty:
@@ -854,21 +963,31 @@ def test_caching_path_never_emits_an_empty_text_block(failures: list[str]) -> No
     )
     wire = runtime.last_body()["messages"][0]["content"]
     if not isinstance(wire, list):
-        failures.append(f"[22d] Expected the block array to reach the wire verbatim; got {type(wire).__name__}")
+        failures.append(
+            f"[22d] Expected the block array to reach the wire verbatim; got {type(wire).__name__}"
+        )
         return
     wire_empty = [i for i, block in enumerate(wire) if not (block.get("text") or "").strip()]
     if wire_empty:
-        failures.append(f"[22e] Empty text block(s) reached the bedrock-2023-05-31 payload at index {wire_empty}.")
+        failures.append(
+            f"[22e] Empty text block(s) reached the bedrock-2023-05-31 payload at index {wire_empty}."
+        )
 
     # And the discipline that omitting the block must not cost: the retry
     # correction still never rewrites the cached prefix.
     attempt_1, attempt_2 = client.calls[0]["user_prompt"], client.calls[1]["user_prompt"]
     if attempt_1[0] != attempt_2[0]:
-        failures.append("[22f] The cached doc block must stay byte-identical across the retry even when it is attempt 1's ONLY block.")
+        failures.append(
+            "[22f] The cached doc block must stay byte-identical across the retry even when it is attempt 1's ONLY block."
+        )
     if pp.RETRY_CORRECTION_HEADING in attempt_2[0]["text"]:
-        failures.append("[22g] The retry correction must land in a NEW uncached block, never be appended to the cached doc block.")
+        failures.append(
+            "[22g] The retry correction must land in a NEW uncached block, never be appended to the cached doc block."
+        )
     if not any(pp.RETRY_CORRECTION_HEADING in b.get("text", "") for b in attempt_2[1:]):
-        failures.append("[22h] Attempt 2 must carry the retry correction in a block after the cached one.")
+        failures.append(
+            "[22h] Attempt 2 must carry the retry correction in a block after the cached one."
+        )
 
 
 # ---------------------------------------------------------------------------

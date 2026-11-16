@@ -35,7 +35,9 @@ PLAYBOOK_PATH = REPO_ROOT / "tests" / "fixtures" / "playbooks" / "synthetic-gene
 # synthetic fixture, by a different path) and is still relied on by
 # tests/test_active_bundle_resolver_194.py (explicitly pinned to "eiaa"),
 # so it must not be repointed at this file's own path.
-GOLDEN_HASH_FIXTURE_PATH = REPO_ROOT / "tests" / "fixtures" / "playbooks" / "synthetic-generic-golden-hash.json"
+GOLDEN_HASH_FIXTURE_PATH = (
+    REPO_ROOT / "tests" / "fixtures" / "playbooks" / "synthetic-generic-golden-hash.json"
+)
 
 # Import the implementation under test.  This WILL FAIL (ImportError) until
 # scripts/canonicalize.py is written -- that's the RED failure.
@@ -51,6 +53,7 @@ def load_playbook() -> dict:
 # ---------------------------------------------------------------------------
 # Test 1: canonical form is stable under release-block mutation
 # ---------------------------------------------------------------------------
+
 
 def test_canonicalize_stable_under_release_block_changes():
     """
@@ -112,6 +115,7 @@ def test_canonicalize_stable_under_release_block_changes():
 # Test 2: canonical form is stable under status flips
 # ---------------------------------------------------------------------------
 
+
 def test_canonicalize_stable_under_status_flips():
     """
     Flipping playbook.status (draft -> active -> retired) must NOT change the
@@ -149,6 +153,7 @@ def test_canonicalize_stable_under_status_flips():
 # ---------------------------------------------------------------------------
 # Test 3: reproducible serialization (key order + whitespace independence)
 # ---------------------------------------------------------------------------
+
 
 def test_content_hash_reproducible_across_serializations():
     """
@@ -192,6 +197,7 @@ def test_content_hash_reproducible_across_serializations():
 # Test 4: golden-hash fixture prevents serialization drift in CI
 # ---------------------------------------------------------------------------
 
+
 def test_golden_hash_fixture():
     """
     The golden-hash fixture at
@@ -234,6 +240,7 @@ def test_golden_hash_fixture():
 # ---------------------------------------------------------------------------
 # Main runner
 # ---------------------------------------------------------------------------
+
 
 def main() -> int:
     tests = [
