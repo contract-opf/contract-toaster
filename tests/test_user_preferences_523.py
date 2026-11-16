@@ -67,9 +67,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 os.environ.setdefault("USERS_TABLE", "contract-toaster-users-prefs523-test")
 os.environ.setdefault("AUDIT_TABLE", "contract-toaster-audit-prefs523-test")
-os.environ.setdefault(
-    "USER_PREFERENCES_TABLE", "contract-toaster-user-preferences-523-test"
-)
+os.environ.setdefault("USER_PREFERENCES_TABLE", "contract-toaster-user-preferences-523-test")
 os.environ.setdefault("REVIEWS_TABLE", "contract-toaster-reviews-prefs523-test")
 os.environ.setdefault(
     "REVIEW_SUBMISSIONS_TABLE", "contract-toaster-review-submissions-prefs523-test"
@@ -142,18 +140,18 @@ class PreferencesTestBase(unittest.TestCase):
         _put_user(self.users_table, USER_B_SUB, is_admin=False)
 
         self.client = TestClient(backend_main.app)
-        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = (
-            lambda: self.ddb
-        )
+        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = lambda: self.ddb
 
     def tearDown(self):
         backend_main.app.dependency_overrides.clear()
         self._mock_aws.stop()
 
     def _authenticate_as(self, sub: str) -> None:
-        backend_main.app.dependency_overrides[backend_main.get_current_user] = (
-            lambda: {"sub": sub, "email": f"{sub}@example.com", "token_use": "access"}
-        )
+        backend_main.app.dependency_overrides[backend_main.get_current_user] = lambda: {
+            "sub": sub,
+            "email": f"{sub}@example.com",
+            "token_use": "access",
+        }
 
     def _prefs_row(self, sub: str) -> dict[str, Any]:
         table = self.ddb.Table(os.environ["USER_PREFERENCES_TABLE"])
@@ -451,9 +449,7 @@ class TestFrontendBackendAgreement(unittest.TestCase):
         )
 
     def test_the_frontend_default_is_the_backend_default(self):
-        match = re.search(
-            r"export const DEFAULT_NOTES_MODE: NotesMode = '([a-z]+)';", self.source
-        )
+        match = re.search(r"export const DEFAULT_NOTES_MODE: NotesMode = '([a-z]+)';", self.source)
         self.assertIsNotNone(match, "DEFAULT_NOTES_MODE not found in notesMode.ts")
         self.assertEqual(match.group(1), reviews_module.DEFAULT_NOTES_MODE)
 
@@ -462,9 +458,7 @@ class TestFrontendBackendAgreement(unittest.TestCase):
         tells the reviewer, in quotes, what will be stamped on every page.
         A paraphrase here would be the UI showing one thing while the
         document said another."""
-        match = re.search(
-            r"export const INTERNAL_MARKER_TEXT = '(.+?)';", self.source, re.DOTALL
-        )
+        match = re.search(r"export const INTERNAL_MARKER_TEXT = '(.+?)';", self.source, re.DOTALL)
         self.assertIsNotNone(match, "INTERNAL_MARKER_TEXT not found in notesMode.ts")
         self.assertEqual(
             match.group(1),

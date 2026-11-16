@@ -44,9 +44,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PERSIST_HANDLER_PATH = REPO_ROOT / "infra" / "lambda" / "persist" / "handler.py"
-RECONCILER_HANDLER_PATH = (
-    REPO_ROOT / "infra" / "lambda" / "orphan_reconciler" / "handler.py"
-)
+RECONCILER_HANDLER_PATH = REPO_ROOT / "infra" / "lambda" / "orphan_reconciler" / "handler.py"
 
 REVIEW_SUBMISSIONS_TABLE = "contract-toaster-review-submissions-test"
 
@@ -77,9 +75,7 @@ def _load_module(path: Path, module_name: str):
 
 
 _persist = _load_module(PERSIST_HANDLER_PATH, "_persist_keyed_lookup_under_test")
-_reconciler = _load_module(
-    RECONCILER_HANDLER_PATH, "_reconciler_keyed_lookup_under_test"
-)
+_reconciler = _load_module(RECONCILER_HANDLER_PATH, "_reconciler_keyed_lookup_under_test")
 
 TARGET_REVIEW_ID = "00000000-0000-4000-a000-0000000000ff"
 TARGET_IDEMPOTENCY_KEY = "idem-target-late-inserted"
@@ -145,8 +141,7 @@ class TestLambdaKeyedReviewLookup(unittest.TestCase):
             ExpressionAttributeValues={":rid": TARGET_REVIEW_ID},
         )
         assert "LastEvaluatedKey" in scan_resp, (
-            "test setup did not produce a multi-page Scan -- increase "
-            "_FILLER_COUNT / _FILLER_BYTES"
+            "test setup did not produce a multi-page Scan -- increase _FILLER_COUNT / _FILLER_BYTES"
         )
         assert scan_resp.get("Items", []) == [], (
             "test setup's target row unexpectedly landed on Scan's first "

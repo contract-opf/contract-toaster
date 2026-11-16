@@ -140,9 +140,9 @@ describe('#105 — the submitter is told what actually broke', () => {
 
   it('still falls back for a stage no build has heard of', () => {
     // The fallback itself is not removed — it is what an unknown token gets.
-    expect(
-      explainFailure({ reason: UNCLASSIFIED_REASON, failing_stage: 'pipeline' }),
-    ).toEqual(GENERIC_FALLBACK);
+    expect(explainFailure({ reason: UNCLASSIFIED_REASON, failing_stage: 'pipeline' })).toEqual(
+      GENERIC_FALLBACK,
+    );
   });
 
   it('renders the stage copy on the Diagnostics row, not the raw token', async () => {

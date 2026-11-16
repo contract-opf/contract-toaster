@@ -150,10 +150,7 @@ describe('stopping a running review', () => {
     // ct-button renders a real <button> into its light DOM; click that.
     fireEvent.click(button.querySelector('button') ?? button);
 
-    await waitFor(
-      () => expect(cancelCalls).toContain('POST /api/reviews/r-1/cancel'),
-      WAIT,
-    );
+    await waitFor(() => expect(cancelCalls).toContain('POST /api/reviews/r-1/cancel'), WAIT);
     // The button must not simply sit there looking unpressed, and must not
     // claim the review has stopped either — the pipeline is still running.
     // The control must not sit there looking unpressed, and must not claim the
@@ -161,9 +158,9 @@ describe('stopping a running review', () => {
     // lever is one element that relabels itself and disarms (issue #733).
     await waitFor(
       () =>
-        expect(
-          screen.getByTestId('review-cancel-button').getAttribute('aria-disabled'),
-        ).toBe('true'),
+        expect(screen.getByTestId('review-cancel-button').getAttribute('aria-disabled')).toBe(
+          'true',
+        ),
       WAIT,
     );
     expect(screen.getByTestId('review-cancel-button').textContent).toMatch(/stopping/i);

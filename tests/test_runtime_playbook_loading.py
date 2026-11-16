@@ -249,9 +249,10 @@ class TestExecutionPathGatesOnRuntimeActivation(RuntimePlaybookLoadingTestBase):
         self._put_review_row(status="PENDING")
         payload = self._payload(release_bundle_hash="")  # nothing was ever active to record
 
-        with patch.object(pipeline_runner, "_load_playbook_bundle") as load_bundle, patch.object(
-            pipeline_runner, "_settle_reservation"
-        ) as settle:
+        with (
+            patch.object(pipeline_runner, "_load_playbook_bundle") as load_bundle,
+            patch.object(pipeline_runner, "_settle_reservation") as settle,
+        ):
             pipeline_runner.run_real_pipeline(
                 REVIEW_ID,
                 payload,
@@ -285,8 +286,9 @@ class TestExecutionPathGatesOnRuntimeActivation(RuntimePlaybookLoadingTestBase):
         )
         payload = self._payload(release_bundle_hash=stale_hash)
 
-        with patch.object(pipeline_runner, "_load_playbook_bundle") as load_bundle, patch.object(
-            pipeline_runner, "_settle_reservation"
+        with (
+            patch.object(pipeline_runner, "_load_playbook_bundle") as load_bundle,
+            patch.object(pipeline_runner, "_settle_reservation"),
         ):
             pipeline_runner.run_real_pipeline(
                 REVIEW_ID,

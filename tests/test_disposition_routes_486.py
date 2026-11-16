@@ -171,8 +171,8 @@ class DispositionRouteTestBase(unittest.TestCase):
         self.client = TestClient(self.app)
 
     def _authenticate_as(self, sub: str, is_admin: bool = False) -> None:
-        self.app.dependency_overrides[review_routes.get_active_user_row] = (
-            lambda: _caller_row(sub, is_admin=is_admin)
+        self.app.dependency_overrides[review_routes.get_active_user_row] = lambda: _caller_row(
+            sub, is_admin=is_admin
         )
 
 
@@ -431,7 +431,9 @@ class TestRecordDispositionRoute(DispositionRouteTestBase):
         self.assertEqual(resp.status_code, 200)
 
         recorded = [
-            row for row in self.ddb.audit.items if row.get("action") == "review_disposition_recorded"
+            row
+            for row in self.ddb.audit.items
+            if row.get("action") == "review_disposition_recorded"
         ]
         self.assertEqual(len(recorded), 1)
         self.assertEqual(recorded[0]["target"], "review-6")

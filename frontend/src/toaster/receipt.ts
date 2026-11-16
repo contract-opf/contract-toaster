@@ -456,10 +456,7 @@ function ledgerLine(ledger?: ReceiptSource['hard_ledger']): string | null {
  * `playbookName` is passed in rather than looked up here: the display name
  * lives in the catalog, and this module must not learn to fetch.
  */
-export function receiptLines(
-  review: ReceiptSource,
-  playbookName?: string | null,
-): ReceiptLine[] {
+export function receiptLines(review: ReceiptSource, playbookName?: string | null): ReceiptLine[] {
   const lines: ReceiptLine[] = [];
   const push = (id: string, label: string, value: string | null | undefined) => {
     if (value !== null && value !== undefined && value !== '') {

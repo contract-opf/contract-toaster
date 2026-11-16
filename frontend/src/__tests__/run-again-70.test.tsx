@@ -300,9 +300,7 @@ async function expectPickerAsksForTheDocumentAgain(): Promise<void> {
 }
 
 /** Drive a review to its burnt terminal state, as `burnt-toast.test.tsx` does. */
-async function submitAndBurn(
-  detail: Record<string, unknown>,
-): Promise<ReturnType<typeof vi.fn>> {
+async function submitAndBurn(detail: Record<string, unknown>): Promise<ReturnType<typeof vi.fn>> {
   const fetchMock = stubFetch({
     '/api/playbooks': CATALOG,
     '/api/me/preferences': { preferences: {}, notes_mode_available: false },

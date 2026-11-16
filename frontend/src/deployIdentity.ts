@@ -71,7 +71,20 @@
 // would be worse, not friendlier. It also keeps the rendering deterministic
 // rather than dependent on the runner's TZ.
 // ---------------------------------------------------------------------------
-const BUILD_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const BUILD_MONTHS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
 
 /**
  * The instant `cb79b4a-20260820191617` encodes, or null when the version
@@ -299,10 +312,7 @@ export function commitsMatch(a: string, b: string): boolean {
  * values side by side looks right and answers nothing, because the #613
  * condition is exactly two plausible-looking values that disagree.
  */
-export function deployAgreement(
-  frontend: FrontendStamp,
-  backend: BackendStamp,
-): DeployAgreement {
+export function deployAgreement(frontend: FrontendStamp, backend: BackendStamp): DeployAgreement {
   // Re-normalised here, not merely trusted. `frontendStamp`/`backendStamp`
   // already strip the unstamped placeholders, but this function is the one
   // that decides whether two builds are the same — and a raw "unknown" on
@@ -312,11 +322,12 @@ export function deployAgreement(
   const backendCommit = stampValue(backend.commit);
 
   if (!frontendCommit || !backendCommit) {
-    const missing = !frontendCommit && !backendCommit
-      ? 'Neither the app bundle nor the server'
-      : !frontendCommit
-        ? 'The app bundle'
-        : 'The server';
+    const missing =
+      !frontendCommit && !backendCommit
+        ? 'Neither the app bundle nor the server'
+        : !frontendCommit
+          ? 'The app bundle'
+          : 'The server';
     return {
       status: 'unknown',
       kind: 'unstamped',

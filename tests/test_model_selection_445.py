@@ -240,9 +240,7 @@ class TestSelectableAllowlist(unittest.TestCase):
         policy = _policy()
         with patch.dict(os.environ, {}, clear=True):
             for role in ("primary", "critic"):
-                model_client.enforce_openrouter_policy_model_id(
-                    policy["models"][role]["model_id"]
-                )
+                model_client.enforce_openrouter_policy_model_id(policy["models"][role]["model_id"])
 
 
 # ---------------------------------------------------------------------------
@@ -543,9 +541,7 @@ class TestResolutionPrecedence(ModelSelectionTestBase):
         policy = _policy()
         with _no_env_overrides():  # noqa: SIM117
             with self.assertLogs("src.model_settings", level="WARNING"):
-                settings = model_settings.get_model_selection_settings(
-                    ADMIN, ExplodingResource()
-                )
+                settings = model_settings.get_model_selection_settings(ADMIN, ExplodingResource())
         self.assertEqual(settings["selected_primary_model_id"], "")
         self.assertEqual(settings["selected_critic_model_id"], "")
         self.assertEqual(
@@ -730,9 +726,7 @@ class TestPipelineUsesTheSelection(ModelSelectionTestBase):
         http = FakeHttpClient()
         with _no_env_overrides():
             resolved = model_settings.resolve_openrouter_model_ids(self.ddb)
-            model_client.OpenRouterModelClient(
-                api_key="test-key", http_client=http
-            ).invoke(
+            model_client.OpenRouterModelClient(api_key="test-key", http_client=http).invoke(
                 model_id=resolved["primary"],
                 system_prompt="s",
                 user_prompt="u",
@@ -796,9 +790,7 @@ class TestSpendReservationTracksTheSelection(ModelSelectionTestBase):
     def _expected_cents(self, primary_id: str, critic_id: str) -> int:
         """The reservation formula recomputed from the artifact, independently
         of backend/src/reviews.py, so this cannot pass against a mirror."""
-        attempts = (
-            1 + reviews.MAX_RETRIES_PER_PASS + reviews.MAX_TRUNCATION_RETRIES_PER_PASS
-        )
+        attempts = 1 + reviews.MAX_RETRIES_PER_PASS + reviews.MAX_TRUNCATION_RETRIES_PER_PASS
         total = 0.0
         for model_id in (primary_id, critic_id):
             rates = self._rates(model_id)
@@ -810,9 +802,10 @@ class TestSpendReservationTracksTheSelection(ModelSelectionTestBase):
 
     def _reserved_cents(self) -> int:
         table = self.ddb.Table(os.environ["DAILY_SPEND_TABLE"])
-        row = table.get_item(
-            Key={"spend_date": time.strftime("%Y-%m-%d", time.gmtime())}
-        ).get("Item") or {}
+        row = (
+            table.get_item(Key={"spend_date": time.strftime("%Y-%m-%d", time.gmtime())}).get("Item")
+            or {}
+        )
         return int(row.get("reserved_usd_cents", 0))
 
     def _default_pair(self) -> tuple[str, str]:
@@ -851,9 +844,7 @@ class TestSpendReservationTracksTheSelection(ModelSelectionTestBase):
         model_settings.set_model_selection(CHEAPEST_ID, CHEAPEST_ID, ADMIN, self.ddb)
         expected = self._expected_cents(CHEAPEST_ID, CHEAPEST_ID)
         default_cents = self._expected_cents(*self._default_pair())
-        self.assertLess(
-            expected, default_cents, "fixture check: the cheapest pair must cost LESS"
-        )
+        self.assertLess(expected, default_cents, "fixture check: the cheapest pair must cost LESS")
         with _no_env_overrides():
             reviews.reserve_spend("review-cheap", self.ddb)
         self.assertEqual(self._reserved_cents(), expected)
@@ -871,9 +862,7 @@ class TestSpendReservationTracksTheSelection(ModelSelectionTestBase):
         model_settings.set_model_selection(DEAREST_ID, CHEAPEST_ID, ADMIN, self.ddb)
         with _no_env_overrides():
             reviews.reserve_spend("review-mixed", self.ddb)
-        self.assertEqual(
-            self._reserved_cents(), self._expected_cents(DEAREST_ID, CHEAPEST_ID)
-        )
+        self.assertEqual(self._reserved_cents(), self._expected_cents(DEAREST_ID, CHEAPEST_ID))
 
     def test_settlement_reverses_exactly_what_the_selection_reserved(self):
         """Reserve and settle must price against the same rate table, or every
@@ -911,13 +900,9 @@ class TestSpendReservationTracksTheSelection(ModelSelectionTestBase):
         ddb_fixtures.create_submissions_table(self.ddb)
         model_settings.set_model_selection(*first, ADMIN, self.ddb)
         with _no_env_overrides():
-            reservation_id, amount = reviews.reserve_spend_with_amount(
-                "review-mid", self.ddb
-            )
+            reservation_id, amount = reviews.reserve_spend_with_amount("review-mid", self.ddb)
         submissions = self.ddb.Table(os.environ["REVIEW_SUBMISSIONS_TABLE"])
-        submissions.put_item(
-            Item={"idempotency_key": "k-mid", "review_id": "review-mid"}
-        )
+        submissions.put_item(Item={"idempotency_key": "k-mid", "review_id": "review-mid"})
         reviews._record_spend_reservation(
             {"idempotency_key": "k-mid"}, reservation_id, self.ddb, amount
         )
@@ -925,9 +910,7 @@ class TestSpendReservationTracksTheSelection(ModelSelectionTestBase):
         return amount
 
     def test_mid_review_switch_to_dearer_models_settles_back_to_exactly_zero(self):
-        amount = self._reserve_then_reselect(
-            (CHEAPEST_ID, CHEAPEST_ID), (DEAREST_ID, DEAREST_ID)
-        )
+        amount = self._reserve_then_reselect((CHEAPEST_ID, CHEAPEST_ID), (DEAREST_ID, DEAREST_ID))
         self.assertEqual(self._reserved_cents(), amount)
         with _no_env_overrides():
             pipeline_runner._settle_reservation("review-mid", self.ddb)
@@ -936,18 +919,14 @@ class TestSpendReservationTracksTheSelection(ModelSelectionTestBase):
         )
 
     def test_mid_review_switch_to_cheaper_models_settles_back_to_exactly_zero(self):
-        amount = self._reserve_then_reselect(
-            (DEAREST_ID, DEAREST_ID), (CHEAPEST_ID, CHEAPEST_ID)
-        )
+        amount = self._reserve_then_reselect((DEAREST_ID, DEAREST_ID), (CHEAPEST_ID, CHEAPEST_ID))
         self.assertEqual(self._reserved_cents(), amount)
         with _no_env_overrides():
             pipeline_runner._settle_reservation("review-mid", self.ddb)
         self.assertEqual(self._reserved_cents(), 0)
 
     def test_the_reserved_amount_is_persisted_on_the_submission_row(self):
-        amount = self._reserve_then_reselect(
-            (CHEAPEST_ID, CHEAPEST_ID), (DEAREST_ID, DEAREST_ID)
-        )
+        amount = self._reserve_then_reselect((CHEAPEST_ID, CHEAPEST_ID), (DEAREST_ID, DEAREST_ID))
         row = self.ddb.Table(os.environ["REVIEW_SUBMISSIONS_TABLE"]).get_item(
             Key={"idempotency_key": "k-mid"}
         )["Item"]
@@ -1001,9 +980,7 @@ class TestSpendReservationTracksTheSelection(ModelSelectionTestBase):
         model_settings.set_model_selection(DEAREST_ID, DEAREST_ID, ADMIN, self.ddb)
         os.environ.pop("MODEL_PROVIDER", None)
         with _no_env_overrides():
-            self.assertEqual(
-                reviews.compute_worst_case_reservation_usd_cents(self.ddb), 1106
-            )
+            self.assertEqual(reviews.compute_worst_case_reservation_usd_cents(self.ddb), 1106)
 
 
 # ---------------------------------------------------------------------------
@@ -1090,7 +1067,8 @@ class TestHttpSurface(ModelSelectionTestBase):
 class TestConsistencyLintScope(unittest.TestCase):
     def _lint_module(self):
         spec = importlib.util.spec_from_file_location(
-            "lint_model_policy_consistency", REPO_ROOT / "tests" / "lint-model-policy-consistency.py"
+            "lint_model_policy_consistency",
+            REPO_ROOT / "tests" / "lint-model-policy-consistency.py",
         )
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -1123,9 +1101,7 @@ class TestConsistencyLintScope(unittest.TestCase):
         # Issue #148: both pins are Opus now, so the divergence is a Sonnet
         # reviewer against Bedrock's Opus one -- a family mismatch.
         openrouter["models"]["primary"]["model_id"] = SONNET_46
-        failures = lint.check_consistency(
-            lint.load_json(lint.BEDROCK_POLICY_PATH), openrouter
-        )
+        failures = lint.check_consistency(lint.load_json(lint.BEDROCK_POLICY_PATH), openrouter)
         self.assertTrue(failures)
 
     def test_lint_accepts_the_declared_forward_pin_the_real_policy_carries(self):
@@ -1150,9 +1126,7 @@ class TestConsistencyLintScope(unittest.TestCase):
         lint = self._lint_module()
         openrouter = lint.load_json(lint.OPENROUTER_POLICY_PATH)
         openrouter["models"]["critic"].pop(lint.MATRIX_DIVERGENCE_FIELD, None)
-        failures = lint.check_consistency(
-            lint.load_json(lint.BEDROCK_POLICY_PATH), openrouter
-        )
+        failures = lint.check_consistency(lint.load_json(lint.BEDROCK_POLICY_PATH), openrouter)
         self.assertTrue(failures)
         self.assertIn(lint.MATRIX_DIVERGENCE_FIELD, failures[0])
 
@@ -1164,9 +1138,7 @@ class TestConsistencyLintScope(unittest.TestCase):
         openrouter = lint.load_json(lint.OPENROUTER_POLICY_PATH)
         openrouter["models"]["critic"]["model_id"] = "anthropic/claude-opus-4"
         openrouter["models"]["critic"][lint.MATRIX_DIVERGENCE_FIELD] = "we meant it, honest"
-        failures = lint.check_consistency(
-            lint.load_json(lint.BEDROCK_POLICY_PATH), openrouter
-        )
+        failures = lint.check_consistency(lint.load_json(lint.BEDROCK_POLICY_PATH), openrouter)
         self.assertTrue(failures)
         self.assertIn("BEHIND", failures[0])
 
@@ -1192,9 +1164,7 @@ class TestConsistencyLintScope(unittest.TestCase):
             openrouter["models"]["critic"]["model_id"],
         }
         openrouter["selectable"] = [
-            entry
-            for entry in openrouter["selectable"]
-            if entry["model_id"] not in drifted_ids
+            entry for entry in openrouter["selectable"] if entry["model_id"] not in drifted_ids
         ]
         failures = lint.check_defaults_are_selectable(openrouter)
         self.assertEqual(len(failures), 2)
@@ -1218,9 +1188,7 @@ class TestConsistencyLintScope(unittest.TestCase):
             openrouter["models"]["critic"]["model_id"],
         }
         openrouter["selectable"] = [
-            entry
-            for entry in openrouter["selectable"]
-            if entry["model_id"] not in drifted_ids
+            entry for entry in openrouter["selectable"] if entry["model_id"] not in drifted_ids
         ]
 
         with tempfile.TemporaryDirectory() as tmp_dir:

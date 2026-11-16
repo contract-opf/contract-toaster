@@ -377,9 +377,13 @@ def test_every_truncated_attempt_is_still_ledgered(failures: list[str]) -> None:
         failures.append(f"[5a] Expected a ledger row per attempt (2); got {len(ledger)}")
         return
     if ledger[0].outcome != "retry":
-        failures.append(f"[5b] The truncated attempt must ledger outcome=retry; got {ledger[0].outcome!r}")
+        failures.append(
+            f"[5b] The truncated attempt must ledger outcome=retry; got {ledger[0].outcome!r}"
+        )
     if ledger[1].outcome != "success":
-        failures.append(f"[5c] The recovering attempt must ledger outcome=success; got {ledger[1].outcome!r}")
+        failures.append(
+            f"[5c] The recovering attempt must ledger outcome=success; got {ledger[1].outcome!r}"
+        )
 
 
 TESTS = [

@@ -72,11 +72,14 @@ const SKIP_DIRS = new Set(['node_modules', '__tests__']);
 
 function filesUnder(dir, exts) {
   const out = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+  for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) =>
+    a.name.localeCompare(b.name),
+  )) {
     if (SKIP_DIRS.has(entry.name)) continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) out.push(...filesUnder(full, exts));
-    else if (exts.some((e) => entry.name.endsWith(e)) && !/\.test\.tsx?$/.test(entry.name)) out.push(full);
+    else if (exts.some((e) => entry.name.endsWith(e)) && !/\.test\.tsx?$/.test(entry.name))
+      out.push(full);
   }
   return out;
 }
@@ -119,7 +122,8 @@ function collect(re, text, group = 1) {
   const out = [];
   re.lastIndex = 0;
   let m;
-  while ((m = re.exec(text)) !== null) out.push({ name: m[group], prefix: Boolean(m[2]), index: m.index });
+  while ((m = re.exec(text)) !== null)
+    out.push({ name: m[group], prefix: Boolean(m[2]), index: m.index });
   return out;
 }
 
@@ -158,7 +162,8 @@ function balanced(text, start) {
 /** Every class-name expression a TS/TSX file applies, with its offset. */
 function classExpressions(text) {
   const out = [];
-  const re = /(?:\bclassName\s*=\s*|\bclass\s*=\s*|\.className\s*=\s*|\bclassList\.(?:add|remove|toggle|replace|contains)\s*)(?=[{"'`(]|\$\{)/g;
+  const re =
+    /(?:\bclassName\s*=\s*|\bclass\s*=\s*|\.className\s*=\s*|\bclassList\.(?:add|remove|toggle|replace|contains)\s*)(?=[{"'`(]|\$\{)/g;
   let m;
   while ((m = re.exec(text)) !== null) {
     let start = m.index + m[0].length;
@@ -186,7 +191,9 @@ function auditTree(files, tokensText, { checkAllowlist = true } = {}) {
       const text = stripCssComments(raw);
       collect(PROP_DECL_RE, text).forEach((d) => declaredProps.add(d.name));
       collect(CLASS_SELECTOR_RE, text).forEach((d) => definedClasses.add(d.name));
-      collect(VAR_USE_RE, text).forEach((u) => varUses.push({ ...u, file, line: lineOf(text, u.index) }));
+      collect(VAR_USE_RE, text).forEach((u) =>
+        varUses.push({ ...u, file, line: lineOf(text, u.index) }),
+      );
     } else {
       for (const block of [...litCssBlocks(raw), ...namedStyleStrings(raw)]) {
         const text = stripCssComments(block);
@@ -195,7 +202,9 @@ function auditTree(files, tokensText, { checkAllowlist = true } = {}) {
       }
       collect(TS_PROP_KEY_RE, raw).forEach((d) => declaredProps.add(d.name));
       const code = stripTsComments(raw);
-      collect(VAR_USE_RE, code).forEach((u) => varUses.push({ ...u, file, line: lineOf(code, u.index) }));
+      collect(VAR_USE_RE, code).forEach((u) =>
+        varUses.push({ ...u, file, line: lineOf(code, u.index) }),
+      );
       for (const { expr, index } of classExpressions(raw)) {
         CLASS_TOKEN_RE.lastIndex = 0;
         let t;
@@ -208,9 +217,13 @@ function auditTree(files, tokensText, { checkAllowlist = true } = {}) {
 
   // 1. Custom properties.
   for (const u of varUses) {
-    const ok = u.prefix ? [...declaredProps].some((d) => d.startsWith(u.name)) : declaredProps.has(u.name);
+    const ok = u.prefix
+      ? [...declaredProps].some((d) => d.startsWith(u.name))
+      : declaredProps.has(u.name);
     if (!ok) {
-      failures.push(`undefined custom property: var(${u.name}${u.prefix ? '${…}' : ''}) at ${u.file}:${u.line}`);
+      failures.push(
+        `undefined custom property: var(${u.name}${u.prefix ? '${…}' : ''}) at ${u.file}:${u.line}`,
+      );
     }
   }
 
@@ -220,14 +233,24 @@ function auditTree(files, tokensText, { checkAllowlist = true } = {}) {
     const mediaStart = tokens.search(/@media\s*\(\s*prefers-color-scheme\s*:\s*dark\s*\)/);
     const attrStart = tokens.search(/:root\[data-theme=['"]dark['"]\]\s*\{/);
     if (mediaStart === -1 || attrStart === -1) {
-      failures.push('theme parity: tokens.css must keep both the prefers-color-scheme dark block and the [data-theme=\'dark\'] block');
+      failures.push(
+        "theme parity: tokens.css must keep both the prefers-color-scheme dark block and the [data-theme='dark'] block",
+      );
     } else {
       const media = balanced(tokens, tokens.indexOf('{', mediaStart));
       const attr = balanced(tokens, tokens.indexOf('{', attrStart));
       const mediaSet = new Set(collect(PROP_DECL_RE, media).map((d) => d.name));
       const attrSet = new Set(collect(PROP_DECL_RE, attr).map((d) => d.name));
-      for (const n of mediaSet) if (!attrSet.has(n)) failures.push(`theme parity: ${n} is dark-overridden by prefers-color-scheme but not by [data-theme='dark']`);
-      for (const n of attrSet) if (!mediaSet.has(n)) failures.push(`theme parity: ${n} is dark-overridden by [data-theme='dark'] but not by prefers-color-scheme`);
+      for (const n of mediaSet)
+        if (!attrSet.has(n))
+          failures.push(
+            `theme parity: ${n} is dark-overridden by prefers-color-scheme but not by [data-theme='dark']`,
+          );
+      for (const n of attrSet)
+        if (!mediaSet.has(n))
+          failures.push(
+            `theme parity: ${n} is dark-overridden by [data-theme='dark'] but not by prefers-color-scheme`,
+          );
     }
   }
 
@@ -242,12 +265,20 @@ function auditTree(files, tokensText, { checkAllowlist = true } = {}) {
       usedAllowlisted.add(u.name);
       continue;
     }
-    failures.push(`class with no rule: ${u.prefix ? `${u.name}\${…}` : u.name} at ${u.file}:${u.line}`);
+    failures.push(
+      `class with no rule: ${u.prefix ? `${u.name}\${…}` : u.name} at ${u.file}:${u.line}`,
+    );
   }
   if (checkAllowlist) {
     for (const name of CLASS_ALLOWLIST.keys()) {
-      if (definedClasses.has(name)) failures.push(`stale allowlist entry: ${name} now has a rule — remove it from CLASS_ALLOWLIST`);
-      else if (!usedAllowlisted.has(name)) failures.push(`stale allowlist entry: ${name} is no longer applied anywhere — remove it from CLASS_ALLOWLIST`);
+      if (definedClasses.has(name))
+        failures.push(
+          `stale allowlist entry: ${name} now has a rule — remove it from CLASS_ALLOWLIST`,
+        );
+      else if (!usedAllowlisted.has(name))
+        failures.push(
+          `stale allowlist entry: ${name} is no longer applied anywhere — remove it from CLASS_ALLOWLIST`,
+        );
     }
   }
 
@@ -255,7 +286,8 @@ function auditTree(files, tokensText, { checkAllowlist = true } = {}) {
   for (const [file, raw] of Object.entries(files)) {
     const re = /#646cff\b/gi;
     let m;
-    while ((m = re.exec(raw)) !== null) failures.push(`Vite starter colour #646cff at ${file}:${lineOf(raw, m.index)}`);
+    while ((m = re.exec(raw)) !== null)
+      failures.push(`Vite starter colour #646cff at ${file}:${lineOf(raw, m.index)}`);
   }
 
   return failures;
@@ -276,36 +308,137 @@ failures.push(...realFailures);
 // The REAL checker runs on every fixture on every invocation, so the audit
 // fails closed if a later edit narrows its detection.
 
-const BASE_TOKENS = ":root{--ct-a:#000;}@media (prefers-color-scheme: dark){:root:not([data-theme='light']){--ct-a:#fff;}}:root[data-theme='dark']{--ct-a:#fff;}";
+const BASE_TOKENS =
+  ":root{--ct-a:#000;}@media (prefers-color-scheme: dark){:root:not([data-theme='light']){--ct-a:#fff;}}:root[data-theme='dark']{--ct-a:#fff;}";
 const SELF_TEST_CASES = [
   // --- must be flagged ---------------------------------------------------
-  { name: 'undeclared token with a fallback', flagged: true, files: { 'a.tsx': "const s = { color: 'var(--ct-bg-subtle, #fff)' };" } },
-  { name: 'undeclared token in a stylesheet', flagged: true, files: { 'a.css': '.ct-x { color: var(--ct-color-success); }', 'b.tsx': '<div className="ct-x" />' } },
-  { name: 'undeclared --od- token', flagged: true, files: { 'a.css': '.od-x { color: var(--od-nope); }' } },
-  { name: 'className with no rule', flagged: true, files: { 'a.tsx': '<div className="ct-row ct-row--between" />', 'a.css': '.ct-row{}' } },
-  { name: 'class in a ternary with no rule', flagged: true, files: { 'a.tsx': "<p className={on ? 'ct-a' : 'ct-b'} />", 'a.css': '.ct-a{}' } },
-  { name: 'Lit class= with no rule', flagged: true, files: { 'a.ts': 'html`<span class="ct-chip__nope"></span>`' } },
-  { name: '.className assignment with no rule', flagged: true, files: { 'a.ts': "el.className = 'ct-ghost';" } },
-  { name: 'classList.add with no rule', flagged: true, files: { 'a.ts': "el.classList.add('od-ghost');" } },
-  { name: 'template prefix with no rule', flagged: true, files: { 'a.tsx': '<i className={`ct-chip--${tone}`} />', 'a.css': '.ct-card{}' } },
-  { name: 'rule only inside a comment', flagged: true, files: { 'a.tsx': '<i className="ct-dead" />', 'a.css': '/* .ct-dead {} */' } },
-  { name: 'Vite stock accent', flagged: true, files: { 'a.css': '.ct-x { color: #646CFF; }', 'a.tsx': '<i className="ct-x" />' } },
-  { name: 'undeclared token named by a template prefix', flagged: true, files: { 'a.ts': 'el.style.width = `var(--ct-gap-${n})`;' } },
-  { name: 'theme parity drift', flagged: true, files: {}, tokens: ":root{--ct-a:#000;--ct-b:#000;}@media (prefers-color-scheme: dark){:root:not([data-theme='light']){--ct-a:#fff;--ct-b:#fff;}}:root[data-theme='dark']{--ct-a:#fff;}" },
+  {
+    name: 'undeclared token with a fallback',
+    flagged: true,
+    files: { 'a.tsx': "const s = { color: 'var(--ct-bg-subtle, #fff)' };" },
+  },
+  {
+    name: 'undeclared token in a stylesheet',
+    flagged: true,
+    files: {
+      'a.css': '.ct-x { color: var(--ct-color-success); }',
+      'b.tsx': '<div className="ct-x" />',
+    },
+  },
+  {
+    name: 'undeclared --od- token',
+    flagged: true,
+    files: { 'a.css': '.od-x { color: var(--od-nope); }' },
+  },
+  {
+    name: 'className with no rule',
+    flagged: true,
+    files: { 'a.tsx': '<div className="ct-row ct-row--between" />', 'a.css': '.ct-row{}' },
+  },
+  {
+    name: 'class in a ternary with no rule',
+    flagged: true,
+    files: { 'a.tsx': "<p className={on ? 'ct-a' : 'ct-b'} />", 'a.css': '.ct-a{}' },
+  },
+  {
+    name: 'Lit class= with no rule',
+    flagged: true,
+    files: { 'a.ts': 'html`<span class="ct-chip__nope"></span>`' },
+  },
+  {
+    name: '.className assignment with no rule',
+    flagged: true,
+    files: { 'a.ts': "el.className = 'ct-ghost';" },
+  },
+  {
+    name: 'classList.add with no rule',
+    flagged: true,
+    files: { 'a.ts': "el.classList.add('od-ghost');" },
+  },
+  {
+    name: 'template prefix with no rule',
+    flagged: true,
+    files: { 'a.tsx': '<i className={`ct-chip--${tone}`} />', 'a.css': '.ct-card{}' },
+  },
+  {
+    name: 'rule only inside a comment',
+    flagged: true,
+    files: { 'a.tsx': '<i className="ct-dead" />', 'a.css': '/* .ct-dead {} */' },
+  },
+  {
+    name: 'Vite stock accent',
+    flagged: true,
+    files: { 'a.css': '.ct-x { color: #646CFF; }', 'a.tsx': '<i className="ct-x" />' },
+  },
+  {
+    name: 'undeclared token named by a template prefix',
+    flagged: true,
+    files: { 'a.ts': 'el.style.width = `var(--ct-gap-${n})`;' },
+  },
+  {
+    name: 'theme parity drift',
+    flagged: true,
+    files: {},
+    tokens:
+      ":root{--ct-a:#000;--ct-b:#000;}@media (prefers-color-scheme: dark){:root:not([data-theme='light']){--ct-a:#fff;--ct-b:#fff;}}:root[data-theme='dark']{--ct-a:#fff;}",
+  },
   // --- must NOT be flagged -----------------------------------------------
-  { name: 'declared token', flagged: false, files: { 'a.css': ':root{--ct-a:1px}.ct-x{margin:var(--ct-a)}', 'a.tsx': '<i className="ct-x" />' } },
-  { name: 'declared token named by a template prefix', flagged: false, files: { 'a.css': ':root{--ct-space-1:4px}', 'a.ts': 'el.style.width = `var(--ct-space-${n})`;' } },
-  { name: 'retired token mentioned in a comment', flagged: false, files: { 'a.ts': '/* was var(--ct-doneness-deep) */\n// var(--ct-gone)\nconst x = 1;' } },
-  { name: 'token set from a TS style object', flagged: false, files: { 'a.tsx': "const s = { '--od-doneness': 2 }; const t = 'var(--od-doneness)';" } },
-  { name: 'Lit css block defines the class', flagged: false, files: { 'a.ts': 'static styles = css`.ct-chip__dot{}`; html`<i class="ct-chip__dot"></i>`;' } },
-  { name: 'template prefix with a rule', flagged: false, files: { 'a.tsx': '<i className={`ct-chip--${tone}`} />', 'a.css': '.ct-chip--ok{}' } },
-  { name: 'non-class ct- strings are ignored', flagged: false, files: { 'a.tsx': '<ct-button data-testid="ct-thing" />' } },
-  { name: 'inline motionStyles string defines the class', flagged: false, files: { 'm.ts': 'export const motionStyles = `.od-console *{animation:none}`;', 'a.tsx': '<div className="od-console" />' } },
+  {
+    name: 'declared token',
+    flagged: false,
+    files: {
+      'a.css': ':root{--ct-a:1px}.ct-x{margin:var(--ct-a)}',
+      'a.tsx': '<i className="ct-x" />',
+    },
+  },
+  {
+    name: 'declared token named by a template prefix',
+    flagged: false,
+    files: {
+      'a.css': ':root{--ct-space-1:4px}',
+      'a.ts': 'el.style.width = `var(--ct-space-${n})`;',
+    },
+  },
+  {
+    name: 'retired token mentioned in a comment',
+    flagged: false,
+    files: { 'a.ts': '/* was var(--ct-doneness-deep) */\n// var(--ct-gone)\nconst x = 1;' },
+  },
+  {
+    name: 'token set from a TS style object',
+    flagged: false,
+    files: { 'a.tsx': "const s = { '--od-doneness': 2 }; const t = 'var(--od-doneness)';" },
+  },
+  {
+    name: 'Lit css block defines the class',
+    flagged: false,
+    files: { 'a.ts': 'static styles = css`.ct-chip__dot{}`; html`<i class="ct-chip__dot"></i>`;' },
+  },
+  {
+    name: 'template prefix with a rule',
+    flagged: false,
+    files: { 'a.tsx': '<i className={`ct-chip--${tone}`} />', 'a.css': '.ct-chip--ok{}' },
+  },
+  {
+    name: 'non-class ct- strings are ignored',
+    flagged: false,
+    files: { 'a.tsx': '<ct-button data-testid="ct-thing" />' },
+  },
+  {
+    name: 'inline motionStyles string defines the class',
+    flagged: false,
+    files: {
+      'm.ts': 'export const motionStyles = `.od-console *{animation:none}`;',
+      'a.tsx': '<div className="od-console" />',
+    },
+  },
 ];
 for (const tc of SELF_TEST_CASES) {
   const hits = auditTree(tc.files, tc.tokens ?? BASE_TOKENS, { checkAllowlist: false });
-  if (tc.flagged && hits.length === 0) failures.push(`self-test: mutation "${tc.name}" was NOT detected`);
-  else if (!tc.flagged && hits.length > 0) failures.push(`self-test: "${tc.name}" must pass but was flagged: ${hits[0]}`);
+  if (tc.flagged && hits.length === 0)
+    failures.push(`self-test: mutation "${tc.name}" was NOT detected`);
+  else if (!tc.flagged && hits.length > 0)
+    failures.push(`self-test: "${tc.name}" must pass but was flagged: ${hits[0]}`);
 }
 
 // ------------------------------------------------------------------ Report

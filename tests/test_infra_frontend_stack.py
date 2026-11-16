@@ -121,8 +121,22 @@ _WORD_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ012345678
 # case it is division). Used only to disambiguate `/` when the previous
 # significant character is itself a word character, e.g. `return /x/`.
 _REGEX_PRECEDING_KEYWORDS = {
-    "return", "typeof", "instanceof", "new", "delete", "void", "do", "else",
-    "in", "of", "yield", "throw", "case", "extends", "await", "default",
+    "return",
+    "typeof",
+    "instanceof",
+    "new",
+    "delete",
+    "void",
+    "do",
+    "else",
+    "in",
+    "of",
+    "yield",
+    "throw",
+    "case",
+    "extends",
+    "await",
+    "default",
 }
 
 # Punctuation after which a bare `/` starts a regex literal. Deliberately
@@ -253,7 +267,7 @@ def _scan_ts(src: str) -> _Scan:
                 quote = None
             i += 1
             continue
-        if ch in "\"`" or (ch == "'" and not (i > 0 and src[i - 1] in _WORD_CHARS)):
+        if ch in '"`' or (ch == "'" and not (i > 0 and src[i - 1] in _WORD_CHARS)):
             quote = ch
             emit(ch)
             i += 1
@@ -331,7 +345,8 @@ def _match_in_shipping_code(pattern: re.Pattern[str], original: str) -> bool:
 def _frontend_code(files: list[Path] | None = None) -> str:
     """Concatenated shipping code of frontend/src/ — no tests, no comments."""
     return "\n".join(
-        _strip_ts_comments(_read(p)) for p in (files if files is not None else _frontend_source_files())
+        _strip_ts_comments(_read(p))
+        for p in (files if files is not None else _frontend_source_files())
     )
 
 
@@ -426,8 +441,7 @@ def _check_comment_stripper(source_files: list[Path]) -> list[str]:
         if file_scan.open_quote is not None:
             unbalanced.append(f"{rel} (ends inside {file_scan.open_quote!r})")
         leftover += [
-            f"{rel}:{number}: {text[:60]}"
-            for number, text in _comment_like_lines(file_scan)
+            f"{rel}:{number}: {text[:60]}" for number, text in _comment_like_lines(file_scan)
         ]
 
     failures += _assert(
@@ -473,6 +487,7 @@ def _assert(condition: bool, label: str, detail: str = "") -> list[str]:
 # ---------------------------------------------------------------------------
 # Check A — frontend/ scaffolded with Vite + React + TypeScript
 # ---------------------------------------------------------------------------
+
 
 def check_a_frontend_scaffold() -> list[str]:
     print("\nCheck A: frontend/ directory scaffolded with Vite + React + TypeScript …")
@@ -526,10 +541,9 @@ def check_a_frontend_scaffold() -> list[str]:
     )
 
     # vite.config (ts or js)
-    has_vite_config = (
-        (FRONTEND_DIR / "vite.config.ts").is_file()
-        or (FRONTEND_DIR / "vite.config.js").is_file()
-    )
+    has_vite_config = (FRONTEND_DIR / "vite.config.ts").is_file() or (
+        FRONTEND_DIR / "vite.config.js"
+    ).is_file()
     failures += _assert(
         has_vite_config,
         "frontend/vite.config.ts (or .js) exists",
@@ -542,6 +556,7 @@ def check_a_frontend_scaffold() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check B — AWS Amplify libraries in frontend/package.json
 # ---------------------------------------------------------------------------
+
 
 def check_b_amplify_libraries() -> list[str]:
     print("\nCheck B: AWS Amplify libraries integrated in frontend/ …")
@@ -573,6 +588,7 @@ def check_b_amplify_libraries() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check C — Amplify Auth configured; Authenticator component used
 # ---------------------------------------------------------------------------
+
 
 def check_c_amplify_auth_config() -> list[str]:
     print("\nCheck C: Amplify Auth configured; Authenticator component used …")
@@ -622,8 +638,7 @@ def check_c_amplify_auth_config() -> list[str]:
     )
     if using_files:
         print(
-            "         rendered in: "
-            + ", ".join(str(p.relative_to(REPO_ROOT)) for p in using_files)
+            "         rendered in: " + ", ".join(str(p.relative_to(REPO_ROOT)) for p in using_files)
         )
 
     # (3) Both in the SAME file. Without this, a stray match in an unrelated
@@ -658,6 +673,7 @@ def check_c_amplify_auth_config() -> list[str]:
 # Check D — Header shows signed-in user's email
 # ---------------------------------------------------------------------------
 
+
 def check_d_header_email() -> list[str]:
     print("\nCheck D: Header shows the signed-in user's email …")
     failures: list[str] = []
@@ -690,6 +706,7 @@ def check_d_header_email() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check E — Footer shows version from authenticated /version endpoint
 # ---------------------------------------------------------------------------
+
 
 def check_e_footer_version() -> list[str]:
     print("\nCheck E: Footer shows version from the authenticated /version endpoint …")
@@ -738,6 +755,7 @@ def check_e_footer_version() -> list[str]:
 # Check F — frontend-stack.ts defines Amplify Hosting app (no longer placeholder)
 # ---------------------------------------------------------------------------
 
+
 def check_f_amplify_hosting_cdk() -> list[str]:
     print("\nCheck F: infra/lib/nested/frontend-stack.ts defines Amplify Hosting app …")
     failures: list[str] = []
@@ -781,11 +799,9 @@ def check_f_amplify_hosting_cdk() -> list[str]:
 # Check G — DEV auto-build/auto-publish enabled; PROD deliberate promotion only
 # ---------------------------------------------------------------------------
 
+
 def check_g_dev_vs_prod_autopublish() -> list[str]:
-    print(
-        "\nCheck G: DEV auto-build/auto-publish allowed; "
-        "PROD requires deliberate promotion …"
-    )
+    print("\nCheck G: DEV auto-build/auto-publish allowed; PROD requires deliberate promotion …")
     failures: list[str] = []
 
     if not FRONTEND_STACK_PATH.is_file():
@@ -835,6 +851,7 @@ def check_g_dev_vs_prod_autopublish() -> list[str]:
 # Check H — CI build script produces frontend artifact
 # ---------------------------------------------------------------------------
 
+
 def check_h_ci_build_script() -> list[str]:
     print("\nCheck H: CI build script produces the frontend artifact …")
     failures: list[str] = []
@@ -871,6 +888,7 @@ def check_h_ci_build_script() -> list[str]:
 # Check I — cdk synth runs cleanly with updated frontend stack
 # ---------------------------------------------------------------------------
 
+
 def check_i_cdk_synth() -> list[str]:
     print("\nCheck I: cdk synth runs cleanly with updated frontend stack …")
     failures: list[str] = []
@@ -897,10 +915,14 @@ def check_i_cdk_synth() -> list[str]:
     with tempfile.TemporaryDirectory(prefix="contract-toaster-gate-frontend-cdk-out-") as tmp_out:
         result = subprocess.run(  # noqa: S603
             [  # noqa: S607
-                "npx", "cdk", "synth",
-                "--context", "env=dev",
+                "npx",
+                "cdk",
+                "synth",
+                "--context",
+                "env=dev",
                 *NEUTRAL_CDK_CONTEXT,
-                "--output", tmp_out,
+                "--output",
+                tmp_out,
                 "--quiet",
             ],
             cwd=INFRA,
@@ -921,6 +943,7 @@ def check_i_cdk_synth() -> list[str]:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> int:
     print("FrontendStack structural gate (issue #54)")
     print("=" * 60)
@@ -938,10 +961,7 @@ def main() -> int:
 
     print("\n" + "=" * 60)
     if all_failures:
-        print(
-            f"\nFAIL: {len(all_failures)} check(s) failed.\n"
-            "See output above for details."
-        )
+        print(f"\nFAIL: {len(all_failures)} check(s) failed.\nSee output above for details.")
         return 1
 
     print("\nPASS: all FrontendStack structural checks passed.")

@@ -78,14 +78,18 @@ class DerivedSectionIntake(unittest.TestCase):
 
     def test_dangling_precedent_id_is_refused(self) -> None:
         doc = _doc()
-        variants = next(c["signed_variants"] for c in doc["digest"]["clauses"] if c["signed_variants"])
+        variants = next(
+            c["signed_variants"] for c in doc["digest"]["clauses"] if c["signed_variants"]
+        )
         variants[0]["precedent_ids"] = [*variants[0]["precedent_ids"], "prec.0000000000000000"]
         self._refused(doc, "dangling precedent id")
 
     def test_forged_section_digests_are_refused_even_with_a_valid_content_hash(self) -> None:
         doc = _doc()
         doc["identity"]["section_digests"]["floor"] = "sha256:" + "0" * 64
-        doc["identity"]["content_hash"] = opf_canonicalize.content_hash(doc)  # identity is excluded from the hash
+        doc["identity"]["content_hash"] = opf_canonicalize.content_hash(
+            doc
+        )  # identity is excluded from the hash
         with self.assertRaises(opf_load.OpfDerivedMismatchError) as caught:
             _load(doc)
         self.assertIn("/identity/section_digests/floor", str(caught.exception))
@@ -107,13 +111,20 @@ class DerivedSectionIntake(unittest.TestCase):
         doc["floor"]["invariants"][0]["statement"] = "Concede on anything."
         doc["manifest"]["hard_rules"][0]["statement"] = "Concede on anything."
         self._refused(doc, "x_signed_hash")
-        self.assertEqual(opf_integrity.signed_binding_status(doc["floor"]["invariants"][0]), "altered")
+        self.assertEqual(
+            opf_integrity.signed_binding_status(doc["floor"]["invariants"][0]), "altered"
+        )
 
     def test_a_retired_line_that_is_still_active_is_refused(self) -> None:
         doc = _doc()
         line = doc["floor"]["invariants"][0]
         doc["floor"]["x_retired"] = [
-            {"id": line["id"], "statement": line["statement"], "x_retired_by": "Owner", "x_retired_at": "2026-11-05T00:00:00+00:00"}
+            {
+                "id": line["id"],
+                "statement": line["statement"],
+                "x_retired_by": "Owner",
+                "x_retired_at": "2026-11-05T00:00:00+00:00",
+            }
         ]
         self._refused(doc, "retired")
 
@@ -147,10 +158,14 @@ class LedgerSaysWhenItIsEmpty(unittest.TestCase):
         doc = _doc()
         del doc["manifest"]
         self.assertEqual(hard_ledger.build_ledger(doc), [])
-        self.assertIn("absent although the Floor has 3 invariant", hard_ledger.ledger_gap(doc) or "")
+        self.assertIn(
+            "absent although the Floor has 3 invariant", hard_ledger.ledger_gap(doc) or ""
+        )
         omissions: dict = {}
         opf_prompt.compose_opf_system_blocks(doc, omissions_out=omissions)
-        self.assertTrue(any(k.startswith("hard-rule manifest — absent") for k in omissions), omissions)
+        self.assertTrue(
+            any(k.startswith("hard-rule manifest — absent") for k in omissions), omissions
+        )
 
     def test_a_document_with_its_manifest_records_nothing(self) -> None:
         import hard_ledger  # noqa: PLC0415

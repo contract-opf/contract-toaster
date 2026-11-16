@@ -314,10 +314,16 @@ def main() -> int:
     checks = [
         ("1", "no Binding block when nothing binds", check_1_no_binding_block_when_nothing_binds),
         ("2", "blocks are absent, never empty-string", check_2_no_empty_string_blocks),
-        ("3", "POSITIVE CONTROL: Binding block present when something binds",
-         check_3_positive_control_block_present_when_something_binds),
-        ("4", "provenance tags + prose honest about floor vs policy-must",
-         check_4_provenance_tags_and_honest_prose),
+        (
+            "3",
+            "POSITIVE CONTROL: Binding block present when something binds",
+            check_3_positive_control_block_present_when_something_binds,
+        ),
+        (
+            "4",
+            "provenance tags + prose honest about floor vs policy-must",
+            check_4_provenance_tags_and_honest_prose,
+        ),
         ("5", "policy rule text rendered verbatim", check_5_policy_text_verbatim),
         ("6", "new params default to today's behavior", check_6_defaults_are_todays_behavior),
     ]

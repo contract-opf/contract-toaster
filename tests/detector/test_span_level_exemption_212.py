@@ -170,7 +170,9 @@ CALL_SITES = {
     "tests/lint-acceptable-variations.py": TESTS_DIR / "lint-acceptable-variations.py",
 }
 
-IMPORT_PATTERN = re.compile(r"^\s*(import detector_common|from detector_common import)", re.MULTILINE)
+IMPORT_PATTERN = re.compile(
+    r"^\s*(import detector_common|from detector_common import)", re.MULTILINE
+)
 
 
 def test_call_sites_import_shared_module() -> None:
@@ -233,7 +235,10 @@ def test_adversarial_fixtures_fire_expected_rule() -> None:
         )
 
     missing = ADVERSARIAL_FIXTURE_CASE_IDS - found_case_ids
-    _check(not missing, f"adversarial gold fixtures not found in {GOLD_FIXTURES_DIR}: {sorted(missing)}")
+    _check(
+        not missing,
+        f"adversarial gold fixtures not found in {GOLD_FIXTURES_DIR}: {sorted(missing)}",
+    )
 
 
 def main() -> int:

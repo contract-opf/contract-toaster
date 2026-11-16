@@ -104,15 +104,12 @@ function buildNav(): HTMLElement {
 function buildMain(): HTMLElement {
   const intro = el('div', { className: 'gallery-intro' }, [
     el('h1', { text: 'Component gallery' }),
-    el(
-      'p',
-      {
-        text:
-          'Every ct-* component in every variant and state, in both themes. Dev-only ' +
-          '(excluded from production builds — docs/frontend-design-system.md §9). ' +
-          'See frontend/src/ui/README.md for the contributor guide.',
-      },
-    ),
+    el('p', {
+      text:
+        'Every ct-* component in every variant and state, in both themes. Dev-only ' +
+        '(excluded from production builds — docs/frontend-design-system.md §9). ' +
+        'See frontend/src/ui/README.md for the contributor guide.',
+    }),
   ]);
 
   const main = el('main', { className: 'gallery-main' }, [

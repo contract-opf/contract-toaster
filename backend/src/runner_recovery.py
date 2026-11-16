@@ -167,8 +167,7 @@ def _relabel(review_id: str, dynamodb_resource: Any) -> bool:
         _reviews_table(dynamodb_resource).update_item(
             Key={"review_id": review_id},
             UpdateExpression=(
-                "SET #status = :error, #reason = :reason, "
-                "failed_at = :now, updated_at = :now"
+                "SET #status = :error, #reason = :reason, failed_at = :now, updated_at = :now"
             ),
             ConditionExpression="attribute_exists(review_id) AND #status IN (:pending, :running)",
             ExpressionAttributeNames={"#status": "status", "#reason": "reason"},
@@ -246,8 +245,7 @@ def recover_orphaned_reviews(
                 )
             except Exception:  # the relabel already landed
                 logger.warning(
-                    "RUNNER_RECOVERY: recovered a review but could not settle or "
-                    "audit it",
+                    "RUNNER_RECOVERY: recovered a review but could not settle or audit it",
                     exc_info=True,
                 )
     if orphans:

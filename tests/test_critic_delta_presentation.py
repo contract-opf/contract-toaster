@@ -44,6 +44,7 @@ OUTPUT_SCHEMA_PATH = REPO_ROOT / "playbooks" / "output-schema-v1.json"
 # Check 1: output-contract.md critic-delta presentation spec
 # ---------------------------------------------------------------------------
 
+
 def check_output_contract_spec(failures: list) -> None:
     label = "OUTPUT-CONTRACT SPEC CHECK"
 
@@ -54,11 +55,13 @@ def check_output_contract_spec(failures: list) -> None:
     text = OUTPUT_CONTRACT_PATH.read_text()
 
     # Must have a heading for critic-delta presentation
-    has_heading = bool(re.search(
-        r"##\s+Critic.delta presentation",
-        text,
-        re.IGNORECASE,
-    ))
+    has_heading = bool(
+        re.search(
+            r"##\s+Critic.delta presentation",
+            text,
+            re.IGNORECASE,
+        )
+    )
     if not has_heading:
         failures.append(
             f"{label}: docs/output-contract.md does not contain a "
@@ -71,11 +74,13 @@ def check_output_contract_spec(failures: list) -> None:
         return
 
     # Must address contested replacements with a per-issue badge
-    has_contested_badge = bool(re.search(
-        r"critic.flagged.this.replacement|critic.*badge|badge.*contested|contested.*badge",
-        text,
-        re.IGNORECASE,
-    ))
+    has_contested_badge = bool(
+        re.search(
+            r"critic.flagged.this.replacement|critic.*badge|badge.*contested|contested.*badge",
+            text,
+            re.IGNORECASE,
+        )
+    )
     if not has_contested_badge:
         failures.append(
             f"{label}: docs/output-contract.md 'Critic-delta presentation' section "
@@ -86,11 +91,13 @@ def check_output_contract_spec(failures: list) -> None:
         )
 
     # Must address side-by-side alternatives
-    has_side_by_side = bool(re.search(
-        r"side.by.side|side by side",
-        text,
-        re.IGNORECASE,
-    ))
+    has_side_by_side = bool(
+        re.search(
+            r"side.by.side|side by side",
+            text,
+            re.IGNORECASE,
+        )
+    )
     if not has_side_by_side:
         failures.append(
             f"{label}: docs/output-contract.md 'Critic-delta presentation' section "
@@ -101,11 +108,13 @@ def check_output_contract_spec(failures: list) -> None:
         )
 
     # Must address critic-added issue attribution
-    has_critic_added = bool(re.search(
-        r"critic.added|critic added.*attribution|attribution.*critic",
-        text,
-        re.IGNORECASE,
-    ))
+    has_critic_added = bool(
+        re.search(
+            r"critic.added|critic added.*attribution|attribution.*critic",
+            text,
+            re.IGNORECASE,
+        )
+    )
     if not has_critic_added:
         failures.append(
             f"{label}: docs/output-contract.md 'Critic-delta presentation' section "
@@ -115,11 +124,13 @@ def check_output_contract_spec(failures: list) -> None:
         )
 
     # Must address download gate: delta indicator must appear before download
-    has_download_gate = bool(re.search(
-        r"download.*delta|delta.*download|download.*critic|critic.*download",
-        text,
-        re.IGNORECASE,
-    ))
+    has_download_gate = bool(
+        re.search(
+            r"download.*delta|delta.*download|download.*critic|critic.*download",
+            text,
+            re.IGNORECASE,
+        )
+    )
     if not has_download_gate:
         failures.append(
             f"{label}: docs/output-contract.md 'Critic-delta presentation' section "
@@ -141,6 +152,7 @@ def check_output_contract_spec(failures: list) -> None:
 # Check 2: ARCHITECTURE.md frontend section references critic-delta surface
 # ---------------------------------------------------------------------------
 
+
 def check_architecture_frontend(failures: list) -> None:
     label = "ARCHITECTURE SPEC CHECK"
 
@@ -157,19 +169,19 @@ def check_architecture_frontend(failures: list) -> None:
         re.DOTALL | re.IGNORECASE,
     )
     if not frontend_match:
-        failures.append(
-            f"{label}: ARCHITECTURE.md does not have a '### Frontend' section."
-        )
+        failures.append(f"{label}: ARCHITECTURE.md does not have a '### Frontend' section.")
         return
 
     frontend_section = frontend_match.group(0)
 
     # Must mention critic delta presentation in the frontend section
-    has_critic_delta = bool(re.search(
-        r"critic.delta|critic.*delta|delta.*critic",
-        frontend_section,
-        re.IGNORECASE,
-    ))
+    has_critic_delta = bool(
+        re.search(
+            r"critic.delta|critic.*delta|delta.*critic",
+            frontend_section,
+            re.IGNORECASE,
+        )
+    )
     if not has_critic_delta:
         failures.append(
             f"{label}: ARCHITECTURE.md '### Frontend' section does not reference "
@@ -191,13 +203,12 @@ def check_architecture_frontend(failures: list) -> None:
 # Check 3: CriticDelta schema has both contested_replacements and added_issues
 # ---------------------------------------------------------------------------
 
+
 def check_critic_delta_schema(failures: list) -> None:
     label = "SCHEMA CONSISTENCY CHECK"
 
     if not OUTPUT_SCHEMA_PATH.exists():
-        failures.append(
-            f"{label}: playbooks/output-schema-v1.json does not exist."
-        )
+        failures.append(f"{label}: playbooks/output-schema-v1.json does not exist.")
         return
 
     with open(OUTPUT_SCHEMA_PATH) as f:
@@ -228,11 +239,7 @@ def check_critic_delta_schema(failures: list) -> None:
         return
 
     # contested_replacements items must have critic_objection (for the badge text)
-    cr_items = (
-        cd_props.get("contested_replacements", {})
-        .get("items", {})
-        .get("properties", {})
-    )
+    cr_items = cd_props.get("contested_replacements", {}).get("items", {}).get("properties", {})
     if "critic_objection" not in cr_items:
         failures.append(
             f"{label}: CriticDelta.contested_replacements items in output-schema-v1.json "
@@ -250,6 +257,7 @@ def check_critic_delta_schema(failures: list) -> None:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> int:
     print("Critic-delta presentation surface gate (issue #36)\n")

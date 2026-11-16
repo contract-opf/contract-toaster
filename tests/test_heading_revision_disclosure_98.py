@@ -145,10 +145,7 @@ def _renamed_heading_p(lead_in: str, old: str, new: str, author: str = _AUTHOR) 
 
 
 def _plain_heading_p(text: str) -> str:
-    return (
-        '<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr>'
-        f"<w:r><w:t>{text}</w:t></w:r></w:p>"
-    )
+    return f'<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>'
 
 
 def _pending_body_p(text: str, author: str = _AUTHOR) -> str:
@@ -220,14 +217,12 @@ def test_an_in_place_heading_rename_is_disclosed_and_names_the_new_text(
     heading = out["paragraphs"][0]["heading"]
     if heading != "Data Protection":
         failures.append(
-            f"[D7] The heading label must be the ACCEPTED text, lead-in stripped. "
-            f"Got: {heading!r}"
+            f"[D7] The heading label must be the ACCEPTED text, lead-in stripped. Got: {heading!r}"
         )
     notes = out.get("normalization_notes") or ""
     if "Data Protection" not in notes or _RECEIPT_TAIL not in notes:
         failures.append(
-            f"[D8] The rename must be disclosed by the heading's accepted text. "
-            f"Got: {notes!r}"
+            f"[D8] The rename must be disclosed by the heading's accepted text. Got: {notes!r}"
         )
 
 

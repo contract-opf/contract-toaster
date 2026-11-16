@@ -84,13 +84,11 @@ function lastBody(
   method: string,
   pathname: string,
 ): Record<string, unknown> {
-  const call = [...fetchMock.mock.calls]
-    .reverse()
-    .find(([input, init]) => {
-      const url = typeof input === 'string' ? input : String(input);
-      const actualMethod = ((init as RequestInit | undefined)?.method ?? 'GET').toUpperCase();
-      return actualMethod === method && new URL(url, 'http://localhost').pathname === pathname;
-    });
+  const call = [...fetchMock.mock.calls].reverse().find(([input, init]) => {
+    const url = typeof input === 'string' ? input : String(input);
+    const actualMethod = ((init as RequestInit | undefined)?.method ?? 'GET').toUpperCase();
+    return actualMethod === method && new URL(url, 'http://localhost').pathname === pathname;
+  });
   if (!call) {
     throw new Error(`no ${method} ${pathname} call was recorded`);
   }
@@ -309,9 +307,9 @@ describe('AdminRetention #475 AC2 — a hold can be placed without ever seeing a
     fireEvent.click(screen.getByTestId('place-hold-button'));
 
     await waitFor(() => {
-      expect(
-        wasCalled(fetchMock, 'POST', `/api/admin/retention/holds/${REVIEW_A.review_id}`),
-      ).toBe(true);
+      expect(wasCalled(fetchMock, 'POST', `/api/admin/retention/holds/${REVIEW_A.review_id}`)).toBe(
+        true,
+      );
     });
   });
 
@@ -404,7 +402,7 @@ describe('AdminRetention #475 AC3 / finding 2 — pasted id resolves or warns, b
   });
 });
 
-describe('AdminRetention #475 finding 2 (round 2) — a pasted id outside the picker\'s newest-50 slice does not break the select', () => {
+describe("AdminRetention #475 finding 2 (round 2) — a pasted id outside the picker's newest-50 slice does not break the select", () => {
   it('resolves to human context but leaves the select on its placeholder, not blank', async () => {
     // Oldest of the bunch -- guaranteed to sort past the picker's
     // `REVIEW_PICKER_OPTION_LIMIT` (50) newest-first cap.

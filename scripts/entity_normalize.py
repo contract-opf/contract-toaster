@@ -94,9 +94,7 @@ _LEADING_ARTICLE = "the"
 
 _DBA_PATTERN = re.compile(
     r"(?<![\w/.])(?:"
-    + "|".join(
-        re.escape(sep) for sep in sorted(DBA_SEPARATORS, key=lambda s: (-len(s), s))
-    )
+    + "|".join(re.escape(sep) for sep in sorted(DBA_SEPARATORS, key=lambda s: (-len(s), s)))
     + r")(?![\w/.])",
     re.IGNORECASE,
 )
@@ -126,11 +124,7 @@ def fold(name: str) -> str:
     decomposed = unicodedata.normalize("NFKD", name)
     without_marks = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
     lowered = without_marks.casefold().replace("&", " and ")
-    kept = [
-        ch
-        for ch in lowered
-        if ch.isalnum() or ch.isspace() or ch in _KEPT_PUNCTUATION
-    ]
+    kept = [ch for ch in lowered if ch.isalnum() or ch.isspace() or ch in _KEPT_PUNCTUATION]
     text = " ".join("".join(kept).split())
     # Looped, not a single strip: "The The Depot" must reach the same
     # answer as folding its own output, or `fold` is not idempotent.

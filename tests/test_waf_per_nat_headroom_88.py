@@ -61,8 +61,7 @@ def compute() -> dict[str, int]:
     slow = _ui_constant("POLL_INTERVAL_SLOW_MS")
     fast_phase = _ui_constant("POLL_FAST_PHASE_MS")
     worst = max(
-        _polls_in_window(offset, fast, slow, fast_phase)
-        for offset in range(0, WINDOW_MS + 1, 1000)
+        _polls_in_window(offset, fast, slow, fast_phase) for offset in range(0, WINDOW_MS + 1, 1000)
     )
     upload_limit = _rule_limit("RateLimitUploadEndpoint")
     poll_limit = _rule_limit("RateLimitPollingEndpoint")

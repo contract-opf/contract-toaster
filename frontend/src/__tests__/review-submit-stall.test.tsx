@@ -126,8 +126,12 @@ async function panelWithUpload(respond: 'stall' | 'accept'): Promise<Harness> {
     const method = (init?.method ?? 'GET').toUpperCase();
     const pathname = new URL(url, 'http://localhost').pathname;
     if (pathname === '/api/playbooks') {
-      // eslint-disable-next-line @typescript-eslint/require-await
-      return Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_PLAYBOOKS } as Response);
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        // eslint-disable-next-line @typescript-eslint/require-await
+        json: async () => DEFAULT_PLAYBOOKS,
+      } as Response);
     }
     if (method === 'POST' && pathname === '/api/reviews') {
       posts.push(init ?? {});

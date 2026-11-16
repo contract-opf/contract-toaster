@@ -199,7 +199,9 @@ def _output(issue: dict[str, Any]) -> dict[str, Any]:
     return {"verdict_summary": "Changes are requested.", "issues": [issue]}
 
 
-def _run(doc: dict[str, Any], *, with_indemnity: bool = False) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def _run(
+    doc: dict[str, Any], *, with_indemnity: bool = False
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """One real review of `doc`: the reviewer cites the liability-cap Floor
     rule (so the critic is sent that rule's dossier), the critic drops the
     issue, and the Floor judge clears each invariant. Returns the result and
@@ -246,7 +248,9 @@ def _pass_calls(calls: list[dict[str, Any]]) -> tuple[dict[str, Any], dict[str, 
     metadata = _load_bundle()["playbook"]["metadata"]
     reviewer = next(c for c in calls if c["model_id"] == metadata["primary_model_id"])
     critic = next(
-        c for c in calls if c["model_id"] == metadata["critic_model_id"] and "CRITIC" in json.dumps(c["user_prompt"])
+        c
+        for c in calls
+        if c["model_id"] == metadata["critic_model_id"] and "CRITIC" in json.dumps(c["user_prompt"])
     )
     return reviewer, critic
 
@@ -254,7 +258,10 @@ def _pass_calls(calls: list[dict[str, Any]]) -> tuple[dict[str, Any], dict[str, 
 def _request_text(call: dict[str, Any]) -> str:
     """Everything a request sent to the model, serialized."""
     return json.dumps(
-        {key: call.get(key) for key in ("system_prompt", "user_prompt", "tool_spec", "output_schema")},
+        {
+            key: call.get(key)
+            for key in ("system_prompt", "user_prompt", "tool_spec", "output_schema")
+        },
         ensure_ascii=False,
         default=str,
     )
@@ -331,7 +338,13 @@ def _digest_refs(doc: dict[str, Any]) -> set[tuple[str, str, str]]:
     def walk(value: Any) -> None:
         if isinstance(value, dict):
             if "document_id" in value and "clause_path" in value:
-                refs.add((str(value["document_id"]), str(value.get("version")), str(value.get("clause_path"))))
+                refs.add(
+                    (
+                        str(value["document_id"]),
+                        str(value.get("version")),
+                        str(value.get("clause_path")),
+                    )
+                )
             for item in value.values():
                 walk(item)
         elif isinstance(value, list):
@@ -377,7 +390,10 @@ def test_each_alias_resolves_to_its_slug() -> None:
         assert restored == invariant["rationale"], invariant["id"]
     liability = doc["dossiers"][LIABILITY_CLAUSE]
     aliased_dossier = deal_aliases.alias_dossier(liability, deal_aliases.alias_map(doc))
-    assert aliased_dossier is not liability and liability == _load(NDA_EXAMPLE)["dossiers"][LIABILITY_CLAUSE]
+    assert (
+        aliased_dossier is not liability
+        and liability == _load(NDA_EXAMPLE)["dossiers"][LIABILITY_CLAUSE]
+    )
     expected = copy.deepcopy(liability)
     for rule in expected["floor_rules"]:
         rule["rationale"] = deal_aliases.alias_text(rule["rationale"], deal_aliases.alias_map(doc))
@@ -424,7 +440,9 @@ def test_the_shared_prefix_is_identical_across_reviews_of_one_version() -> None:
 def _corpus(doc: dict[str, Any]) -> leakage_scan.ConfidentialCorpus:
     with contextlib.redirect_stderr(io.StringIO()):
         blocks = [{"type": "text", "text": b} for b in opf_prompt.compose_opf_system_blocks(doc)]
-    return leakage_scan.ConfidentialCorpus.from_opf_document(doc, overrides=None, system_blocks=blocks)
+    return leakage_scan.ConfidentialCorpus.from_opf_document(
+        doc, overrides=None, system_blocks=blocks
+    )
 
 
 def test_check_3_holds_the_aliases_in_place_of_the_slugs() -> None:
@@ -507,11 +525,23 @@ _ORDINARY_WORD_SLUGS = (
     # leaves it, so the Binding block and the dossier render it.
     ("nda", "mutual NDA", "Under this NDA we ask to keep the confidentiality carve-out."),
     # A Floor statement and its manifest hard rule.
-    ("agreement", "obligations in this Agreement", "This Agreement should keep the confidentiality carve-out."),
+    (
+        "agreement",
+        "obligations in this Agreement",
+        "This Agreement should keep the confidentiality carve-out.",
+    ),
     # The same statement; the rationale's own uses are aliased (below).
-    ("liability", "Limitation of liability", "The liability cap must not reach a confidentiality breach."),
+    (
+        "liability",
+        "Limitation of liability",
+        "The liability cap must not reach a confidentiality breach.",
+    ),
     # Two Floor statements and the posture prose.
-    ("confidentiality", "Survival of Confidentiality Obligations", "We ask to keep the confidentiality carve-out."),
+    (
+        "confidentiality",
+        "Survival of Confidentiality Obligations",
+        "We ask to keep the confidentiality carve-out.",
+    ),
 )
 
 
@@ -533,7 +563,9 @@ def test_an_ordinary_word_slug_no_longer_blocks_that_word() -> None:
         assert set(aliases.values()) <= set(corpus.internal_precedent_ids), word
         # The note uses the word and nothing else the corpus holds.
         assert _named(note, {word}), (word, note)
-        assert not leakage_scan.scan_model_output(_output(_issue(**{_EXTERNAL: note})), corpus).blocked, (
+        assert not leakage_scan.scan_model_output(
+            _output(_issue(**{_EXTERNAL: note})), corpus
+        ).blocked, (
             word,
             note,
         )
@@ -549,7 +581,10 @@ def test_an_ordinary_word_slug_no_longer_blocks_that_word() -> None:
     doc = _renamed("30")
     overrides = {
         "floor_additions": [
-            {"id": "operator-added-notice-floor", "statement": "Notice periods are never shorter than 30 days."}
+            {
+                "id": "operator-added-notice-floor",
+                "statement": "Notice periods are never shorter than 30 days.",
+            }
         ]
     }
     with contextlib.redirect_stderr(io.StringIO()):
@@ -562,7 +597,9 @@ def test_an_ordinary_word_slug_no_longer_blocks_that_word() -> None:
     note = "We ask for 30 days of notice."
     assert not leakage_scan.scan_model_output(_output(_issue(**{_EXTERNAL: note})), corpus).blocked
     alias = deal_aliases.alias_map(doc)["30"]
-    assert leakage_scan.scan_model_output(_output(_issue(**{_EXTERNAL: f"As in {alias}: {note}"})), corpus).blocked
+    assert leakage_scan.scan_model_output(
+        _output(_issue(**{_EXTERNAL: f"As in {alias}: {note}"})), corpus
+    ).blocked
     # The rule is the slug's shape: one word or one number, in any case, and
     # nothing with a separator or a mix of letters and digits.
     assert leakage_scan._is_single_token_slug("30") and leakage_scan._is_single_token_slug("NDA")
@@ -585,7 +622,8 @@ def test_a_separated_slug_the_prose_uses_as_a_phrase_is_still_held() -> None:
     corpus = _corpus(doc)
     assert "in-house" in corpus.internal_precedent_ids
     outcome = leakage_scan.scan_model_output(
-        _output(_issue(**{_EXTERNAL: "Our in-house counsel must approve this breach carve-out."})), corpus
+        _output(_issue(**{_EXTERNAL: "Our in-house counsel must approve this breach carve-out."})),
+        corpus,
     )
     assert outcome.blocked and outcome.rule_id == "internal-precedent-id", outcome
 
@@ -610,7 +648,10 @@ def test_an_ordinary_word_slug_is_still_aliased_in_engine_rationale() -> None:
     assert not re.search(r"(?<!\w)liability(?!\w)", aliased), aliased
     text = _compose(doc).replace('\\"', '"')
     assert f"(Rationale: {aliased})" in text
-    assert invariant["statement"] in text and "Limitation of liability, if present" in invariant["statement"]
+    assert (
+        invariant["statement"] in text
+        and "Limitation of liability, if present" in invariant["statement"]
+    )
     dossier = _all_dossiers_rendered(doc)
     assert f"A $50,000 {alias} cap" in dossier and invariant["statement"] in dossier
     # The swap is the only change: restoring the slugs gives the engine's text.
@@ -623,7 +664,9 @@ def test_an_ordinary_word_slug_is_still_aliased_in_engine_rationale() -> None:
     assert restored == rationale
     # The word is not held; the alias it became is.
     corpus = _corpus(doc)
-    assert "liability" not in corpus.internal_precedent_ids and alias in corpus.internal_precedent_ids
+    assert (
+        "liability" not in corpus.internal_precedent_ids and alias in corpus.internal_precedent_ids
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -659,11 +702,23 @@ _SLUG_VARIANTS = ("Theta-Logistics", "THETA-LOGISTICS", "theta\u2011logistics")
 
 
 def _assert_held_variant(corpus: leakage_scan.ConfidentialCorpus, written: str) -> None:
-    assert "theta-logistics" in corpus.internal_precedent_ids, (written, corpus.internal_precedent_ids)
-    for echoed in (f"As agreed with {written}, we keep it.", "As agreed with Theta-Logistics, we keep it."):
+    assert "theta-logistics" in corpus.internal_precedent_ids, (
+        written,
+        corpus.internal_precedent_ids,
+    )
+    for echoed in (
+        f"As agreed with {written}, we keep it.",
+        "As agreed with Theta-Logistics, we keep it.",
+    ):
         outcome = leakage_scan.scan_model_output(_output(_issue(**{_EXTERNAL: echoed})), corpus)
-        assert outcome.blocked and outcome.rule_id == "internal-precedent-id", (written, echoed, outcome)
-        assert not leakage_scan.scan_model_output(_output(_issue(**{_INTERNAL: echoed})), corpus).blocked
+        assert outcome.blocked and outcome.rule_id == "internal-precedent-id", (
+            written,
+            echoed,
+            outcome,
+        )
+        assert not leakage_scan.scan_model_output(
+            _output(_issue(**{_INTERNAL: echoed})), corpus
+        ).blocked
 
 
 def test_a_case_or_dash_variant_slug_in_a_floor_statement_stays_held() -> None:
@@ -735,7 +790,12 @@ def _aliasing_bypassed() -> Iterator[None]:
     """Every `deal_aliases` entry point `opf_prompt` and `critic_dossiers`
     call, replaced by the identity for the duration: the composition a
     document gets with no aliasing at all."""
-    saved = (deal_aliases.alias_map, deal_aliases.alias_digest, deal_aliases.alias_text, deal_aliases.alias_dossier)
+    saved = (
+        deal_aliases.alias_map,
+        deal_aliases.alias_digest,
+        deal_aliases.alias_text,
+        deal_aliases.alias_dossier,
+    )
     deal_aliases.alias_map = lambda _doc: {}
     deal_aliases.alias_digest = lambda digest, _aliases: digest
     deal_aliases.alias_text = lambda text, _aliases: text
@@ -755,7 +815,12 @@ def test_a_document_with_no_deals_composes_as_with_aliasing_bypassed() -> None:
     doc = _load(NDA_EXAMPLE)
     for clause in doc["digest"]["clauses"]:
         # Digest 5 (issue #177): a verified-absent deal is a deal too.
-        for field in ("signed_variants", "refused_asks", "changed_openings", "verified_absent_deals"):
+        for field in (
+            "signed_variants",
+            "refused_asks",
+            "changed_openings",
+            "verified_absent_deals",
+        ):
             clause[field] = []
     doc["corpus"]["documents"] = []
     doc["evidence"]["precedent"] = []

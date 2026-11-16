@@ -121,16 +121,23 @@ class FakeHttpClient:
 
 def _client(http: FakeHttpClient) -> mc.OpenRouterModelClient:
     return mc.OpenRouterModelClient(
-        api_key="sk-test", http_client=http, max_retries=0, sleep_fn=lambda _s: None,
+        api_key="sk-test",
+        http_client=http,
+        max_retries=0,
+        sleep_fn=lambda _s: None,
     )
 
 
-def _choice_response(status: int = 200, *, content: Any = "{}", finish_reason: str | None = "stop") -> FakeResponse:
+def _choice_response(
+    status: int = 200, *, content: Any = "{}", finish_reason: str | None = "stop"
+) -> FakeResponse:
     message: dict[str, Any] = {"content": content}
     choice: dict[str, Any] = {"message": message}
     if finish_reason is not None:
         choice["finish_reason"] = finish_reason
-    return FakeResponse(status, {"choices": [choice], "usage": {"prompt_tokens": 1, "completion_tokens": 1}})
+    return FakeResponse(
+        status, {"choices": [choice], "usage": {"prompt_tokens": 1, "completion_tokens": 1}}
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +188,9 @@ class TestReasoningAllowanceAppliedToRequest(unittest.TestCase):
         allowance = mc.openrouter_reasoning_max_tokens(KIMI_MODEL_ID)
         with patch.dict("os.environ", {}, clear=True):
             _client(http).invoke(
-                model_id=KIMI_MODEL_ID, system_prompt="s", user_prompt="u",
+                model_id=KIMI_MODEL_ID,
+                system_prompt="s",
+                user_prompt="u",
                 max_output_tokens=8000,
             )
         self.assertEqual(http.calls[0]["json"]["max_tokens"], 8000 + allowance)
@@ -200,7 +209,9 @@ class TestReasoningAllowanceAppliedToRequest(unittest.TestCase):
         self.assertEqual(mc.openrouter_reasoning_max_tokens("anthropic/claude-sonnet-5"), 0)
         with patch.dict("os.environ", {}, clear=True):
             _client(http).invoke(
-                model_id="anthropic/claude-sonnet-5", system_prompt="s", user_prompt="u",
+                model_id="anthropic/claude-sonnet-5",
+                system_prompt="s",
+                user_prompt="u",
                 max_output_tokens=8000,
             )
         self.assertEqual(http.calls[0]["json"]["max_tokens"], 8000)
@@ -218,7 +229,9 @@ class TestFailClosedOnEmptyOrTruncatedContent(unittest.TestCase):
         with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelEmptyContentError) as ctx:
                 _client(http).invoke(
-                    model_id=PRIMARY_MODEL_ID, system_prompt="s", user_prompt="u",
+                    model_id=PRIMARY_MODEL_ID,
+                    system_prompt="s",
+                    user_prompt="u",
                     max_output_tokens=64,
                 )
         self.assertIsInstance(ctx.exception, mc.ModelInvocationError)
@@ -228,7 +241,9 @@ class TestFailClosedOnEmptyOrTruncatedContent(unittest.TestCase):
         with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelEmptyContentError):
                 _client(http).invoke(
-                    model_id=PRIMARY_MODEL_ID, system_prompt="s", user_prompt="u",
+                    model_id=PRIMARY_MODEL_ID,
+                    system_prompt="s",
+                    user_prompt="u",
                     max_output_tokens=64,
                 )
 
@@ -237,7 +252,9 @@ class TestFailClosedOnEmptyOrTruncatedContent(unittest.TestCase):
         with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelOutputTruncatedError) as ctx:
                 _client(http).invoke(
-                    model_id=KIMI_MODEL_ID, system_prompt="s", user_prompt="u",
+                    model_id=KIMI_MODEL_ID,
+                    system_prompt="s",
+                    user_prompt="u",
                     max_output_tokens=64,
                 )
         self.assertIsInstance(ctx.exception, mc.ModelInvocationError)
@@ -251,15 +268,21 @@ class TestFailClosedOnEmptyOrTruncatedContent(unittest.TestCase):
         with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelOutputTruncatedError):
                 _client(http).invoke(
-                    model_id=KIMI_MODEL_ID, system_prompt="s", user_prompt="u",
+                    model_id=KIMI_MODEL_ID,
+                    system_prompt="s",
+                    user_prompt="u",
                     max_output_tokens=64,
                 )
 
     def test_normal_stop_with_content_is_unaffected(self) -> None:
-        http = FakeHttpClient(_choice_response(content='{"decision":"ACCEPT"}', finish_reason="stop"))
+        http = FakeHttpClient(
+            _choice_response(content='{"decision":"ACCEPT"}', finish_reason="stop")
+        )
         with patch.dict("os.environ", {}, clear=True):
             out = _client(http).invoke(
-                model_id=PRIMARY_MODEL_ID, system_prompt="s", user_prompt="u",
+                model_id=PRIMARY_MODEL_ID,
+                system_prompt="s",
+                user_prompt="u",
                 max_output_tokens=64,
             )
         self.assertEqual(out, '{"decision":"ACCEPT"}')
@@ -270,7 +293,9 @@ class TestFailClosedOnEmptyOrTruncatedContent(unittest.TestCase):
         http = FakeHttpClient(FakeResponse(200, {"choices": [{"message": {"content": "{}"}}]}))
         with patch.dict("os.environ", {}, clear=True):
             out = _client(http).invoke(
-                model_id=PRIMARY_MODEL_ID, system_prompt="s", user_prompt="u",
+                model_id=PRIMARY_MODEL_ID,
+                system_prompt="s",
+                user_prompt="u",
                 max_output_tokens=64,
             )
         self.assertEqual(out, "{}")
@@ -356,8 +381,14 @@ class FakeReviewsTable:
     def __init__(self, status: str = "RUNNING"):
         self.item: dict[str, Any] = {"review_id": "rid", "status": status}
 
-    def update_item(self, Key, UpdateExpression, ConditionExpression=None,
-                    ExpressionAttributeNames=None, ExpressionAttributeValues=None):
+    def update_item(
+        self,
+        Key,
+        UpdateExpression,
+        ConditionExpression=None,
+        ExpressionAttributeNames=None,
+        ExpressionAttributeValues=None,
+    ):
         names = ExpressionAttributeNames or {}
         values = ExpressionAttributeValues or {}
         set_clause = UpdateExpression.split("SET", 1)[1]
@@ -380,9 +411,14 @@ class TestRecordStageFailureStampsModelIds(unittest.TestCase):
         table = FakeReviewsTable()
         with patch.dict("os.environ", {"REVIEWS_TABLE": "reviews-test"}, clear=False):
             reviews.record_stage_failure(
-                "rid", "run_review", "model_empty_content", FakeDDB(table),
-                model_ids={"primary_model_id": PRIMARY_MODEL_ID,
-                           "critic_model_id": "moonshotai/kimi-k3"},
+                "rid",
+                "run_review",
+                "model_empty_content",
+                FakeDDB(table),
+                model_ids={
+                    "primary_model_id": PRIMARY_MODEL_ID,
+                    "critic_model_id": "moonshotai/kimi-k3",
+                },
             )
         self.assertEqual(table.item["primary_model_id"], PRIMARY_MODEL_ID)
         self.assertEqual(table.item["critic_model_id"], "moonshotai/kimi-k3")
@@ -401,7 +437,10 @@ class TestRecordStageFailureStampsModelIds(unittest.TestCase):
         table = FakeReviewsTable()
         with patch.dict("os.environ", {"REVIEWS_TABLE": "reviews-test"}, clear=False):
             reviews.record_stage_failure(
-                "rid", "verify_active_bundle", "unhandled_exception", FakeDDB(table),
+                "rid",
+                "verify_active_bundle",
+                "unhandled_exception",
+                FakeDDB(table),
                 model_ids={},
             )
         self.assertNotIn("primary_model_id", table.item)
@@ -424,7 +463,12 @@ class TestRunRealPipelineCapturesModelIdsOnFailure(unittest.TestCase):
 
         class FakePlaybooksTable:
             def get_item(self, Key):
-                return {"Item": {"playbook_id": Key["playbook_id"], "active_release_bundle_hash": "hash-1"}}
+                return {
+                    "Item": {
+                        "playbook_id": Key["playbook_id"],
+                        "active_release_bundle_hash": "hash-1",
+                    }
+                }
 
         class FakeDDBFull:
             def __init__(self):
@@ -439,6 +483,7 @@ class TestRunRealPipelineCapturesModelIdsOnFailure(unittest.TestCase):
         class FakeS3:
             def get_object(self, Bucket, Key):
                 import io
+
                 return {"Body": io.BytesIO(b"docx-bytes")}
 
             def put_object(self, Bucket, Key, Body, **_kwargs):
@@ -461,21 +506,32 @@ class TestRunRealPipelineCapturesModelIdsOnFailure(unittest.TestCase):
             os.environ["UPLOADS_BUCKET"] = "uploads-test"
             os.environ["OUTPUTS_BUCKET"] = "outputs-test"
             os.environ["PLAYBOOKS_TABLE"] = "playbooks-test"
-            with patch.object(pr, "_settle_reservation"), \
-                 patch.object(pr, "_load_playbook_bundle", return_value={"playbook": {"metadata": {}}}), \
-                 patch.object(
-                     pr, "_bundle_with_openrouter_model_ids",
-                     side_effect=lambda bundle, dynamodb_resource=None: {
-                         "playbook": {"metadata": {
-                             "primary_model_id": PRIMARY_MODEL_ID,
-                             "critic_model_id": KIMI_MODEL_ID,
-                         }}
-                     },
-                 ), \
-                 patch.object(pr.review_spine, "run_review", side_effect=mc.ModelEmptyContentError("empty")):
+            with (
+                patch.object(pr, "_settle_reservation"),
+                patch.object(
+                    pr, "_load_playbook_bundle", return_value={"playbook": {"metadata": {}}}
+                ),
+                patch.object(
+                    pr,
+                    "_bundle_with_openrouter_model_ids",
+                    side_effect=lambda bundle, dynamodb_resource=None: {
+                        "playbook": {
+                            "metadata": {
+                                "primary_model_id": PRIMARY_MODEL_ID,
+                                "critic_model_id": KIMI_MODEL_ID,
+                            }
+                        }
+                    },
+                ),
+                patch.object(
+                    pr.review_spine, "run_review", side_effect=mc.ModelEmptyContentError("empty")
+                ),
+            ):
                 pr.run_real_pipeline(
-                    review_id, payload,
-                    dynamodb_resource=FakeDDBFull(), s3_client=FakeS3(),
+                    review_id,
+                    payload,
+                    dynamodb_resource=FakeDDBFull(),
+                    s3_client=FakeS3(),
                     model_client=InertModelClient(),
                 )
 

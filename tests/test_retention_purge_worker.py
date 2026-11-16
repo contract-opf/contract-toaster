@@ -108,6 +108,7 @@ ClientError = sys.modules["botocore.exceptions"].ClientError
 # In-memory fakes
 # ---------------------------------------------------------------------------
 
+
 class FakeTable:
     """Tiny in-memory DynamoDB Table stand-in (same shape/contract as the
     fakes in tests/test_orphan_reconciler_e2e.py)."""
@@ -131,8 +132,14 @@ class FakeTable:
         key = Item[self.key_name]
         self.items[key] = dict(Item)
 
-    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues=None,
-                     ExpressionAttributeNames=None, ConditionExpression=None):
+    def update_item(
+        self,
+        Key,
+        UpdateExpression,
+        ExpressionAttributeValues=None,
+        ExpressionAttributeNames=None,
+        ConditionExpression=None,
+    ):
         key = Key[self.key_name]
         item = self.items.setdefault(key, dict(Key))
         vals = ExpressionAttributeValues or {}
@@ -151,12 +158,12 @@ class FakeTable:
         if upper.startswith("SET"):
             remove_idx = upper.find(" REMOVE ")
             if remove_idx == -1:
-                set_part = expr[len("SET"):]
+                set_part = expr[len("SET") :]
             else:
-                set_part = expr[len("SET"):remove_idx]
-                remove_part = expr[remove_idx + len(" REMOVE "):]
+                set_part = expr[len("SET") : remove_idx]
+                remove_part = expr[remove_idx + len(" REMOVE ") :]
         elif upper.startswith("REMOVE"):
-            remove_part = expr[len("REMOVE"):]
+            remove_part = expr[len("REMOVE") :]
 
         # SET clause support (generic key=value assignment interpreter,
         # good enough for the small set of expressions handler.py issues).
@@ -180,8 +187,13 @@ class FakeTable:
                 attr = names.get(f, f)
                 item.pop(attr, None)
 
-    def scan(self, FilterExpression=None, ExpressionAttributeNames=None,
-              ExpressionAttributeValues=None, ExclusiveStartKey=None):
+    def scan(
+        self,
+        FilterExpression=None,
+        ExpressionAttributeNames=None,
+        ExpressionAttributeValues=None,
+        ExclusiveStartKey=None,
+    ):
         self.scan_calls.append({"ExclusiveStartKey": ExclusiveStartKey})
         all_keys = list(self.items.keys())
 
@@ -193,7 +205,7 @@ class FakeTable:
             start_key = ExclusiveStartKey[self.key_name]
             start_index = all_keys.index(start_key) + 1
 
-        page_keys = all_keys[start_index:start_index + self.scan_page_size]
+        page_keys = all_keys[start_index : start_index + self.scan_page_size]
         page = {"Items": [dict(self.items[k]) for k in page_keys]}
 
         next_index = start_index + self.scan_page_size
@@ -290,6 +302,7 @@ class Boto3Stub:
 # Tests
 # ---------------------------------------------------------------------------
 
+
 class PurgeWorkerTestCase(unittest.TestCase):
     def setUp(self):
         self.ddb = FakeDynamoDBResource()
@@ -319,11 +332,19 @@ class PurgeWorkerTestCase(unittest.TestCase):
     def _output_key(self, review_id: str) -> str:
         return f"outputs/{review_id}/out.docx"
 
-    def _seed_review(self, review_id: str, *, status: str, age_days: int,
-                      retention_window_at_creation: int = 90,
-                      legal_hold: bool = False, has_upload: bool = True,
-                      has_output: bool = True, owner_sub: str = "user-1",
-                      record_pointer: bool = True) -> None:
+    def _seed_review(
+        self,
+        review_id: str,
+        *,
+        status: str,
+        age_days: int,
+        retention_window_at_creation: int = 90,
+        legal_hold: bool = False,
+        has_upload: bool = True,
+        has_output: bool = True,
+        owner_sub: str = "user-1",
+        record_pointer: bool = True,
+    ) -> None:
         now = _handler_module.now_epoch()
         created_at = now - age_days * 86400
         reviews_table = self.ddb.Table(os.environ["REVIEWS_TABLE"])
@@ -393,8 +414,9 @@ class PurgeWorkerTestCase(unittest.TestCase):
 
     def test_pending_review_never_purged_even_at_zero_day_window(self):
         self._seed_default_settings(window_days=0)
-        self._seed_review("review-pending", status="PENDING", age_days=1000,
-                           retention_window_at_creation=0)
+        self._seed_review(
+            "review-pending", status="PENDING", age_days=1000, retention_window_at_creation=0
+        )
 
         result = _handler_module.run_purge_sweep()
 
@@ -403,13 +425,17 @@ class PurgeWorkerTestCase(unittest.TestCase):
         reviews_table = self.ddb.Table(os.environ["REVIEWS_TABLE"])
         self.assertEqual(reviews_table.items["review-pending"]["status"], "PENDING")
         self.assertTrue(
-            self.s3.objects[(os.environ["UPLOADS_BUCKET"], self._upload_key("review-pending"))]["deleted"] is False
+            self.s3.objects[(os.environ["UPLOADS_BUCKET"], self._upload_key("review-pending"))][
+                "deleted"
+            ]
+            is False
         )
 
     def test_running_review_never_purged(self):
         self._seed_default_settings(window_days=0)
-        self._seed_review("review-running", status="RUNNING", age_days=1000,
-                           retention_window_at_creation=0)
+        self._seed_review(
+            "review-running", status="RUNNING", age_days=1000, retention_window_at_creation=0
+        )
 
         result = _handler_module.run_purge_sweep()
 
@@ -422,8 +448,9 @@ class PurgeWorkerTestCase(unittest.TestCase):
         # at creation and is 45 days old -- it must purge on ITS window (30),
         # not today's global window (90).
         self._seed_default_settings(window_days=90)
-        self._seed_review("review-snapshot", status="DONE", age_days=45,
-                           retention_window_at_creation=30)
+        self._seed_review(
+            "review-snapshot", status="DONE", age_days=45, retention_window_at_creation=30
+        )
 
         result = _handler_module.run_purge_sweep()
 
@@ -431,8 +458,9 @@ class PurgeWorkerTestCase(unittest.TestCase):
 
     def test_review_not_yet_past_its_own_snapshotted_window_is_kept(self):
         self._seed_default_settings(window_days=0)
-        self._seed_review("review-fresh", status="DONE", age_days=5,
-                           retention_window_at_creation=90)
+        self._seed_review(
+            "review-fresh", status="DONE", age_days=5, retention_window_at_creation=90
+        )
 
         result = _handler_module.run_purge_sweep()
 
@@ -442,8 +470,13 @@ class PurgeWorkerTestCase(unittest.TestCase):
 
     def test_legal_hold_review_never_purged_even_at_zero_day_retroactive(self):
         self._seed_default_settings(window_days=0)
-        self._seed_review("review-held", status="DONE", age_days=1000,
-                           retention_window_at_creation=0, legal_hold=True)
+        self._seed_review(
+            "review-held",
+            status="DONE",
+            age_days=1000,
+            retention_window_at_creation=0,
+            legal_hold=True,
+        )
 
         result = _handler_module.run_purge_sweep()
 
@@ -456,34 +489,41 @@ class PurgeWorkerTestCase(unittest.TestCase):
             "Substance fields on a held review must not be cleared.",
         )
         self.assertIn(
-            "normalization_notes", reviews_table.items["review-held"],
+            "normalization_notes",
+            reviews_table.items["review-held"],
             "normalization_notes on a held review must not be cleared.",
         )
         self.assertIn(
-            "attorney_disposition_note", reviews_table.items["review-held"],
+            "attorney_disposition_note",
+            reviews_table.items["review-held"],
             "attorney_disposition_note on a held review must not be cleared "
             "(issue #486 follow-up).",
         )
         self.assertIn(
-            "cover_note_draft", reviews_table.items["review-held"],
-            "cover_note_draft on a held review must not be cleared "
-            "(issue #499 follow-up).",
+            "cover_note_draft",
+            reviews_table.items["review-held"],
+            "cover_note_draft on a held review must not be cleared (issue #499 follow-up).",
         )
         self.assertIn(
-            "toaster_guidance", reviews_table.items["review-held"],
+            "toaster_guidance",
+            reviews_table.items["review-held"],
             "toaster_guidance on a held review must not be cleared -- same "
             "Confidential-substance reasoning as the fields above.",
         )
         self.assertNotIn(
-            "purged_at", reviews_table.items["review-held"],
-            "a held review was never purged, so it must not carry the "
-            "purged_at marker either.",
+            "purged_at",
+            reviews_table.items["review-held"],
+            "a held review was never purged, so it must not carry the purged_at marker either.",
         )
         self.assertFalse(
-            self.s3.objects[(os.environ["UPLOADS_BUCKET"], self._upload_key("review-held"))]["deleted"]
+            self.s3.objects[(os.environ["UPLOADS_BUCKET"], self._upload_key("review-held"))][
+                "deleted"
+            ]
         )
         self.assertFalse(
-            self.s3.objects[(os.environ["OUTPUTS_BUCKET"], self._output_key("review-held"))]["deleted"]
+            self.s3.objects[(os.environ["OUTPUTS_BUCKET"], self._output_key("review-held"))][
+                "deleted"
+            ]
         )
 
     def test_purge_role_delete_attempt_on_held_object_is_denied_by_storage_layer(self):
@@ -492,7 +532,8 @@ class PurgeWorkerTestCase(unittest.TestCase):
         the contract-toaster:legal-hold=true tag blocks it. Proves the purge role cannot
         delete a held object -- not just that the app chooses not to try."""
         self.s3.put_test_object(
-            os.environ["UPLOADS_BUCKET"], "uploads/review-x/contract.docx",
+            os.environ["UPLOADS_BUCKET"],
+            "uploads/review-x/contract.docx",
             tags={"contract-toaster:legal-hold": "true"},
         )
         with self.assertRaises(ClientError) as ctx:
@@ -502,15 +543,18 @@ class PurgeWorkerTestCase(unittest.TestCase):
             )
         self.assertEqual(ctx.exception.response["Error"]["Code"], "AccessDenied")
         self.assertFalse(
-            self.s3.objects[(os.environ["UPLOADS_BUCKET"], "uploads/review-x/contract.docx")]["deleted"]
+            self.s3.objects[(os.environ["UPLOADS_BUCKET"], "uploads/review-x/contract.docx")][
+                "deleted"
+            ]
         )
 
     # -- Invariant 4: documents, then matched substance fields ------------
 
     def test_purged_review_clears_substance_fields_but_keeps_non_substantive_row(self):
         self._seed_default_settings(window_days=0)
-        self._seed_review("review-clear", status="DONE", age_days=1000,
-                           retention_window_at_creation=0)
+        self._seed_review(
+            "review-clear", status="DONE", age_days=1000, retention_window_at_creation=0
+        )
 
         _handler_module.run_purge_sweep()
 
@@ -532,16 +576,21 @@ class PurgeWorkerTestCase(unittest.TestCase):
 
     def test_purged_review_documents_actually_deleted_from_s3(self):
         self._seed_default_settings(window_days=0)
-        self._seed_review("review-del", status="DONE", age_days=1000,
-                           retention_window_at_creation=0)
+        self._seed_review(
+            "review-del", status="DONE", age_days=1000, retention_window_at_creation=0
+        )
 
         _handler_module.run_purge_sweep()
 
         self.assertTrue(
-            self.s3.objects[(os.environ["UPLOADS_BUCKET"], self._upload_key("review-del"))]["deleted"]
+            self.s3.objects[(os.environ["UPLOADS_BUCKET"], self._upload_key("review-del"))][
+                "deleted"
+            ]
         )
         self.assertTrue(
-            self.s3.objects[(os.environ["OUTPUTS_BUCKET"], self._output_key("review-del"))]["deleted"]
+            self.s3.objects[(os.environ["OUTPUTS_BUCKET"], self._output_key("review-del"))][
+                "deleted"
+            ]
         )
 
     # -- Pagination: reviews_table.scan() must follow LastEvaluatedKey ----
@@ -557,8 +606,9 @@ class PurgeWorkerTestCase(unittest.TestCase):
         # required (2 + 2 + 1) to see every row.
         review_ids = [f"review-page-{i}" for i in range(5)]
         for review_id in review_ids:
-            self._seed_review(review_id, status="DONE", age_days=1000,
-                               retention_window_at_creation=0)
+            self._seed_review(
+                review_id, status="DONE", age_days=1000, retention_window_at_creation=0
+            )
 
         reviews_table = self.ddb.Table(os.environ["REVIEWS_TABLE"])
         reviews_table.scan_page_size = 2
@@ -566,12 +616,13 @@ class PurgeWorkerTestCase(unittest.TestCase):
         result = _handler_module.run_purge_sweep()
 
         self.assertEqual(
-            sorted(result["deleted_reviews"]), sorted(review_ids),
-            "Every review across every scan page must be purged, not just "
-            "the first page's.",
+            sorted(result["deleted_reviews"]),
+            sorted(review_ids),
+            "Every review across every scan page must be purged, not just the first page's.",
         )
         self.assertGreaterEqual(
-            len(reviews_table.scan_calls), 3,
+            len(reviews_table.scan_calls),
+            3,
             "Expected scan() to be called once per page (3 pages of size "
             "2 over 5 items) -- got fewer calls, so pagination did not run.",
         )
@@ -585,8 +636,9 @@ class PurgeWorkerTestCase(unittest.TestCase):
         # counted.
         for review_id in review_ids:
             self.assertTrue(
-                self.s3.objects[(os.environ["UPLOADS_BUCKET"],
-                                  self._upload_key(review_id))]["deleted"],
+                self.s3.objects[(os.environ["UPLOADS_BUCKET"], self._upload_key(review_id))][
+                    "deleted"
+                ],
                 f"{review_id}'s upload was never deleted -- likely on a "
                 "scan page that was never fetched.",
             )
@@ -599,7 +651,6 @@ class PurgeWorkerTestCase(unittest.TestCase):
         result = _handler_module.request_retention_change(
             new_window_days=30,
             actor="admin-1",
-
         )
 
         self.assertEqual(result["status"], "PENDING_SECOND_APPROVAL")
@@ -614,7 +665,6 @@ class PurgeWorkerTestCase(unittest.TestCase):
         result = _handler_module.request_retention_change(
             new_window_days=90,
             actor="admin-1",
-
         )
 
         self.assertEqual(result["status"], "APPLIED")
@@ -653,7 +703,9 @@ class PurgeWorkerTestCase(unittest.TestCase):
     def test_pending_reduction_sweep_blocked_before_delay_expires(self):
         self._seed_default_settings(window_days=90)
         _handler_module.request_retention_change(
-            new_window_days=0, actor="admin-1", reason="test",
+            new_window_days=0,
+            actor="admin-1",
+            reason="test",
         )
         settings_table = self.ddb.Table(os.environ["RETENTION_SETTINGS_TABLE"])
         pending = settings_table.items["global"]["pending_reduction"]
@@ -667,7 +719,9 @@ class PurgeWorkerTestCase(unittest.TestCase):
     def test_pending_reduction_sweep_allowed_after_72h_delay_elapses(self):
         self._seed_default_settings(window_days=90)
         _handler_module.request_retention_change(
-            new_window_days=0, actor="admin-1", reason="test",
+            new_window_days=0,
+            actor="admin-1",
+            reason="test",
         )
         settings_table = self.ddb.Table(os.environ["RETENTION_SETTINGS_TABLE"])
         pending = settings_table.items["global"]["pending_reduction"]

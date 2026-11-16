@@ -94,6 +94,7 @@ def _apply_whole_block_replacement(docx_bytes: bytes, new_text: str) -> dict:
     )
     return dict(result, proven=True)
 
+
 WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
 
@@ -165,7 +166,9 @@ def _build_docx_bytes(
     return buf.getvalue()
 
 
-def _mid_span_pending_p(prefix: str, original: str, resulting: str, suffix: str, author: str) -> str:
+def _mid_span_pending_p(
+    prefix: str, original: str, resulting: str, suffix: str, author: str
+) -> str:
     """Plain text, then a pending tracked change mid-paragraph, then more
     plain text -- the shape that exercises quote-locate spanning a pending
     boundary."""
@@ -222,7 +225,9 @@ def _plain_p(text: str) -> str:
     return f"<w:p><w:r><w:t>{text}</w:t></w:r></w:p>"
 
 
-def _field_code_pending_change_p(prefix: str, original: str, resulting: str, suffix: str, author: str) -> str:
+def _field_code_pending_change_p(
+    prefix: str, original: str, resulting: str, suffix: str, author: str
+) -> str:
     """A pending tracked change living INSIDE a `<w:fldSimple>` field's
     cached-result region -- issue #530's byte-space half: `_splice_accept_
     all` must strip the `<w:del>`/unwrap the `<w:ins>` inside the field
@@ -310,17 +315,13 @@ def test_single_cluster_del_removed_ins_unwrapped(failures: list) -> None:
     materialized = stage.materialize_accept_all(docx_bytes)
 
     if _revision_tag_count(materialized) != 0:
-        failures.append(
-            "single-cluster materialize left w:ins/w:del markup behind"
-        )
+        failures.append("single-cluster materialize left w:ins/w:del markup behind")
 
     with zipfile.ZipFile(io.BytesIO(materialized)) as zf:
         root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
     body_text = "".join(_paragraph_text(p) for p in root.iter(_w("p")))
     if body_text != "Payment is due within 45 days of invoice.":
-        failures.append(
-            f"single-cluster materialize produced wrong text: {body_text!r}"
-        )
+        failures.append(f"single-cluster materialize produced wrong text: {body_text!r}")
 
 
 def test_multi_cluster_multi_author_all_accepted(failures: list) -> None:
@@ -328,9 +329,7 @@ def test_multi_cluster_multi_author_all_accepted(failures: list) -> None:
     materialized = stage.materialize_accept_all(docx_bytes)
 
     if _revision_tag_count(materialized) != 0:
-        failures.append(
-            "multi-cluster/multi-author materialize left w:ins/w:del markup behind"
-        )
+        failures.append("multi-cluster/multi-author materialize left w:ins/w:del markup behind")
 
     with zipfile.ZipFile(io.BytesIO(materialized)) as zf:
         root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
@@ -358,13 +357,9 @@ def test_nested_ins_wrapping_del_is_excluded_entirely(failures: list) -> None:
         root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
     body_text = "".join(_paragraph_text(p) for p in root.iter(_w("p")))
     if body_text != "Payment is due within days.":
-        failures.append(
-            f"inserted-then-deleted span was not excluded: {body_text!r}"
-        )
+        failures.append(f"inserted-then-deleted span was not excluded: {body_text!r}")
     if "30" in body_text:
-        failures.append(
-            "inserted-then-deleted text leaked into the materialized document"
-        )
+        failures.append("inserted-then-deleted text leaked into the materialized document")
 
 
 def test_round_trips_and_carries_no_revision_markup(failures: list) -> None:
@@ -538,7 +533,9 @@ def test_materialized_bytes_deliver_a_clean_single_author_redline(failures: list
         root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
     body_text = "".join(_paragraph_text(p) for p in root.iter(_w("p")))
     if "three (3) years" not in body_text:
-        failures.append(f"the new proposed text is missing from the delivered document: {body_text!r}")
+        failures.append(
+            f"the new proposed text is missing from the delivered document: {body_text!r}"
+        )
     if "one (1) year" in body_text or "written notice" in body_text:
         failures.append(
             f"the counterparty's original pre-revision text leaked into the "
@@ -577,15 +574,12 @@ def test_deleted_paragraph_mark_pins_known_unmerged_limitation(failures: list) -
     text_space_body = text_space_paragraphs[0]["text"]
     if text_space_body != "Payment is due within 45 days\nof invoice.":
         failures.append(
-            f"fixture premise broken: unexpected text-space merged text: "
-            f"{text_space_body!r}"
+            f"fixture premise broken: unexpected text-space merged text: {text_space_body!r}"
         )
 
     materialized = stage.materialize_accept_all(docx_bytes)
     if _revision_tag_count(materialized) != 0:
-        failures.append(
-            "deleted-paragraph-mark materialize left w:ins/w:del markup behind"
-        )
+        failures.append("deleted-paragraph-mark materialize left w:ins/w:del markup behind")
 
     with zipfile.ZipFile(io.BytesIO(materialized)) as zf:
         root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
@@ -630,7 +624,9 @@ def test_deleted_paragraph_mark_pins_known_unmerged_limitation(failures: list) -
             )
 
 
-def test_field_code_pending_change_materializes_without_corrupting_the_field(failures: list) -> None:
+def test_field_code_pending_change_materializes_without_corrupting_the_field(
+    failures: list,
+) -> None:
     """Issue #530's byte-space half, verbatim from the ticket's Notes:
     'confirm materialize_accept_all strips w:del/unwraps w:ins inside a
     field code without corrupting the field.' `_splice_accept_all` has no
@@ -643,7 +639,11 @@ def test_field_code_pending_change_materializes_without_corrupting_the_field(fai
     a separate, weaker check."""
     docx_bytes = _build_docx_bytes(
         _field_code_pending_change_p(
-            "Obligations under ", "this Section 4", "this Section 5", " survive termination.", "counterparty"
+            "Obligations under ",
+            "this Section 4",
+            "this Section 5",
+            " survive termination.",
+            "counterparty",
         )
     )
 
@@ -725,9 +725,7 @@ def test_reserved_root_namespace_prefix_survives_materialization(failures: list)
     root = ET.fromstring(document_xml.encode("utf-8"))  # noqa: S314
     body_text = "".join(_paragraph_text(p) for p in root.iter(_w("p")))
     if body_text != "Payment is due within 45 days of invoice.":
-        failures.append(
-            f"reserved-root-prefix materialize produced wrong text: {body_text!r}"
-        )
+        failures.append(f"reserved-root-prefix materialize produced wrong text: {body_text!r}")
 
 
 def test_non_root_namespace_prefix_survives_materialization(failures: list) -> None:
@@ -749,7 +747,7 @@ def test_non_root_namespace_prefix_survives_materialization(failures: list) -> N
         # throwaway `<cust:meta>` element is what makes the prefix "used":
         # `_walk_content` skips it without recursion (not `w:r`/`w:ins`/
         # `w:del`/`w:fldSimple`), same as any other non-allowlisted tag.
-        '<cust:meta>ignored</cust:meta>'
+        "<cust:meta>ignored</cust:meta>"
         "<w:r><w:t>Notice period is </w:t></w:r>"
         '<w:del w:id="1" w:author="counterparty" w:date="2026-01-01T00:00:00Z">'
         "<w:r><w:delText>thirty (30) days</w:delText></w:r></w:del>"
@@ -776,16 +774,13 @@ def test_non_root_namespace_prefix_survives_materialization(failures: list) -> N
         document_xml = zf.read("word/document.xml").decode("utf-8")
     if "http://schemas.example.com/non-root" not in document_xml:
         failures.append(
-            "the non-root namespace URI did not survive materialization at "
-            f"all: {document_xml!r}"
+            f"the non-root namespace URI did not survive materialization at all: {document_xml!r}"
         )
 
     root = ET.fromstring(document_xml.encode("utf-8"))  # noqa: S314
     body_text = "".join(_paragraph_text(p) for p in root.iter(_w("p")))
     if body_text != "Notice period is sixty (60) days.":
-        failures.append(
-            f"non-root-prefix materialize produced wrong text: {body_text!r}"
-        )
+        failures.append(f"non-root-prefix materialize produced wrong text: {body_text!r}")
 
 
 TESTS = [

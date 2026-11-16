@@ -253,9 +253,7 @@ def _real_critic_diagnostics(review_id: str, critic_response: str) -> list[dict[
     budget, so this returns two records: attempt 1 `retry`, attempt 2
     `failure`."""
     captured: list[dict[str, Any]] = []
-    client = model_client.FakeBedrockClient(
-        {_CRITIC_MODEL_ID: [critic_response, critic_response]}
-    )
+    client = model_client.FakeBedrockClient({_CRITIC_MODEL_ID: [critic_response, critic_response]})
     result = cp.run_critic_pass(
         review_id=review_id,
         primary_output={"issues": []},
@@ -434,9 +432,7 @@ class TestDiagnosticSinkNeverFailsAReview(unittest.TestCase):
 
         self.assertEqual(reviews_table.item["status"], "DONE")
         self.assertEqual(reviews_table.item["decision"], "REQUEST_CHANGE")
-        self.assertEqual(
-            reviews_table.item["output_s3_key"], f"outputs/{dts.REVIEW_ID}/out.docx"
-        )
+        self.assertEqual(reviews_table.item["output_s3_key"], f"outputs/{dts.REVIEW_ID}/out.docx")
         self.assertIsNone(s3.diagnostics_document())  # every diagnostics put failed
         # Non-vacuous: the sink was genuinely EXERCISED and genuinely
         # raised. Without this, an unwired sink (the pre-fix tree) would
@@ -449,24 +445,22 @@ class TestDiagnosticSinkNeverFailsAReview(unittest.TestCase):
         there. `os.environ["OUTPUTS_BUCKET"]` raises `KeyError`, which is
         not an S3 error at all -- the guard has to be total, exactly as
         `invocation_ledger`'s is for `MODEL_INVOCATIONS_TABLE`."""
-        diagnostics = _real_critic_diagnostics("diag-669-noenv", _fixture(
-            "schema_invalid_missing_issues.json"
-        ))
+        diagnostics = _real_critic_diagnostics(
+            "diag-669-noenv", _fixture("schema_invalid_missing_issues.json")
+        )
         s3 = RecordingS3()
         write = attempt_diagnostics.make_attempt_diagnostic_write("diag-669-noenv", s3)
 
-        env_without_bucket = {
-            k: v for k, v in os.environ.items() if k != "OUTPUTS_BUCKET"
-        }
+        env_without_bucket = {k: v for k, v in os.environ.items() if k != "OUTPUTS_BUCKET"}
         with patch.dict(os.environ, env_without_bucket, clear=True):
             write(diagnostics[0])  # must not raise
 
         self.assertEqual(s3.puts, [])
 
     def test_put_object_failure_never_raises_out_of_the_sink(self) -> None:
-        diagnostics = _real_critic_diagnostics("diag-669-raise", _fixture(
-            "schema_invalid_missing_issues.json"
-        ))
+        diagnostics = _real_critic_diagnostics(
+            "diag-669-raise", _fixture("schema_invalid_missing_issues.json")
+        )
         write = attempt_diagnostics.make_attempt_diagnostic_write(
             "diag-669-raise", RecordingS3(raise_always=True)
         )
@@ -560,9 +554,7 @@ class TestDiagnosticArtifactIsBounded(unittest.TestCase):
         assert match is not None
         true_length = int(match.group(1))
         self.assertGreater(true_length, 20000)
-        self.assertEqual(
-            len(message), attempt_diagnostics.MAX_FIELD_CHARS + len(match.group(0))
-        )
+        self.assertEqual(len(message), attempt_diagnostics.MAX_FIELD_CHARS + len(match.group(0)))
         # Upstream-bounded values are untouched by this clip: the schema
         # error's offending_value is already capped at 2000 by
         # primary_review_pass._debug_safe_value.
@@ -638,9 +630,7 @@ class TestDiagnosticArtifactIsBounded(unittest.TestCase):
         self.assertEqual(len(s3.puts), 1)
         self.assertEqual(s3.puts[0]["Bucket"], os.environ["OUTPUTS_BUCKET"])
         self.assertTrue(s3.puts[0]["Key"].startswith("outputs/diag-669-key/"))
-        self.assertEqual(
-            s3.puts[0]["Key"], "outputs/diag-669-key/attempt-diagnostics.json"
-        )
+        self.assertEqual(s3.puts[0]["Key"], "outputs/diag-669-key/attempt-diagnostics.json")
 
 
 def _run_tests() -> int:

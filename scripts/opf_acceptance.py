@@ -61,8 +61,16 @@ import opf_load  # noqa: E402
 PASS, FAIL, PENDING = "PASS", "FAIL", "PENDING"
 
 STAGE_NAMES = (
-    "EXTRACT", "VERIFY", "BIND", "REVIEW", "ROUNDTRIP",
-    "ATTRIBUTE", "COMMENTS", "PRESERVE", "SELFCHECK", "FLOOR",
+    "EXTRACT",
+    "VERIFY",
+    "BIND",
+    "REVIEW",
+    "ROUNDTRIP",
+    "ATTRIBUTE",
+    "COMMENTS",
+    "PRESERVE",
+    "SELFCHECK",
+    "FLOOR",
 )
 
 #: The review prompt's acceptance budget (chars / 4, the repo-wide estimate).
@@ -122,7 +130,11 @@ def _wholesale_evidence_in(doc: dict, prompt: str) -> int:
         record_id = record.get("id")
         if isinstance(record_id, str) and record_id and record_id in prompt:
             leaked += 1
-        entries = [record.get("signed_text"), record.get("opening_text"), *(record.get("refused_asks") or [])]
+        entries = [
+            record.get("signed_text"),
+            record.get("opening_text"),
+            *(record.get("refused_asks") or []),
+        ]
         for entry in entries:
             text = entry.get("text") if isinstance(entry, dict) else None
             if (
@@ -208,7 +220,9 @@ def run(
     try:
         doc, how = _extract_only(bundle_path)
         by_name["EXTRACT"].status = PASS
-        by_name["EXTRACT"].detail = f"{how}; {len(doc.get('evidence', {}).get('clauses', []))} clauses"
+        by_name[
+            "EXTRACT"
+        ].detail = f"{how}; {len(doc.get('evidence', {}).get('clauses', []))} clauses"
     except Exception as exc:  # noqa: BLE001 — harness reports, never raises
         by_name["EXTRACT"].status = FAIL
         by_name["EXTRACT"].detail = f"{type(exc).__name__}: {exc}"
@@ -239,7 +253,8 @@ def run(
 
             playbook_id = playbook_id_arg or (validated.get("agreement_type") or {}).get("id") or ""
             policy_path = (
-                Path(policy_arg) if policy_arg
+                Path(policy_arg)
+                if policy_arg
                 else policy_load.resolve_latest_policy_path(playbook_id)
             )
             bundle = bind_bundle.bind_bundle(
@@ -253,9 +268,9 @@ def run(
                 f"policy v{rp['version']} ({rp['approval_status']})" if rp else "NO review policy"
             )
             by_name["BIND"].status = PASS
-            by_name["BIND"].detail = (
-                f"playbook_id={playbook_id}; lineage hash verified; {policy_note}"
-            )
+            by_name[
+                "BIND"
+            ].detail = f"playbook_id={playbook_id}; lineage hash verified; {policy_note}"
         except Exception as exc:  # noqa: BLE001
             by_name["BIND"].status = FAIL
             by_name["BIND"].detail = f"{type(exc).__name__}: {exc}"
@@ -278,9 +293,9 @@ def run(
             note = f"{len(blocks)} blocks, ~{tokens} tokens"
             if leaked:
                 by_name["REVIEW"].status = FAIL
-                by_name["REVIEW"].detail = (
-                    f"{note}; {leaked} per-deal precedent value(s) LEAKED into the prompt"
-                )
+                by_name[
+                    "REVIEW"
+                ].detail = f"{note}; {leaked} per-deal precedent value(s) LEAKED into the prompt"
             elif tokens >= REVIEW_TOKEN_BUDGET:
                 by_name["REVIEW"].status = FAIL
                 by_name["REVIEW"].detail = f"{note}; over the 50K review budget"
@@ -341,7 +356,9 @@ def run(
         print("ACCEPTANCE: FAILED — " + ", ".join(s.name for s in failed))
         return 1
     if pending:
-        print("ACCEPTANCE: INCOMPLETE — stages still pending: " + ", ".join(s.name for s in pending))
+        print(
+            "ACCEPTANCE: INCOMPLETE — stages still pending: " + ", ".join(s.name for s in pending)
+        )
         return 2
     print("ACCEPTANCE: PASSED")
     return 0
@@ -349,23 +366,50 @@ def run(
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="OPF end-to-end acceptance harness")
-    ap.add_argument("bundle_pos", nargs="?", type=Path, default=None, metavar="BUNDLE",
-                    help="Path to the playbook bundle (.opf.html or .opf.json); same as --bundle")
-    ap.add_argument("--bundle", type=Path, default=None,
-                    help="Path to the playbook bundle (.opf.html or .opf.json)")
-    ap.add_argument("--stage", default=None, choices=STAGE_NAMES,
-                    help="Exit 0 only if this one stage PASSED (the full report still prints)")
-    ap.add_argument("--contract", type=Path, default=None,
-                    help="Path to a sample contract .docx to review end to end")
-    ap.add_argument("--playbook-id", default=None,
-                    help="Registry key to bind as (default: the OPF's own agreement_type.id). "
-                         "Must be one of the OPF's id/aliases.")
-    ap.add_argument("--policy", default=None,
-                    help="Path to the review policy document (default: the highest-versioned "
-                         "playbooks/<playbook_id>-policy-v<N>.json).")
-    ap.add_argument("--comments", default="none",
-                    choices=["external", "internal", "both", "none"],
-                    help="Comment mode to exercise (default: none)")
+    ap.add_argument(
+        "bundle_pos",
+        nargs="?",
+        type=Path,
+        default=None,
+        metavar="BUNDLE",
+        help="Path to the playbook bundle (.opf.html or .opf.json); same as --bundle",
+    )
+    ap.add_argument(
+        "--bundle",
+        type=Path,
+        default=None,
+        help="Path to the playbook bundle (.opf.html or .opf.json)",
+    )
+    ap.add_argument(
+        "--stage",
+        default=None,
+        choices=STAGE_NAMES,
+        help="Exit 0 only if this one stage PASSED (the full report still prints)",
+    )
+    ap.add_argument(
+        "--contract",
+        type=Path,
+        default=None,
+        help="Path to a sample contract .docx to review end to end",
+    )
+    ap.add_argument(
+        "--playbook-id",
+        default=None,
+        help="Registry key to bind as (default: the OPF's own agreement_type.id). "
+        "Must be one of the OPF's id/aliases.",
+    )
+    ap.add_argument(
+        "--policy",
+        default=None,
+        help="Path to the review policy document (default: the highest-versioned "
+        "playbooks/<playbook_id>-policy-v<N>.json).",
+    )
+    ap.add_argument(
+        "--comments",
+        default="none",
+        choices=["external", "internal", "both", "none"],
+        help="Comment mode to exercise (default: none)",
+    )
     args = ap.parse_args()
 
     if (args.bundle is None) == (args.bundle_pos is None):

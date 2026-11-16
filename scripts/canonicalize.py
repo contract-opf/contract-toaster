@@ -102,7 +102,9 @@ import playbook_registry  # noqa: E402
 # --playbook-id is passed -- see main() / resolve_playbook_path() below
 # (issue #209: playbook_id must be a first-class runtime parameter, not a
 # hard-coded path).
-PLAYBOOK_PATH = playbook_registry.resolve_playbook(playbook_registry.DEFAULT_PLAYBOOK_ID).playbook_path
+PLAYBOOK_PATH = playbook_registry.resolve_playbook(
+    playbook_registry.DEFAULT_PLAYBOOK_ID
+).playbook_path
 GOLDEN_HASH_FIXTURE_PATH = REPO_ROOT / "tests" / "gold-fixtures" / "canonicalize-golden-hash.json"
 
 
@@ -110,6 +112,7 @@ def resolve_playbook_path(playbook_id: str) -> Path:
     """Resolve a playbook_id to its playbook JSON path via the registry
     (issue #209)."""
     return playbook_registry.resolve_playbook(playbook_id).playbook_path
+
 
 # Keys excluded from the canonical form.
 # These are the two fields that must not participate in the hash because they

@@ -51,14 +51,22 @@ MIN_WORDS = 50
 # Sync cadence: something like "≤ 1 hour", "1h", "60 min", "every hour", etc.
 SYNC_CADENCE_PATTERNS = [
     re.compile(r"\b(≤\s*1\s*h(our)?|1\s*h(our)?|60\s*min(ute)?s?|every\s+hour)\b", re.IGNORECASE),
-    re.compile(r"sync\s+(cadence|interval|frequency|window)\s*(:|is|of|=|≤)?\s*[\d≤]+\s*(h|hour|min)", re.IGNORECASE),
+    re.compile(
+        r"sync\s+(cadence|interval|frequency|window)\s*(:|is|of|=|≤)?\s*[\d≤]+\s*(h|hour|min)",
+        re.IGNORECASE,
+    ),
 ]
 # Token TTL: something like "15 min", "60 min", "15–60 min", "15 minutes", etc.  # noqa: RUF003
 TOKEN_TTL_PATTERNS = [
     re.compile(r"\b(15|60|30)\s*(–|-|to)\s*(60|30|15)\s*min(ute)?s?\b", re.IGNORECASE),  # noqa: RUF001
-    re.compile(r"\b(access.?token|token)\s*(TTL|lifetime|expir\w+)\s*(:|is|of|=|≤|<)?\s*[\d≤]+\s*(h|hour|min)", re.IGNORECASE),
+    re.compile(
+        r"\b(access.?token|token)\s*(TTL|lifetime|expir\w+)\s*(:|is|of|=|≤|<)?\s*[\d≤]+\s*(h|hour|min)",
+        re.IGNORECASE,
+    ),
     re.compile(r"\bTTL\s*(is|of|=|≤|<)?\s*(15|60|30)\b", re.IGNORECASE),
-    re.compile(r"\b(15|60|30)\s*min(ute)?s?\s*(TTL|access.?token|token\s*lifetime)\b", re.IGNORECASE),
+    re.compile(
+        r"\b(15|60|30)\s*min(ute)?s?\s*(TTL|access.?token|token\s*lifetime)\b", re.IGNORECASE
+    ),
 ]
 
 
@@ -99,9 +107,7 @@ def check_threat_model_section(name: str, heading: str) -> list[str]:
     text = read(THREAT_MODEL)
     body = extract_section_body(text, heading)
     if not body:
-        failures.append(
-            f"  threat-model.md: missing section '{heading}'"
-        )
+        failures.append(f"  threat-model.md: missing section '{heading}'")
     else:
         wc = word_count(body)
         if wc < MIN_WORDS:
@@ -212,7 +218,7 @@ def extract_phase0_issue5_body(text: str) -> str:
         return ""
     start = m.start()
     # Find next ## N. heading
-    nm = re.search(r"^## \d+\.", text[m.end():], re.MULTILINE)
+    nm = re.search(r"^## \d+\.", text[m.end() :], re.MULTILINE)
     end = m.end() + nm.start() if nm else len(text)
     return text[start:end]
 

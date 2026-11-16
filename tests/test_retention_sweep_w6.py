@@ -68,7 +68,9 @@ def _create_simple_table(ddb, name: str, hash_key: str, range_key: str | None = 
         schema.append({"AttributeName": range_key, "KeyType": "RANGE"})
         attrs.append({"AttributeName": range_key, "AttributeType": "S"})
     return ddb.create_table(
-        TableName=name, KeySchema=schema, AttributeDefinitions=attrs,
+        TableName=name,
+        KeySchema=schema,
+        AttributeDefinitions=attrs,
         BillingMode="PAY_PER_REQUEST",
     )
 
@@ -92,8 +94,9 @@ class SweepTestBase(unittest.TestCase):
     def tearDown(self) -> None:
         self._mock.stop()
 
-    def seed(self, review_id: str, status: str, *, age_days: float = 30,
-             window_days: int = 1, **extra) -> str:
+    def seed(
+        self, review_id: str, status: str, *, age_days: float = 30, window_days: int = 1, **extra
+    ) -> str:
         key = f"uploads/{OWNER}/{review_id}/in.docx"
         self.s3.put_object(Bucket=os.environ["UPLOADS_BUCKET"], Key=key, Body=b"doc")
         row = {
@@ -211,10 +214,14 @@ class TestEveryPurgeRunIsAudited(SweepTestBase):
     def test_both_targets_build_the_same_sweep_detail(self) -> None:
         worker = _load_purge_worker()
         sample = {
-            "sweep_id": "s1", "dry_run": False,
+            "sweep_id": "s1",
+            "dry_run": False,
             "deleted_reviews": [f"r{i}" for i in range(1203)],
-            "failed_reviews": ["f1"], "eligible_reviews": ["x"] * 1204,
-            "object_count": 2407, "skipped_active": ["a"], "skipped_hold": ["h", "i"],
+            "failed_reviews": ["f1"],
+            "eligible_reviews": ["x"] * 1204,
+            "object_count": 2407,
+            "skipped_active": ["a"],
+            "skipped_hold": ["h", "i"],
             "skipped_not_yet_eligible": [],
         }
         backend = retention.sweep_audit_detail(sample)
@@ -334,7 +341,8 @@ class TestWriteTimeTagging(SweepTestBase):
             "r-held", {"status": "OK"}, self.s3, dynamodb_resource=self.ddb
         )
         write = attempt_diagnostics.make_attempt_diagnostic_write(
-            "r-held", self.s3,
+            "r-held",
+            self.s3,
             extra_put_kwargs=lambda: retention.tag_if_held("r-held", self.ddb),
         )
         write({"review_id": "r-held", "stage": "primary"})

@@ -106,7 +106,9 @@ describe('AdminRetention / #602 — retention window row uses ct-columns', () =>
     // ct-columns.ts's docstring).
     const panel = screen.getByTestId('retention-slider-panel');
     const controlIds = Array.from(panel.querySelectorAll('input,select')).map((el) => el.id);
-    expect(controlIds.indexOf('retention-slider')).toBeLessThan(controlIds.indexOf('retention-days-input'));
+    expect(controlIds.indexOf('retention-slider')).toBeLessThan(
+      controlIds.indexOf('retention-days-input'),
+    );
   });
 });
 

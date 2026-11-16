@@ -226,9 +226,7 @@ def test_findings_never_carry_the_matched_text(failures: list) -> None:
     """Ids and locators only -- the same discipline `opf_injection_scan` and
     `leakage_scan` keep. The UI may say WHERE and WHAT CATEGORY; the owner
     opens their own document to read the words."""
-    findings = dis.scan_document(
-        _docx(_p(OVERRIDE) + _p(HIDDEN_PAYLOAD, "<w:vanish/>"))
-    )
+    findings = dis.scan_document(_docx(_p(OVERRIDE) + _p(HIDDEN_PAYLOAD, "<w:vanish/>")))
     blob = repr(findings)
     for secret in (OVERRIDE, HIDDEN_PAYLOAD, "pre-approved", "Disregard"):
         if secret in blob:
@@ -256,7 +254,7 @@ def test_it_is_wired_into_the_pipeline_as_advisory(failures: list) -> None:
     if "injection_summary" not in source:
         failures.append("the summary never reaches the terminal row write")
     # Advisory means the review's outcome cannot branch on it.
-    for forbidden in ("if injection_summary", "injection_summary and", "raise" ):
+    for forbidden in ("if injection_summary", "injection_summary and", "raise"):
         line = f"{forbidden} "
         for entry in source.splitlines():
             if line in entry and "injection" in entry:

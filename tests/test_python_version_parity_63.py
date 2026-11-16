@@ -120,14 +120,13 @@ ENV_KEY_RE = re.compile(r"^(\s*)env:\s*(?:#.*)?$")
 ENV_ENTRY_RE = re.compile(r"^(\s*)([A-Za-z_][A-Za-z0-9_-]*):\s*(\S.*?)\s*$")
 ENV_EXPR_RE = re.compile(r"^\$\{\{\s*env\.([A-Za-z_][A-Za-z0-9_-]*)\s*\}\}$")
 FROM_RE = re.compile(r"^FROM\s+python:(\S+)\s*$", re.MULTILINE)
-REQUIRES_PYTHON_RE = re.compile(
-    r"^\s*requires-python\s*=\s*[\"'](.+?)[\"']\s*$", re.MULTILINE
-)
+REQUIRES_PYTHON_RE = re.compile(r"^\s*requires-python\s*=\s*[\"'](.+?)[\"']\s*$", re.MULTILINE)
 
 
 # ---------------------------------------------------------------------------
 # Scanning
 # ---------------------------------------------------------------------------
+
 
 def _strip_comment_and_quotes(value: str) -> str:
     """`'3.13'  # why` -> `3.13`. Quoted values keep their content verbatim."""
@@ -261,7 +260,8 @@ def check_self() -> list[str]:
         scanned = scan(root)
 
         failures += _assert(
-            set(scanned) == {
+            set(scanned)
+            == {
                 "good-literal.yml",
                 "good-env.yml",
                 "stray-literal.yml",
@@ -297,8 +297,7 @@ def check_self() -> list[str]:
             f"got {scanned.get('unresolvable-env.yml')}",
         )
         conflicting = workflow_env(
-            "env:\n  PYTHON_VERSION: '3.13'\njobs:\n  a:\n    env:\n"
-            "      PYTHON_VERSION: '3.11'\n"
+            "env:\n  PYTHON_VERSION: '3.13'\njobs:\n  a:\n    env:\n      PYTHON_VERSION: '3.11'\n"
         )["PYTHON_VERSION"]
         failures += _assert(
             conflicting.startswith("<conflicting"),
@@ -311,6 +310,7 @@ def check_self() -> list[str]:
 # ---------------------------------------------------------------------------
 # Checks 1-6 — the real tree
 # ---------------------------------------------------------------------------
+
 
 def check_declarations() -> tuple[list[str], str | None]:
     print("\nChecks 1-3 — .python-version, pyproject.toml, the DTS image")

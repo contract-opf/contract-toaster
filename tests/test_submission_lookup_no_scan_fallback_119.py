@@ -60,17 +60,13 @@ class _QueryRaisesScanAsserts:
         raise RuntimeError("ProvisionedThroughputExceededException: throttled")
 
     def scan(self, **kwargs: Any) -> Any:  # pragma: no cover - must not run
-        raise AssertionError(
-            "_find_submission_row_for_review fell back to a table scan"
-        )
+        raise AssertionError("_find_submission_row_for_review fell back to a table scan")
 
 
 class TestNoScanFallbackOnQueryError(unittest.TestCase):
     def test_a_query_error_propagates_instead_of_falling_back_to_scan(self) -> None:
         with self.assertRaises(RuntimeError):
-            reviews._find_submission_row_for_review(
-                _QueryRaisesScanAsserts(), REVIEW_ID
-            )
+            reviews._find_submission_row_for_review(_QueryRaisesScanAsserts(), REVIEW_ID)
 
 
 class TestNoScanFallbackOnMissingGsi(unittest.TestCase):
@@ -86,9 +82,7 @@ class TestNoScanFallbackOnMissingGsi(unittest.TestCase):
         self.ddb.create_table(
             TableName=REVIEW_SUBMISSIONS_TABLE,
             KeySchema=[{"AttributeName": "idempotency_key", "KeyType": "HASH"}],
-            AttributeDefinitions=[
-                {"AttributeName": "idempotency_key", "AttributeType": "S"}
-            ],
+            AttributeDefinitions=[{"AttributeName": "idempotency_key", "AttributeType": "S"}],
             BillingMode="PAY_PER_REQUEST",
         )
         self.table = self.ddb.Table(REVIEW_SUBMISSIONS_TABLE)

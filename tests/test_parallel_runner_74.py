@@ -109,21 +109,14 @@ INFRA_SKIP_PHRASE = "CDK synth".lower()
 # Stub sources — the shapes the loop actually consumes
 # ---------------------------------------------------------------------------
 
+
 def passing_stub(sleep_s: float = 0.0) -> str:
-    return (
-        "import sys, time\n"
-        f"time.sleep({sleep_s!r})\n"
-        "print('STUB_OK')\n"
-        "sys.exit(0)\n"
-    )
+    return f"import sys, time\ntime.sleep({sleep_s!r})\nprint('STUB_OK')\nsys.exit(0)\n"
 
 
 def failing_stub(rc: int, sleep_s: float = 0.0) -> str:
     return (
-        "import sys, time\n"
-        f"time.sleep({sleep_s!r})\n"
-        f"print('STUB_FAILED_rc={rc}')\n"
-        f"sys.exit({rc})\n"
+        f"import sys, time\ntime.sleep({sleep_s!r})\nprint('STUB_FAILED_rc={rc}')\nsys.exit({rc})\n"
     )
 
 
@@ -223,6 +216,7 @@ def ledger_stub(ledger: Path, name: str, rc: int = 0) -> str:
 # Harness
 # ---------------------------------------------------------------------------
 
+
 def build_tree(root: Path, files: dict[str, str]) -> Path:
     """Write `files` (paths relative to `root`) and return `root`."""
     for rel, source in files.items():
@@ -313,6 +307,7 @@ def _equivalence(files: dict[str, str], label: str, expected_rc: int) -> None:
 # (a) parallel == serial, on all three verdicts
 # ---------------------------------------------------------------------------
 
+
 def test_green_tree_parallel_matches_serial() -> None:
     _equivalence(
         {
@@ -392,6 +387,7 @@ def test_flaky_tree_parallel_matches_serial() -> None:
 # (b) discovery order, not completion order
 # ---------------------------------------------------------------------------
 
+
 def test_failure_blocks_are_reported_in_discovery_order() -> None:
     """Five failing files whose sleeps make completion order the EXACT REVERSE
     of discovery order. A report that printed as workers finished would emit the
@@ -425,9 +421,14 @@ def test_failure_blocks_are_reported_in_discovery_order() -> None:
     # thing a shared per-basename status file would get wrong.
     pairs = re.findall(r"^FAIL\(rc=(\d+)\): (\S+)$", proc.stdout + proc.stderr, re.M)
     _assert(
-        pairs == [("1", "tests/test_a_74.py"), ("2", "tests/test_b_74.py"),
-                  ("3", "tests/test_c_74.py"), ("4", "tests/sub/test_d_74.py"),
-                  ("5", "tests/lint-e-74.py")],
+        pairs
+        == [
+            ("1", "tests/test_a_74.py"),
+            ("2", "tests/test_b_74.py"),
+            ("3", "tests/test_c_74.py"),
+            ("4", "tests/sub/test_d_74.py"),
+            ("5", "tests/lint-e-74.py"),
+        ],
         "each FAIL block reports that file's own exit status",
         f"got={pairs!r}\n{proc.stdout}{proc.stderr}",
     )
@@ -464,6 +465,7 @@ def test_same_basename_in_two_directories_keeps_its_own_result() -> None:
 # (e) the parallel batch really overlaps
 # ---------------------------------------------------------------------------
 
+
 def test_parallel_batch_actually_overlaps() -> None:
     """Without this, every equivalence check above passes for a `-P` that never
     parallelised anything.
@@ -487,9 +489,11 @@ def test_parallel_batch_actually_overlaps() -> None:
         ser = run_loop(ser_root, COLLECT_JOBS="1")
         ser_elapsed = time.monotonic() - t0
 
-    _assert(par.returncode == RC_GREEN and ser.returncode == RC_GREEN,
-            "both timing runs were green",
-            f"parallel={par.returncode} serial={ser.returncode}")
+    _assert(
+        par.returncode == RC_GREEN and ser.returncode == RC_GREEN,
+        "both timing runs were green",
+        f"parallel={par.returncode} serial={ser.returncode}",
+    )
     _assert(
         par_elapsed < ser_elapsed / 2,
         "COLLECT_JOBS=8 overlaps the per-file processes (it is not a serial loop "
@@ -528,6 +532,7 @@ def test_collect_jobs_rejects_a_value_that_is_not_a_positive_integer() -> None:
 # ---------------------------------------------------------------------------
 # (f) the synth-running infra files are never concurrent
 # ---------------------------------------------------------------------------
+
 
 def _intervals(ledger: Path) -> dict[str, tuple[float, float]]:
     out: dict[str, tuple[float, float]] = {}
@@ -637,9 +642,7 @@ def test_skip_infra_zero_does_not_exclude_files() -> None:
         ledger = root / "ran.ledger"
         files = {
             "tests/test_plain_74.py": ledger_stub(ledger, "plain"),
-            "tests/test_synthy_74.py": interval_stub(
-                ledger, "synthy", hold_s=0.0, infra=True
-            ),
+            "tests/test_synthy_74.py": interval_stub(ledger, "synthy", hold_s=0.0, infra=True),
         }
         proc = run_loop(build_tree(root, files), SKIP_INFRA="0", COLLECT_JOBS="8")
         ran = ledger.read_text().split() if ledger.exists() else []
@@ -663,6 +666,7 @@ def test_skip_infra_zero_does_not_exclude_files() -> None:
 # (c) scripts/check.sh --only
 # ---------------------------------------------------------------------------
 
+
 def test_check_sh_only_runs_just_the_matching_files() -> None:
     """`--only 'tests/test_gate_*.py'` against a synthetic corpus whose expected
     selection is known exactly, driven through a COPY of the real check.sh.
@@ -677,18 +681,29 @@ def test_check_sh_only_runs_just_the_matching_files() -> None:
         shutil.copy2(CHECK_SH, root / "scripts" / "check.sh")
         shutil.copy2(SHARED_LOOP, root / "scripts" / "collect_test_failures.sh")
         ledger = root / "ran.ledger"
-        build_tree(root, {
-            "tests/test_gate_alpha_74.py": ledger_stub(ledger, "test_gate_alpha_74.py"),
-            "tests/test_gate_beta_74.py": ledger_stub(ledger, "test_gate_beta_74.py"),
-            "tests/test_other_74.py": ledger_stub(ledger, "test_other_74.py"),
-            "tests/lint-other-74.py": ledger_stub(ledger, "lint-other-74.py"),
-        })
+        build_tree(
+            root,
+            {
+                "tests/test_gate_alpha_74.py": ledger_stub(ledger, "test_gate_alpha_74.py"),
+                "tests/test_gate_beta_74.py": ledger_stub(ledger, "test_gate_beta_74.py"),
+                "tests/test_other_74.py": ledger_stub(ledger, "test_other_74.py"),
+                "tests/lint-other-74.py": ledger_stub(ledger, "lint-other-74.py"),
+            },
+        )
         env = clean_env(SKIP_INFRA="1", CHECK_NO_LOCK="1")
         env["CHECK_LOCK_DIR"] = str(root / "unused.lock")
         proc = subprocess.run(  # noqa: S603
-            ["bash", str(root / "scripts" / "check.sh"),  # noqa: S607
-             "--only", "tests/test_gate_*.py"],
-            capture_output=True, text=True, timeout=300, env=env, cwd=str(root),
+            [  # noqa: S607
+                "bash",
+                str(root / "scripts" / "check.sh"),
+                "--only",
+                "tests/test_gate_*.py",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=300,
+            env=env,
+            cwd=str(root),
         )
         ran = sorted(ledger.read_text().split()) if ledger.exists() else []
 
@@ -707,18 +722,26 @@ def test_check_sh_only_runs_just_the_matching_files() -> None:
 # (d) pytest convergence: pytest.ini and tests/conftest.py
 # ---------------------------------------------------------------------------
 
+
 def test_pytest_ini_declares_the_isolating_options() -> None:
     _assert(PYTEST_INI.is_file(), f"{PYTEST_INI} exists")
     text = PYTEST_INI.read_text(encoding="utf-8")
     body = text.split("[pytest]", 1)
     _assert(len(body) == 2, "pytest.ini has a [pytest] section", text)
     config = body[1]
-    _assert("--import-mode=importlib" in config,
-            "pytest.ini's addopts declare --import-mode=importlib", config)
-    _assert("-p no:cacheprovider" in config,
-            "pytest.ini's addopts declare -p no:cacheprovider", config)
-    _assert(re.search(r"^\s*python_files\s*=.*test_\*\.py", config, re.M) is not None,
-            "pytest.ini declares python_files = test_*.py", config)
+    _assert(
+        "--import-mode=importlib" in config,
+        "pytest.ini's addopts declare --import-mode=importlib",
+        config,
+    )
+    _assert(
+        "-p no:cacheprovider" in config, "pytest.ini's addopts declare -p no:cacheprovider", config
+    )
+    _assert(
+        re.search(r"^\s*python_files\s*=.*test_\*\.py", config, re.M) is not None,
+        "pytest.ini declares python_files = test_*.py",
+        config,
+    )
 
 
 def test_conftest_puts_the_declared_roots_on_sys_path() -> None:
@@ -734,11 +757,13 @@ def test_conftest_puts_the_declared_roots_on_sys_path() -> None:
     )
     proc = subprocess.run(  # noqa: S603
         [sys.executable, "-c", probe],
-        capture_output=True, text=True, timeout=120,
-        env=clean_env(), cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=clean_env(),
+        cwd=str(REPO_ROOT),
     )
-    _assert(proc.returncode == 0, "tests/conftest.py imports cleanly",
-            proc.stdout + proc.stderr)
+    _assert(proc.returncode == 0, "tests/conftest.py imports cleanly", proc.stdout + proc.stderr)
     import json
 
     installed = set(json.loads(proc.stdout))
@@ -746,13 +771,11 @@ def test_conftest_puts_the_declared_roots_on_sys_path() -> None:
     required = [REPO_ROOT / "backend" / "src", REPO_ROOT / "scripts"]
     lambda_root = REPO_ROOT / "infra" / "lambda"
     handlers = sorted(c for c in lambda_root.iterdir() if c.is_dir())
-    _assert(handlers != [], "infra/lambda/* has handler directories to add",
-            f"{lambda_root}")
+    _assert(handlers != [], "infra/lambda/* has handler directories to add", f"{lambda_root}")
     required.extend(handlers)
 
     missing = [str(p) for p in required if str(p) not in installed]
-    _assert(missing == [], "tests/conftest.py installs every declared root",
-            f"missing={missing!r}")
+    _assert(missing == [], "tests/conftest.py installs every declared root", f"missing={missing!r}")
 
 
 def test_this_file_collects_and_passes_under_pytest() -> None:
@@ -768,19 +791,35 @@ def test_this_file_collects_and_passes_under_pytest() -> None:
         return
     env = clean_env(PARALLEL_RUNNER_74_INNER="1")
     proc = subprocess.run(  # noqa: S603
-        [sys.executable, "-m", "pytest", "-q", "--no-header",
-         "-p", "no:cacheprovider", "--import-mode=importlib",
-         "-k", "pytest_ini or conftest_puts or collects_and_passes",
-         str(Path(__file__).resolve())],
-        capture_output=True, text=True, timeout=600,
-        env=env, cwd=str(REPO_ROOT),
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "--no-header",
+            "-p",
+            "no:cacheprovider",
+            "--import-mode=importlib",
+            "-k",
+            "pytest_ini or conftest_puts or collects_and_passes",
+            str(Path(__file__).resolve()),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=600,
+        env=env,
+        cwd=str(REPO_ROOT),
     )
-    _assert(proc.returncode == 0,
-            "this file's pytest-style functions collect and pass under pytest",
-            proc.stdout + proc.stderr)
-    _assert("3 passed" in proc.stdout,
-            "the inner pytest run collected all three selected functions",
-            proc.stdout + proc.stderr)
+    _assert(
+        proc.returncode == 0,
+        "this file's pytest-style functions collect and pass under pytest",
+        proc.stdout + proc.stderr,
+    )
+    _assert(
+        "3 passed" in proc.stdout,
+        "the inner pytest run collected all three selected functions",
+        proc.stdout + proc.stderr,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -799,8 +838,7 @@ def test_this_file_collects_and_passes_under_pytest() -> None:
 # only thing standing between this repo and a silently mis-bound handler.
 
 # Assignments of the form `NAME = REPO_ROOT / "infra" / "lambda" / ...`.
-BUNDLE_ASSIGNMENT = re.compile(
-    r'^(\w+)\s*=\s*REPO_ROOT\s*/\s*"infra"\s*/\s*"lambda"', re.M)
+BUNDLE_ASSIGNMENT = re.compile(r'^(\w+)\s*=\s*REPO_ROOT\s*/\s*"infra"\s*/\s*"lambda"', re.M)
 
 # The representative handler test: it imports infra/lambda/purge_worker's
 # `handler`, which is NOT the alphabetically first bundle, so a mis-bound
@@ -826,29 +864,37 @@ def test_no_test_guards_its_lambda_bundle_sys_path_insert() -> None:
         for name in names:
             guard = re.search(
                 r"if\s+(?:str\(\s*%s\s*\)|%s)\s+not in sys\.path" % (name, name),  # noqa: UP031
-                src)
-            _assert(guard is None,
-                    f"{path.name} does not guard its insert of {name}",
-                    "a guarded insert is a no-op under pytest; insert "
-                    "unconditionally at sys.path[0] instead")
+                src,
+            )
+            _assert(
+                guard is None,
+                f"{path.name} does not guard its insert of {name}",
+                "a guarded insert is a no-op under pytest; insert "
+                "unconditionally at sys.path[0] instead",
+            )
             looped = re.search(
                 r"for\s+\w+\s+in\s+\([^)]*\b%s\b[^)]*\):\s*\n\s*"  # noqa: UP031
                 r"if\s+\w+\s+not in sys\.path" % name,
-                src)
-            _assert(looped is None,
-                    f"{path.name} does not guard {name} inside a loop",
-                    "same no-op, spelled as a loop over several roots")
+                src,
+            )
+            _assert(
+                looped is None,
+                f"{path.name} does not guard {name} inside a loop",
+                "same no-op, spelled as a loop over several roots",
+            )
             if re.search(r"^\s*import handler\b", src, re.M):
-                unguarded = re.search(
-                    r"^sys\.path\.insert\(0,\s*str\(%s\)\)" % name, src, re.M)  # noqa: UP031
-                _assert(unguarded is not None,
-                        f"{path.name} inserts {name} unconditionally at "
-                        f"sys.path[0]",
-                        "a file doing a bare `import handler` must force its "
-                        "own bundle to the front of the path")
-    _assert(checked >= 6,
-            "every infra/lambda bundle test was checked",
-            f"checked={checked} (expected at least the six handler tests)")
+                unguarded = re.search(r"^sys\.path\.insert\(0,\s*str\(%s\)\)" % name, src, re.M)  # noqa: UP031
+                _assert(
+                    unguarded is not None,
+                    f"{path.name} inserts {name} unconditionally at sys.path[0]",
+                    "a file doing a bare `import handler` must force its "
+                    "own bundle to the front of the path",
+                )
+    _assert(
+        checked >= 6,
+        "every infra/lambda bundle test was checked",
+        f"checked={checked} (expected at least the six handler tests)",
+    )
 
 
 def test_a_handler_test_still_passes_under_pytest() -> None:
@@ -862,12 +908,17 @@ def test_a_handler_test_still_passes_under_pytest() -> None:
     _assert(HANDLER_TEST.is_file(), f"{HANDLER_TEST} exists")
     proc = subprocess.run(  # noqa: S603
         [sys.executable, "-m", "pytest", "-q", "--no-header", str(HANDLER_TEST)],
-        capture_output=True, text=True, timeout=600,
-        env=clean_env(), cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=600,
+        env=clean_env(),
+        cwd=str(REPO_ROOT),
     )
-    _assert(proc.returncode == 0,
-            f"{HANDLER_TEST.name} passes under pytest, not just script-style",
-            proc.stdout + proc.stderr)
+    _assert(
+        proc.returncode == 0,
+        f"{HANDLER_TEST.name} passes under pytest, not just script-style",
+        proc.stdout + proc.stderr,
+    )
 
 
 def test_the_handler_test_binds_the_bundle_it_names_under_pytest() -> None:
@@ -888,19 +939,26 @@ def test_the_handler_test_binds_the_bundle_it_names_under_pytest() -> None:
     )
     proc = subprocess.run(  # noqa: S603
         [sys.executable, "-c", probe],
-        capture_output=True, text=True, timeout=300,
-        env=clean_env(), cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=300,
+        env=clean_env(),
+        cwd=str(REPO_ROOT),
     )
-    _assert(proc.returncode == 0,
-            "the handler test imports cleanly with conftest's paths installed",
-            proc.stdout + proc.stderr)
+    _assert(
+        proc.returncode == 0,
+        "the handler test imports cleanly with conftest's paths installed",
+        proc.stdout + proc.stderr,
+    )
     import json
 
     bound = Path(json.loads(proc.stdout.strip().splitlines()[-1])).resolve()
     expected = (REPO_ROOT / "infra" / "lambda" / "purge_worker" / "handler.py").resolve()
-    _assert(bound == expected,
-            "`import handler` bound the purge_worker bundle",
-            f"bound={bound}\nexpected={expected}")
+    _assert(
+        bound == expected,
+        "`import handler` bound the purge_worker bundle",
+        f"bound={bound}\nexpected={expected}",
+    )
 
 
 # ---------------------------------------------------------------------------

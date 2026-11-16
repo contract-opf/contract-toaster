@@ -98,9 +98,7 @@ describe('deriveVersionIdentifier', () => {
   it('derives <upload date>-<hash prefix> when identity.version is absent', () => {
     // The real production playbook (educational-affiliation) is exactly this
     // shape: opf_version 0.6, content_hash present, version absent.
-    expect(deriveVersionIdentifier({ contentHash: HASH }, UPLOADED)).toBe(
-      '2026-08-20-73add98b',
-    );
+    expect(deriveVersionIdentifier({ contentHash: HASH }, UPLOADED)).toBe('2026-08-20-73add98b');
   });
 
   it('derives the SAME identifier twice for byte-identical content', () => {
@@ -123,9 +121,7 @@ describe('deriveVersionIdentifier', () => {
     // 2026-08-20 in New York. A local-date rule would derive two different
     // identifiers for the same bytes depending on who uploaded them.
     const lateUtc = new Date(Date.UTC(2026, 7, 20, 23, 30, 0));
-    expect(deriveVersionIdentifier({ contentHash: HASH }, lateUtc)).toBe(
-      '2026-08-20-73add98b',
-    );
+    expect(deriveVersionIdentifier({ contentHash: HASH }, lateUtc)).toBe('2026-08-20-73add98b');
   });
 
   it('returns null when there is nothing to derive from', () => {

@@ -164,9 +164,7 @@ class TestStructuredOutputEnabledFlag(unittest.TestCase):
         # value is hand-typed.
         for value in ("0", "false", "False", "FALSE", "no", "NO", "off", "OFF", "  0  "):
             with patch.dict("os.environ", {"OPENROUTER_STRUCTURED_OUTPUT": value}, clear=True):
-                self.assertFalse(
-                    config.structured_output_enabled(), f"{value!r} should disable it"
-                )
+                self.assertFalse(config.structured_output_enabled(), f"{value!r} should disable it")
 
     def test_garbage_value_is_on(self) -> None:
         # Default-ON means an unrecognized value falls to ON, matching
@@ -333,7 +331,10 @@ def _tool_call_response(arguments: str, finish_reason: str = "tool_calls") -> Fa
                             {
                                 "id": "call_1",
                                 "type": "function",
-                                "function": {"name": mc.STRUCTURED_OUTPUT_TOOL_NAME, "arguments": arguments},
+                                "function": {
+                                    "name": mc.STRUCTURED_OUTPUT_TOOL_NAME,
+                                    "arguments": arguments,
+                                },
                             }
                         ],
                     },
@@ -532,7 +533,9 @@ class LegacyShapedFakeClient:
         self._response_text = response_text
         self.calls: list[dict[str, Any]] = []
 
-    def invoke(self, *, model_id: str, system_prompt: str, user_prompt: str, max_output_tokens: int) -> str:
+    def invoke(
+        self, *, model_id: str, system_prompt: str, user_prompt: str, max_output_tokens: int
+    ) -> str:
         self.calls.append({"model_id": model_id, "max_output_tokens": max_output_tokens})
         return self._response_text
 
@@ -597,7 +600,9 @@ class TestRunPrimaryPassThreading(unittest.TestCase):
 
 class TestRunCriticPassThreading(unittest.TestCase):
     def test_flag_off_never_sends_tool_spec_even_to_a_legacy_shaped_client(self) -> None:
-        legacy = LegacyShapedFakeClient(json.dumps(_load_fixture("critic_drop_i1_accept_valid.json")))
+        legacy = LegacyShapedFakeClient(
+            json.dumps(_load_fixture("critic_drop_i1_accept_valid.json"))
+        )
         primary_output = _load_fixture(_PRIMARY_VALID_FIXTURE)
         # Explicit "0" for the same reason as the primary-pass twin above.
         with patch.dict("os.environ", {"OPENROUTER_STRUCTURED_OUTPUT": "0"}, clear=True):

@@ -210,10 +210,10 @@ def clean_heading_text(text: str) -> str:
     stripped = (text or "").strip()
     m = NUMBERED_LEAD_IN_RE.match(stripped)
     if m:
-        return stripped[m.end():].strip()
+        return stripped[m.end() :].strip()
     m = LETTERED_LEAD_IN_RE.match(stripped)
     if m:
-        return stripped[m.end():].strip()
+        return stripped[m.end() :].strip()
     return stripped
 
 

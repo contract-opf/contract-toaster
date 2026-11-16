@@ -440,7 +440,10 @@ export default function AdminInstructions({
                   {history.map((row) => {
                     const isExpanded = expandedVersions.has(row.version);
                     return (
-                      <div key={row.version} data-testid={`admin-instructions-history-row-${row.version}`}>
+                      <div
+                        key={row.version}
+                        data-testid={`admin-instructions-history-row-${row.version}`}
+                      >
                         <div className="ct-row">
                           <span>
                             v{row.version} · {row.saved_by ?? 'someone'} ·{' '}

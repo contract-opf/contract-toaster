@@ -128,18 +128,18 @@ class PlaybookVersionNotesTestBase(unittest.TestCase):
         _put_user(self.users_table, NON_ADMIN_SUB, is_admin=False)
 
         self.client = TestClient(backend_main.app)
-        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = (
-            lambda: self.ddb
-        )
+        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = lambda: self.ddb
 
     def tearDown(self):
         backend_main.app.dependency_overrides.clear()
         self._mock_aws.stop()
 
     def _authenticate_as(self, sub: str) -> None:
-        backend_main.app.dependency_overrides[backend_main.get_current_user] = (
-            lambda: {"sub": sub, "email": f"{sub}@example.com", "token_use": "access"}
-        )
+        backend_main.app.dependency_overrides[backend_main.get_current_user] = lambda: {
+            "sub": sub,
+            "email": f"{sub}@example.com",
+            "token_use": "access",
+        }
 
     def _upload(self, version="1.0.0", uploader="uploader@example.com"):
         return pv.record_playbook_version_upload(
@@ -180,9 +180,9 @@ class TestNotesDefaultEmptyAtUpload(PlaybookVersionNotesTestBase):
         item = self._upload()
         self.assertEqual(item["notes"], "")
 
-        row = self.versions_table.get_item(
-            Key={"playbook_id": PLAYBOOK_ID, "version": "1.0.0"}
-        )["Item"]
+        row = self.versions_table.get_item(Key={"playbook_id": PLAYBOOK_ID, "version": "1.0.0"})[
+            "Item"
+        ]
         self.assertEqual(row["notes"], "")
 
 
@@ -197,9 +197,9 @@ class TestNotesAdminGate(PlaybookVersionNotesTestBase):
         self.assertEqual(resp.status_code, 403)
 
         # The row must be untouched.
-        row = self.versions_table.get_item(
-            Key={"playbook_id": PLAYBOOK_ID, "version": "1.0.0"}
-        )["Item"]
+        row = self.versions_table.get_item(Key={"playbook_id": PLAYBOOK_ID, "version": "1.0.0"})[
+            "Item"
+        ]
         self.assertEqual(row["notes"], "")
 
 
@@ -215,9 +215,9 @@ class TestNotesSetAndUpdate(PlaybookVersionNotesTestBase):
         self.assertEqual(resp.status_code, 200, resp.text)
         self.assertEqual(resp.json()["notes"], "Synthetic demo playbook.")
 
-        row = self.versions_table.get_item(
-            Key={"playbook_id": PLAYBOOK_ID, "version": "1.0.0"}
-        )["Item"]
+        row = self.versions_table.get_item(Key={"playbook_id": PLAYBOOK_ID, "version": "1.0.0"})[
+            "Item"
+        ]
         self.assertEqual(row["notes"], "Synthetic demo playbook.")
 
         # Updating again replaces the prior value (not append/concat).
@@ -225,9 +225,9 @@ class TestNotesSetAndUpdate(PlaybookVersionNotesTestBase):
         self.assertEqual(resp2.status_code, 200, resp2.text)
         self.assertEqual(resp2.json()["notes"], "Revised note.")
 
-        row2 = self.versions_table.get_item(
-            Key={"playbook_id": PLAYBOOK_ID, "version": "1.0.0"}
-        )["Item"]
+        row2 = self.versions_table.get_item(Key={"playbook_id": PLAYBOOK_ID, "version": "1.0.0"})[
+            "Item"
+        ]
         self.assertEqual(row2["notes"], "Revised note.")
 
         # Every other field is untouched by a notes-only update.
@@ -265,9 +265,9 @@ class TestNotesSetAndUpdate(PlaybookVersionNotesTestBase):
             actor_identity=ADMIN_SUB,
             dynamodb_resource=self.ddb,
         )
-        row = self.versions_table.get_item(
-            Key={"playbook_id": PLAYBOOK_ID, "version": "1.0.0"}
-        )["Item"]
+        row = self.versions_table.get_item(Key={"playbook_id": PLAYBOOK_ID, "version": "1.0.0"})[
+            "Item"
+        ]
         self.assertEqual(row["notes"], "")
 
 
@@ -335,9 +335,9 @@ class TestVersionContentStaysImmutable(PlaybookVersionNotesTestBase):
             )
 
         # The row's content fields (and the note) are unchanged.
-        row = self.versions_table.get_item(
-            Key={"playbook_id": PLAYBOOK_ID, "version": "1.0.0"}
-        )["Item"]
+        row = self.versions_table.get_item(Key={"playbook_id": PLAYBOOK_ID, "version": "1.0.0"})[
+            "Item"
+        ]
         self.assertEqual(row["content_hash"], "sha256:" + "a" * 64)
         self.assertEqual(row["uploaded_by"], "uploader@example.com")
         self.assertEqual(row["notes"], "a note")

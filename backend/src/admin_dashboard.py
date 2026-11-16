@@ -288,9 +288,7 @@ def get_spend_ledger(
     require_admin(caller_user_row, "Admin privilege required to view the spend ledger.")
     # Admin-gated in its own right, and gated again above — the cap setting
     # never rides along on a read a non-admin could reach.
-    cap_setting = model_settings_module.get_spend_cap_settings(
-        caller_user_row, dynamodb_resource
-    )
+    cap_setting = model_settings_module.get_spend_cap_settings(caller_user_row, dynamodb_resource)
     enforced_cap_cents = int(cap_setting["daily_cap_usd_cents"])
     window = _clamp(days, SPEND_LEDGER_DEFAULT_DAYS, 1, SPEND_LEDGER_MAX_DAYS)
     now = time.time() if now_epoch is None else now_epoch
@@ -318,14 +316,10 @@ def get_spend_ledger(
     # Bounded on BOTH ends: a row dated after today is not part of "the last
     # N days" either, whatever wrote it.
     in_window = [
-        d
-        for d in projected
-        if window_start_key <= str(d.get("spend_date") or "") <= today_key
+        d for d in projected if window_start_key <= str(d.get("spend_date") or "") <= today_key
     ]
 
-    next_review_cents = reviews_module.compute_worst_case_reservation_usd_cents(
-        dynamodb_resource
-    )
+    next_review_cents = reviews_module.compute_worst_case_reservation_usd_cents(dynamodb_resource)
     spent_today_cents = int(today["reserved_usd_cents"])
 
     return json_safe(
@@ -348,9 +342,7 @@ def get_spend_ledger(
             "cap_setting": cap_setting,
             "spent_today_usd_cents": spent_today_cents,
             "remaining_usd_cents": max(0, enforced_cap_cents - spent_today_cents),
-            "next_review_admissible": (
-                spent_today_cents + next_review_cents <= enforced_cap_cents
-            ),
+            "next_review_admissible": (spent_today_cents + next_review_cents <= enforced_cap_cents),
         }
     )
 
@@ -397,7 +389,9 @@ def _concurrency_limit() -> int:
     otherwise raise on.
     """
     try:
-        return max(1, int(os.environ.get("PIPELINE_MAX_CONCURRENCY", _DEFAULT_PIPELINE_MAX_CONCURRENCY)))
+        return max(
+            1, int(os.environ.get("PIPELINE_MAX_CONCURRENCY", _DEFAULT_PIPELINE_MAX_CONCURRENCY))
+        )
     except (TypeError, ValueError):
         return _DEFAULT_PIPELINE_MAX_CONCURRENCY
 
@@ -532,7 +526,10 @@ FAILURE_QUEUE_STATUS = "ERROR"
 # Rows stored before #133 still carry one of the retired statuses. They are
 # read into the queue and reported as `ERROR` (their `reason` is unchanged);
 # nothing writes these any more and there is no migration.
-LEGACY_FAILURE_STATUSES = ("MANUAL_REVIEW_REQUIRED", "ERROR_MANUAL_REVIEW_REQUIRED")  # legacy read only
+LEGACY_FAILURE_STATUSES = (
+    "MANUAL_REVIEW_REQUIRED",
+    "ERROR_MANUAL_REVIEW_REQUIRED",
+)  # legacy read only
 
 # `status_filter` survives only so a caller still sending one of the retired
 # statuses gets a 400 rather than a silently unfiltered queue.
@@ -594,8 +591,10 @@ def _manual_review_entry(item: dict[str, Any], now: int) -> dict[str, Any]:
     entry = {field: item.get(field) for field in _MANUAL_REVIEW_FIELDS}
     entry["status"] = FAILURE_QUEUE_STATUS
     entry["reason"] = reviews_module._resolve_failure_reason(item)
-    entered_at = _as_int(item.get("failed_at")) or _as_int(item.get("updated_at")) or _as_int(
-        item.get("created_at")
+    entered_at = (
+        _as_int(item.get("failed_at"))
+        or _as_int(item.get("updated_at"))
+        or _as_int(item.get("created_at"))
     )
     entry["waiting_seconds"] = None if entered_at is None else max(0, now - entered_at)
     entry["sla_breached"] = bool(
@@ -692,9 +691,7 @@ def list_manual_review_queue(
         "pending_triage": sum(
             1 for e in entries if e.get("legal_triage_status") == TRIAGE_STATUS_PENDING
         ),
-        "triaged": sum(
-            1 for e in entries if e.get("legal_triage_status") == TRIAGE_STATUS_TRIAGED
-        ),
+        "triaged": sum(1 for e in entries if e.get("legal_triage_status") == TRIAGE_STATUS_TRIAGED),
         "by_reason": dict(sorted(by_reason.items())),
     }
 

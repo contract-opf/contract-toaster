@@ -346,7 +346,9 @@ export function capabilityRows(capabilities: DeploymentCapabilities): Capability
       id: 'internal-notes',
       name: 'Internal-audience footnotes',
       enabled: capabilities.internalNotes,
-      state: capabilities.internalNotes ? 'Enabled by this deployment' : 'Not enabled by this deployment',
+      state: capabilities.internalNotes
+        ? 'Enabled by this deployment'
+        : 'Not enabled by this deployment',
       why: capabilities.internalNotes
         ? 'This deployment allows internal notes, so “Internal” and “Both” can be chosen under ' +
           '“Review”. Which footnotes a given review carries is a per-review choice made there — ' +
@@ -422,7 +424,8 @@ function modelKeyRow(key: ModelKeySettings | null): SecretRow {
       stateVariant: 'muted' as const,
       fingerprint: '',
       lastSet: '',
-      rotation: 'We could not read this key’s status just now, so nothing below is a claim about it.',
+      rotation:
+        'We could not read this key’s status just now, so nothing below is a claim about it.',
     };
   }
 
@@ -906,9 +909,7 @@ export default function AdminSettings({
       setRosterSaveError('');
       setRosterSaved(false);
     } catch (err) {
-      setRosterLoad(
-        failedLoad(err, "We couldn't load your legal entity names. Please try again."),
-      );
+      setRosterLoad(failedLoad(err, "We couldn't load your legal entity names. Please try again."));
     }
   }, []);
 
@@ -1022,9 +1023,7 @@ export default function AdminSettings({
       setCapSaveError('');
       setCapSaved(false);
     } catch (err) {
-      setSpendLoad(
-        failedLoad(err, "We couldn't load this deployment's spend. Please try again."),
-      );
+      setSpendLoad(failedLoad(err, "We couldn't load this deployment's spend. Please try again."));
     }
   }, []);
 
@@ -1131,13 +1130,12 @@ export default function AdminSettings({
           importantly — what it is not, so nobody reads a read-only row as a
           control that failed to render. */}
       <CtBanner variant="muted" data-testid="admin-settings-scope-note">
-        What is actually deployed, what this deployment has turned on, which secrets it runs on,
-        and why the product behaves the way it does. Apart from your own legal entity names
-        below, everything here is read-only: a capability below is decided by the deployment,
-        not on this screen, and the copy says where it is actually set. Secrets are never
-        displayed — not even partly — so this screen shows a one-way fingerprint and names the
-        screen that rotates. Per-review choices — including which footnotes a redline carries —
-        stay under “Review”.
+        What is actually deployed, what this deployment has turned on, which secrets it runs on, and
+        why the product behaves the way it does. Apart from your own legal entity names below,
+        everything here is read-only: a capability below is decided by the deployment, not on this
+        screen, and the copy says where it is actually set. Secrets are never displayed — not even
+        partly — so this screen shows a one-way fingerprint and names the screen that rotates.
+        Per-review choices — including which footnotes a redline carries — stay under “Review”.
       </CtBanner>
 
       {load.status === 'failed' && (
@@ -1197,13 +1195,12 @@ export default function AdminSettings({
           <CtToolbar title="Our legal entities" />
           <div className="ct-stack">
             <p data-testid="admin-settings-roster-explainer">
-              Every legal entity of ours that can be the contracting party. A review recognises
-              any of these names as us — together with the name the governing playbook itself
-              carries, which is treated as one of them and not as the main one. Add the
-              subsidiaries, the former names and the trading names a counterparty might have
-              drafted against, because the one that is missing is the one that will turn up.
-              This list is the same for every playbook, and a change takes effect on the next
-              review.
+              Every legal entity of ours that can be the contracting party. A review recognises any
+              of these names as us — together with the name the governing playbook itself carries,
+              which is treated as one of them and not as the main one. Add the subsidiaries, the
+              former names and the trading names a counterparty might have drafted against, because
+              the one that is missing is the one that will turn up. This list is the same for every
+              playbook, and a change takes effect on the next review.
             </p>
 
             {rosterSaveError && (
@@ -1277,14 +1274,18 @@ export default function AdminSettings({
                             const originalIndex = currentEntities.indexOf(name);
                             return (
                               <tr key={name}>
-                                <td><strong>{name}</strong></td>
+                                <td>
+                                  <strong>{name}</strong>
+                                </td>
                                 <td style={{ textAlign: 'right' }}>
                                   <CtButton
                                     type="button"
                                     variant="ghost"
                                     size="sm"
                                     onClick={() => {
-                                      const next = currentEntities.filter((_, i) => i !== originalIndex);
+                                      const next = currentEntities.filter(
+                                        (_, i) => i !== originalIndex,
+                                      );
                                       setRosterDraft(next.join('\n'));
                                       setRosterSaved(false);
                                     }}
@@ -1299,7 +1300,11 @@ export default function AdminSettings({
                       </table>
                     </CtTable>
                   ) : (
-                    <p className="ct-muted" data-testid="admin-settings-roster-filter-empty" style={{ margin: '0.5rem 0', fontSize: '14px' }}>
+                    <p
+                      className="ct-muted"
+                      data-testid="admin-settings-roster-filter-empty"
+                      style={{ margin: '0.5rem 0', fontSize: '14px' }}
+                    >
                       No recognised entities match &ldquo;{rosterFilterQuery}&rdquo;.
                     </p>
                   )}
@@ -1354,7 +1359,8 @@ export default function AdminSettings({
                         style={{ fontSize: '14px', color: 'var(--ct-warn)', fontWeight: 500 }}
                       >
                         {duplicateLineCount}{' '}
-                        {duplicateLineCount === 1 ? 'duplicate entry' : 'duplicate entries'} will be merged on save
+                        {duplicateLineCount === 1 ? 'duplicate entry' : 'duplicate entries'} will be
+                        merged on save
                       </span>
                     )}
                   </div>
@@ -1575,8 +1581,8 @@ export default function AdminSettings({
                       {formatUsdCents(spendLoad.data.spent_today_usd_cents)}
                     </td>
                     <td data-testid="spend-meaning-spent">
-                      What today’s reviews hold against the cap. A review in flight holds its
-                      worst case; once it finishes, this falls to what it actually cost.
+                      What today’s reviews hold against the cap. A review in flight holds its worst
+                      case; once it finishes, this falls to what it actually cost.
                     </td>
                   </tr>
                   <tr data-testid="spend-row-settled">
@@ -1585,9 +1591,9 @@ export default function AdminSettings({
                       {formatUsdCents(spendLoad.data.settled_today_usd_cents)}
                     </td>
                     <td data-testid="spend-meaning-settled">
-                      What finished work actually cost, including the cheap check that runs when
-                      a file is chosen and any cover notes drafted. Those two do not reserve, so
-                      they are billed but sit outside the ceiling above.
+                      What finished work actually cost, including the cheap check that runs when a
+                      file is chosen and any cover notes drafted. Those two do not reserve, so they
+                      are billed but sit outside the ceiling above.
                     </td>
                   </tr>
                   <tr data-testid="spend-row-remaining">
@@ -1615,11 +1621,11 @@ export default function AdminSettings({
                         : formatUsdCents(spendLoad.data.estimated_review_usd_cents)}
                     </td>
                     <td data-testid="spend-meaning-next">
-                      What a document of ordinary size is expected to cost on the models
-                      currently selected. It reserves{' '}
+                      What a document of ordinary size is expected to cost on the models currently
+                      selected. It reserves{' '}
                       {formatUsdCents(spendLoad.data.worst_case_reservation_usd_cents)} while it
-                      runs — the worst case is what the cap is measured against, and the unused
-                      part is released when the review finishes.
+                      runs — the worst case is what the cap is measured against, and the unused part
+                      is released when the review finishes.
                     </td>
                   </tr>
                 </tbody>
@@ -1668,13 +1674,11 @@ export default function AdminSettings({
                 >
                   <CtField
                     label="Daily cap (US dollars)"
-                    hint={
-                      `Between ${formatUsdCents(
-                        spendLoad.data.cap_setting.min_daily_cap_usd_cents,
-                      )} and ${formatUsdCents(
-                        spendLoad.data.cap_setting.max_daily_cap_usd_cents,
-                      )}. Takes effect on the next review, with no redeploy.`
-                    }
+                    hint={`Between ${formatUsdCents(
+                      spendLoad.data.cap_setting.min_daily_cap_usd_cents,
+                    )} and ${formatUsdCents(
+                      spendLoad.data.cap_setting.max_daily_cap_usd_cents,
+                    )}. Takes effect on the next review, with no redeploy.`}
                   >
                     <input
                       type="text"

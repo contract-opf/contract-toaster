@@ -127,9 +127,7 @@ MODULE_ROOTS = (
 
 # `python3 tests/foo.py`, `python scripts/bar.py`. Anchored on a token boundary
 # so `python3 -m pip install …` and heredoc prose do not match.
-INVOCATION_RE = re.compile(
-    r"(?:^|[\s;&|(])python3?\s+((?:tests|scripts)/[\w./-]+\.py)"
-)
+INVOCATION_RE = re.compile(r"(?:^|[\s;&|(])python3?\s+((?:tests|scripts)/[\w./-]+\.py)")
 PIP_INSTALL_RE = re.compile(r"(?:^|[\s;&|(])(?:python3?\s+-m\s+)?pip\s+install\s+(.*)$")
 
 # YAML keys the line scanner navigates by. All three tolerate a trailing
@@ -151,6 +149,7 @@ RAW_RUN_KEY_RE = re.compile(r"^\s*(?:-\s+)?run:", re.MULTILINE)
 # Reporting helpers (same shape as tests/test_frontend_gate_wired_634.py)
 # ---------------------------------------------------------------------------
 
+
 def _assert(condition: bool, label: str, detail: str = "") -> list[str]:
     if condition:
         print(f"  [PASS] {label}")
@@ -165,6 +164,7 @@ def _assert(condition: bool, label: str, detail: str = "") -> list[str]:
 # ---------------------------------------------------------------------------
 # Workflow scanning — enumerate, never hand-list
 # ---------------------------------------------------------------------------
+
 
 class Step:
     """One workflow step: which job it belongs to, its name, its shell body."""
@@ -206,7 +206,7 @@ def _split_jobs(text: str) -> list[tuple[str, list[str]]]:
     jobs: list[tuple[str, list[str]]] = []
     current: list[str] | None = None
     job_indent: int | None = None
-    for line in lines[start + 1:]:
+    for line in lines[start + 1 :]:
         stripped = line.strip()
         if not stripped:
             if current is not None:
@@ -237,12 +237,10 @@ def _split_steps(job_lines: list[str]) -> list[tuple[str, list[str]]]:
     reason `jobs:` may — see _split_jobs.
     """
     try:
-        steps_at = next(
-            i for i, line in enumerate(job_lines) if STEPS_KEY_RE.match(line)
-        )
+        steps_at = next(i for i, line in enumerate(job_lines) if STEPS_KEY_RE.match(line))
     except StopIteration:
         return []
-    body = job_lines[steps_at + 1:]
+    body = job_lines[steps_at + 1 :]
 
     item_re = re.compile(r"^(\s+)-\s")
     item_indent = None
@@ -294,16 +292,14 @@ def _step_run(step_lines: list[str]) -> str:
         if rest and rest[0] not in "|>":
             return rest
         collected = []
-        for follow in step_lines[i + 1:]:
+        for follow in step_lines[i + 1 :]:
             if not follow.strip():
                 collected.append("")
                 continue
             if len(follow) - len(follow.lstrip()) <= indent:
                 break
             collected.append(follow.strip())
-        return "\n".join(
-            line for line in collected if not line.lstrip().startswith("#")
-        )
+        return "\n".join(line for line in collected if not line.lstrip().startswith("#"))
     return ""
 
 
@@ -317,9 +313,7 @@ def iter_steps(workflows_dir: Path) -> list[Step]:
         text = path.read_text(encoding="utf-8")
         for job_id, job_lines in _split_jobs(text):
             for index, (name, step_lines) in enumerate(_split_steps(job_lines)):
-                steps.append(
-                    Step(path.name, job_id, index, name, _step_run(step_lines))
-                )
+                steps.append(Step(path.name, job_id, index, name, _step_run(step_lines)))
     return steps
 
 
@@ -401,6 +395,7 @@ def step_events(run: str) -> list[tuple[str, str]]:
 # ---------------------------------------------------------------------------
 # What a job has installed, at each point in the job
 # ---------------------------------------------------------------------------
+
 
 def _normalize_dist(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
@@ -518,6 +513,7 @@ def modules_installed_by(run: str, root: Path) -> set[str]:
 # What a file needs: third-party top-level modules, transitively
 # ---------------------------------------------------------------------------
 
+
 def _eval_path(node: ast.AST, env: dict[str, Path], this_file: Path) -> Path | None:
     """Best-effort static evaluation of a pathlib expression.
 
@@ -557,7 +553,11 @@ def _eval_path(node: ast.AST, env: dict[str, Path], this_file: Path) -> Path | N
         if isinstance(value, ast.Attribute) and value.attr == "parents":
             base = _eval_path(value.value, env, this_file)
             index = node.slice
-            if base is not None and isinstance(index, ast.Constant) and isinstance(index.value, int):
+            if (
+                base is not None
+                and isinstance(index, ast.Constant)
+                and isinstance(index.value, int)
+            ):
                 parents = list(base.parents)
                 if index.value < len(parents):
                     return parents[index.value]
@@ -699,6 +699,7 @@ def third_party_requirements(
 # The local gate's own discovery globs
 # ---------------------------------------------------------------------------
 
+
 def local_gate_globs(script: Path = COLLECT_SCRIPT) -> list[str]:
     """The `for t in …` glob list from scripts/collect_test_failures.sh.
 
@@ -819,7 +820,7 @@ def tz_pin_problems(text: str) -> list[str]:
         if default is None:
             problems.append(
                 f"line {lineno}: `export TZ={rhs}` — cannot read what this resolves "
-                "to with CHECK_TZ unset; write `\"${CHECK_TZ:-UTC}\"` or a bare zone"
+                'to with CHECK_TZ unset; write `"${CHECK_TZ:-UTC}"` or a bare zone'
             )
         elif default != "UTC":
             problems.append(
@@ -831,13 +832,11 @@ def tz_pin_problems(text: str) -> list[str]:
     reaching = [
         lineno
         for lineno, indent, _rhs, default in exports
-        if default == "UTC"
-        and indent == ""
-        and (collect_line is None or lineno < collect_line)
+        if default == "UTC" and indent == "" and (collect_line is None or lineno < collect_line)
     ]
     if exports and not reaching:
         problems.append(
-            "no unconditional top-level `export TZ=\"${CHECK_TZ:-UTC}\"` runs before "
+            'no unconditional top-level `export TZ="${CHECK_TZ:-UTC}"` runs before '
             f"line {collect_line} (`scripts/{COLLECT_SCRIPT_NAME}`): an export that is "
             "indented (inside a function or conditional) or that sits below the line "
             "running the suite cannot pin the clock the suite runs under"
@@ -914,7 +913,7 @@ def _mangle_workflow(text: str, mangle: str | None) -> str:
         # Valid YAML: the jobs: body two columns deeper than this repo writes it.
         lines = text.splitlines()
         at = next(i for i, line in enumerate(lines) if line.rstrip() == "jobs:")
-        body = [("  " + line if line.strip() else line) for line in lines[at + 1:]]
+        body = [("  " + line if line.strip() else line) for line in lines[at + 1 :]]
         return "\n".join(lines[: at + 1] + body) + "\n"
     if mangle == "unreadable":
         # NOT valid YAML — stands in for the next shape nobody anticipated.
@@ -928,9 +927,7 @@ def _mangle_workflow(text: str, mangle: str | None) -> str:
     raise ValueError(f"unknown mangle: {mangle!r}")
 
 
-def _write_self_fixture(
-    root: Path, install_before: bool | None, mangle: str | None = None
-) -> Path:
+def _write_self_fixture(root: Path, install_before: bool | None, mangle: str | None = None) -> Path:
     """A synthetic repo: one workflow, one test, one local module, one dep.
 
     `install_before` is True (install step first), False (install step after
@@ -943,9 +940,7 @@ def _write_self_fixture(
     text = _SELF_WORKFLOW.format(install_step=install_step)
     if install_before is False:
         text += "\n" + _INSTALL_STEP.rstrip("\n") + "\n"
-    (workflows / "throwaway.yml").write_text(
-        _mangle_workflow(text, mangle), encoding="utf-8"
-    )
+    (workflows / "throwaway.yml").write_text(_mangle_workflow(text, mangle), encoding="utf-8")
 
     (root / "tests" / "needy").mkdir(parents=True)
     # The test imports a REPO-LOCAL module, which is what imports the
@@ -1090,9 +1085,7 @@ def check_self() -> list[str]:
         ),
     ):
         with tempfile.TemporaryDirectory() as tmp:
-            root = _write_self_fixture(
-                Path(tmp) / mangle, install_before=None, mangle=mangle
-            )
+            root = _write_self_fixture(Path(tmp) / mangle, install_before=None, mangle=mangle)
             problems = _self_violations(root)
             coverage = workflow_scan_coverage(root / ".github" / "workflows")
             failures += _assert(
@@ -1114,9 +1107,7 @@ def check_self() -> list[str]:
         ),
     ):
         with tempfile.TemporaryDirectory() as tmp:
-            root = _write_self_fixture(
-                Path(tmp) / mangle, install_before=None, mangle=mangle
-            )
+            root = _write_self_fixture(Path(tmp) / mangle, install_before=None, mangle=mangle)
             failures += _assert(
                 _self_violations(root) == []
                 and workflow_scan_coverage(root / ".github" / "workflows") != [],
@@ -1131,9 +1122,7 @@ def check_self() -> list[str]:
     # workflow file yields >= 1 job and every `run:` key in its text is
     # accounted for — so adding a workflow needs no edit here, while a parser
     # regression turns this red instead of quietly shrinking the scan.
-    real_workflows = sorted(WORKFLOWS_DIR.glob("*.yml")) + sorted(
-        WORKFLOWS_DIR.glob("*.yaml")
-    )
+    real_workflows = sorted(WORKFLOWS_DIR.glob("*.yml")) + sorted(WORKFLOWS_DIR.glob("*.yaml"))
     coverage = workflow_scan_coverage(WORKFLOWS_DIR)
     failures += _assert(
         bool(real_workflows) and not coverage,
@@ -1208,6 +1197,7 @@ def check_self() -> list[str]:
 # Checks 1-4 — the real repo
 # ---------------------------------------------------------------------------
 
+
 def check_invocations_exist(steps: list[Step]) -> list[str]:
     print("Check 1: every repo .py file a workflow invokes exists …")
     missing = []
@@ -1238,9 +1228,7 @@ def check_bare_interpreter_parity() -> list[str]:
 
 
 def check_local_gate_drift(steps: list[Step]) -> list[str]:
-    print(
-        "Check 3: every tests/ file CI invokes is also discovered by the local gate …"
-    )
+    print("Check 3: every tests/ file CI invokes is also discovered by the local gate …")
     globs = local_gate_globs()
     problems = []
     seen = set()
@@ -1279,11 +1267,7 @@ def check_clock_parity() -> list[str]:
     # The default parsed above is still only a string. Ask libc what clock it
     # actually produces, so a zone that merely LOOKS like UTC cannot pass.
     defaults = sorted(
-        {
-            default
-            for _lineno, _indent, _rhs, default in tz_exports(text)[0]
-            if default is not None
-        }
+        {default for _lineno, _indent, _rhs, default in tz_exports(text)[0] if default is not None}
     )
     offsets = {zone: effective_utc_offsets(zone) for zone in defaults}
     failures += _assert(

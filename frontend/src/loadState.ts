@@ -28,9 +28,7 @@ import { toUserMessage } from './userMessage';
  * is not a smaller bug than the spinner, just a quieter one.
  */
 export type LoadState<T> =
-  | { status: 'loading' }
-  | { status: 'ready'; data: T }
-  | { status: 'failed'; message: string };
+  { status: 'loading' } | { status: 'ready'; data: T } | { status: 'failed'; message: string };
 
 /**
  * The `failed` state for an error of unknown shape, with a fallback. Only a

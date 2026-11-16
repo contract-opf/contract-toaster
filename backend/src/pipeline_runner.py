@@ -208,9 +208,7 @@ def classify_failure_reason(exc: BaseException) -> str:
     if isinstance(exc, model_client.ModelInvocationError):
         status_code = getattr(exc, "status_code", None)
         if isinstance(status_code, int):
-            return _MODEL_STATUS_FAILURE_REASONS.get(
-                status_code, FAILURE_REASON_UNCLASSIFIED
-            )
+            return _MODEL_STATUS_FAILURE_REASONS.get(status_code, FAILURE_REASON_UNCLASSIFIED)
     return FAILURE_REASON_UNCLASSIFIED
 
 
@@ -434,8 +432,9 @@ def _copy_output_object(
     return True
 
 
-def _write_terminal(review_id: str, result: dict[str, Any], object_written: bool,
-                    dynamodb_resource: Any) -> None:
+def _write_terminal(
+    review_id: str, result: dict[str, Any], object_written: bool, dynamodb_resource: Any
+) -> None:
     """Write the terminal reviews-row state (persist-stage equivalent).
     output_s3_key is recorded only when the object was materialized.
 
@@ -453,8 +452,7 @@ def _write_terminal(review_id: str, result: dict[str, Any], object_written: bool
     completed = decision in ("REQUEST_CHANGE", "ACCEPT")
     terminal = "DONE" if completed else "ERROR"
     set_clauses = ["#s = :s", "updated_at = :now"]
-    values: dict[str, Any] = {":s": terminal, ":now": str(int(time.time())),
-                              ":error": "ERROR"}
+    values: dict[str, Any] = {":s": terminal, ":now": str(int(time.time())), ":error": "ERROR"}
     if completed:
         set_clauses.append("decision = :d")
         values[":d"] = decision
@@ -505,9 +503,7 @@ def _find_submission_by_review_id(table: Any, review_id: str) -> dict[str, Any] 
     return items[0] if items else None
 
 
-def _settle_reservation(
-    review_id: str, dynamodb_resource: Any, actual_usd_cents: int = 0
-) -> None:
+def _settle_reservation(review_id: str, dynamodb_resource: Any, actual_usd_cents: int = 0) -> None:
     """Settle the worst-case spend reservation (persist-stage equivalent),
     reusing reviews.settle_spend. Guarded so a review with no reservation, or
     one already released, is a no-op (no double-credit).
@@ -755,8 +751,9 @@ def _actual_cost_for_client(
         return {}
 
 
-def run_mock_pipeline(review_id: str, payload: dict[str, Any], *,
-                      dynamodb_resource: Any, s3_client: Any) -> None:
+def run_mock_pipeline(
+    review_id: str, payload: dict[str, Any], *, dynamodb_resource: Any, s3_client: Any
+) -> None:
     """Phase 1 in-process mock pipeline for one review. Injectable stores make
     it unit-testable offline. On any failure the review is moved to ERROR (the
     shared-error-handler equivalent) and the reservation is still settled."""
@@ -792,8 +789,10 @@ def _fail_review(review_id: str, dynamodb_resource: Any) -> None:
             ),
             ExpressionAttributeNames={"#s": "status"},
             ExpressionAttributeValues={
-                ":e": "ERROR", ":stage": "inprocess_pipeline",
-                ":failed_at": now, ":now": now,
+                ":e": "ERROR",
+                ":stage": "inprocess_pipeline",
+                ":failed_at": now,
+                ":now": now,
             },
         )
     except Exception:  # pragma: no cover - best effort
@@ -1123,9 +1122,7 @@ def review_prompt_basis(
             )
             blocks = review_spine._assemble_opf_system_blocks(knowledge)
             floor_calls = len(
-                opf_prompt.resolve_floor_invariants(
-                    knowledge.opf_doc or {}, knowledge.overrides
-                )
+                opf_prompt.resolve_floor_invariants(knowledge.opf_doc or {}, knowledge.overrides)
             )
         else:
             blocks = primary_review_pass.assemble_system_blocks(bundle)
@@ -1514,22 +1511,24 @@ def _scan_upload_for_injection(docx_bytes: bytes) -> dict[str, Any]:
     became a second way for a review to die would be worse than no tripwire.
     """
     try:
-        return document_injection_scan.summarise(
-            document_injection_scan.scan_document(docx_bytes)
-        )
+        return document_injection_scan.summarise(document_injection_scan.scan_document(docx_bytes))
     except Exception:  # noqa: BLE001 - advisory: degrade, never fail the review
         logger.warning("INJECTION_SCAN: scan failed; review continues unaffected")
         return {}
 
 
-def _write_real_terminal(review_id: str, result: dict[str, Any], output_s3_key: str | None,
-                          dynamodb_resource: Any,
-                          analysis_s3_key: str | None = None,
-                          model_ids: dict[str, str] | None = None,
-                          opf_lineage: dict[str, Any] | None = None,
-                          floor_coverage: dict[str, Any] | None = None,
-                          failing_stage: str | None = None,
-                          actual_cost: dict[str, Any] | None = None) -> None:
+def _write_real_terminal(
+    review_id: str,
+    result: dict[str, Any],
+    output_s3_key: str | None,
+    dynamodb_resource: Any,
+    analysis_s3_key: str | None = None,
+    model_ids: dict[str, str] | None = None,
+    opf_lineage: dict[str, Any] | None = None,
+    floor_coverage: dict[str, Any] | None = None,
+    failing_stage: str | None = None,
+    actual_cost: dict[str, Any] | None = None,
+) -> None:
     """Write the terminal reviews-row state from a ReviewResult dict
     (scripts/review_spine.py::run_review's return contract). Unlike
     reviews.record_stage_failure (used only for an actual raised
@@ -1749,8 +1748,14 @@ def _write_real_terminal(review_id: str, result: dict[str, Any], output_s3_key: 
             raise
 
 
-def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resource: Any,
-                      s3_client: Any, model_client: Any = None) -> None:
+def run_real_pipeline(
+    review_id: str,
+    payload: dict[str, Any],
+    *,
+    dynamodb_resource: Any,
+    s3_client: Any,
+    model_client: Any = None,
+) -> None:
     """Phase 2 in-process real pipeline for one review: drives the composed
     review spine (scripts/review_spine.py::run_review, issue #239) with a
     real model client, replacing run_mock_pipeline's canned fixture with a
@@ -1938,9 +1943,7 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
         # is -- `or DEFAULT` so a payload written before the field existed
         # (or one that omitted it because it was the default) resolves to
         # `medium`, which renders no prompt block.
-        markup_intensity = (
-            payload.get("markup_intensity") or reviews.DEFAULT_MARKUP_INTENSITY
-        )
+        markup_intensity = payload.get("markup_intensity") or reviews.DEFAULT_MARKUP_INTENSITY
         # Issue #483 (epic #481): the playbook's standing instructions, ALREADY
         # resolved once at submission time (backend/src/reviews.py's
         # _resolve_instructions_lineage, issue #482) and carried verbatim in
@@ -2152,8 +2155,12 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
             # History/console/receipt. Drop it at the same place
             # `status`/`reason` are downgraded, not left for
             # `_write_real_terminal` alone to catch.
-            result = {**result, "status": "ERROR",
-                      "reason": "redline_not_persisted", "decision": None}
+            result = {
+                **result,
+                "status": "ERROR",
+                "reason": "redline_not_persisted",
+                "decision": None,
+            }
             failing_stage = stage
         elif result["status"] != "OK":
             # Issue #616 second finding: every fail-closed condition
@@ -2212,7 +2219,10 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
             client, dynamodb_resource, model_ids, failed=failing_stage is not None
         )
         _write_real_terminal(
-            review_id, result, output_s3_key, dynamodb_resource,
+            review_id,
+            result,
+            output_s3_key,
+            dynamodb_resource,
             analysis_s3_key=analysis_s3_key,
             actual_cost=cost,
             # Issue #514: the row records the request side (`model_ids`) and
@@ -2230,7 +2240,8 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
                 **_served_model_ids_for_result(result),
                 **injection_summary,
             },
-            opf_lineage=opf_lineage, floor_coverage=floor_coverage,
+            opf_lineage=opf_lineage,
+            floor_coverage=floor_coverage,
             # Issue #584: only set on the no-output branch just above -- a
             # genuine DONE/other terminal keeps `failing_stage` absent
             # (never a null placeholder), same convention as every other
@@ -2262,9 +2273,7 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
         # cumulative_usage the client accumulated before the stop landed
         # (issue #415) -- `client` is still `None` if the stop happened
         # before `build_model_client` even ran, which correctly settles at 0.
-        logger.info(
-            "Review %s cancelled by its owner at stage %s; stopping.", review_id, stage
-        )
+        logger.info("Review %s cancelled by its owner at stage %s; stopping.", review_id, stage)
         reviews.mark_cancelled(review_id, dynamodb_resource)
         # A stop is not a failure: the tokens spent before it landed are real
         # and are recorded, but the row is not marked `actual_cost_failed`.
@@ -2299,9 +2308,7 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
         # (`load_playbook`, `fetch_upload`, ...), where `stage` is already
         # the accurate, specific value.
         recorded_stage = (
-            last_progress_stage
-            if stage == "run_review" and last_progress_stage
-            else stage
+            last_progress_stage if stage == "run_review" and last_progress_stage else stage
         )
         logger.exception(
             "In-process real pipeline failed for review %s at stage %s (reason %s)",
@@ -2316,9 +2323,7 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
         # the same provenance a successful row gets via `_write_real_terminal`.
         # What the failed attempt still spent goes in the same update as the
         # ERROR status (0 when no model call was made).
-        failed_cost = _actual_cost_for_client(
-            client, dynamodb_resource, model_ids, failed=True
-        )
+        failed_cost = _actual_cost_for_client(client, dynamodb_resource, model_ids, failed=True)
         reviews.record_stage_failure(
             review_id,
             recorded_stage,

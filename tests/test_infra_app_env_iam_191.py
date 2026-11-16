@@ -106,11 +106,15 @@ def _run_cdk_synth() -> tuple[list[str], Path | None]:
     if not node_modules.is_dir():
         print("  (node_modules absent -- running npm install first …)")
         install = subprocess.run(
-            ["npm", "install"], cwd=INFRA, capture_output=True, text=True,  # noqa: S607
+            ["npm", "install"],  # noqa: S607
+            cwd=INFRA,
+            capture_output=True,
+            text=True,
         )
         if install.returncode != 0:
             return _assert(
-                False, "npm install succeeded in infra/",
+                False,
+                "npm install succeeded in infra/",
                 f"stderr: {install.stderr[-500:]}",
             ), None
 
@@ -131,8 +135,11 @@ def _run_cdk_synth() -> tuple[list[str], Path | None]:
 
     cdk_out = INFRA / "cdk.out"
     app_templates = list(cdk_out.glob("*App*.nested.template.json"))
-    failures += _assert(len(app_templates) == 1, "exactly one App nested template found",
-                         f"found: {[p.name for p in app_templates]}")
+    failures += _assert(
+        len(app_templates) == 1,
+        "exactly one App nested template found",
+        f"found: {[p.name for p in app_templates]}",
+    )
     if failures:
         return failures, None
 
@@ -169,7 +176,9 @@ def _api_task_role_policy(resources: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def _statements_for_resource_substring(statements: list[dict[str, Any]], substring: str) -> list[dict[str, Any]]:
+def _statements_for_resource_substring(
+    statements: list[dict[str, Any]], substring: str
+) -> list[dict[str, Any]]:
     """Return policy statements whose Resource (str or list of str) contains
     a string matching `substring`."""
     matches = []
@@ -213,8 +222,10 @@ REQUIRED_ENV_VARS = {
 
 
 def check_b_runtime_env_vars(service: dict[str, Any]) -> list[str]:
-    print("\nCheck B: App Runner RuntimeEnvironmentVariables carries every "
-          "env var the mounted /api/* routes dereference …")
+    print(
+        "\nCheck B: App Runner RuntimeEnvironmentVariables carries every "
+        "env var the mounted /api/* routes dereference …"
+    )
     failures: list[str] = []
 
     image_config = (
@@ -253,14 +264,18 @@ def check_b_runtime_env_vars(service: dict[str, Any]) -> list[str]:
 
 
 def check_cde_task_role_grants(policy: dict[str, Any]) -> list[str]:
-    print("\nChecks C-E: API task-role IAM policy grants audit/sync_status/"
-          "retention_settings table access …")
+    print(
+        "\nChecks C-E: API task-role IAM policy grants audit/sync_status/"
+        "retention_settings table access …"
+    )
     failures: list[str] = []
 
     statements = policy.get("Properties", {}).get("PolicyDocument", {}).get("Statement", [])
 
     # C: audit table -- PutItem ONLY (append-only posture).
-    audit_statements = _statements_for_resource_substring(statements, "table/contract-toaster-audit-")
+    audit_statements = _statements_for_resource_substring(
+        statements, "table/contract-toaster-audit-"
+    )
     failures += _assert(
         len(audit_statements) >= 1,
         "a policy statement grants access to the audit table",
@@ -277,7 +292,9 @@ def check_cde_task_role_grants(policy: dict[str, Any]) -> list[str]:
         )
 
     # D: sync_status table -- GetItem.
-    sync_status_statements = _statements_for_resource_substring(statements, "table/contract-toaster-sync-status-")
+    sync_status_statements = _statements_for_resource_substring(
+        statements, "table/contract-toaster-sync-status-"
+    )
     failures += _assert(
         len(sync_status_statements) >= 1,
         "a policy statement grants access to the sync_status table",
@@ -351,14 +368,14 @@ UPLOADS_PREFIX_ARN_FRAGMENT = "contract-toaster-uploads-dev/uploads/*"
 
 
 def check_f_uploads_read_grant(policy: dict[str, Any]) -> list[str]:
-    print("\nCheck F: API task-role IAM policy can read the uploads bucket "
-          "(GET /api/reviews/{id}/input, issue #449) …")
+    print(
+        "\nCheck F: API task-role IAM policy can read the uploads bucket "
+        "(GET /api/reviews/{id}/input, issue #449) …"
+    )
     failures: list[str] = []
 
     statements = policy.get("Properties", {}).get("PolicyDocument", {}).get("Statement", [])
-    uploads_statements = _statements_for_resource_substring(
-        statements, UPLOADS_PREFIX_ARN_FRAGMENT
-    )
+    uploads_statements = _statements_for_resource_substring(statements, UPLOADS_PREFIX_ARN_FRAGMENT)
     failures += _assert(
         len(uploads_statements) >= 1,
         "a policy statement targets the uploads bucket's uploads/* prefix",
@@ -389,10 +406,7 @@ def check_f_uploads_read_grant(policy: dict[str, Any]) -> list[str]:
         resource = s.get("Resource")
         resources_list = resource if isinstance(resource, list) else [resource]
         failures += _assert(
-            all(
-                isinstance(r, str) and r.endswith("/uploads/*")
-                for r in resources_list
-            ),
+            all(isinstance(r, str) and r.endswith("/uploads/*") for r in resources_list),
             f"uploads statement {s.get('Sid')!r} stays scoped to the uploads/* prefix",
             f"got resources: {resources_list}",
         )
@@ -409,9 +423,11 @@ PLAYBOOKS_PREFIX_ARN_FRAGMENT = "contract-toaster-uploads-dev/playbooks/*"
 
 
 def check_g_playbook_artifacts_grant(policy: dict[str, Any]) -> list[str]:
-    print("\nCheck G: API task-role IAM policy can read + write the uploads "
-          "bucket's playbooks/* prefix (POST /api/admin/playbooks/{playbook_id}"
-          "/versions, issue #478) …")
+    print(
+        "\nCheck G: API task-role IAM policy can read + write the uploads "
+        "bucket's playbooks/* prefix (POST /api/admin/playbooks/{playbook_id}"
+        "/versions, issue #478) …"
+    )
     failures: list[str] = []
 
     statements = policy.get("Properties", {}).get("PolicyDocument", {}).get("Statement", [])
@@ -445,10 +461,7 @@ def check_g_playbook_artifacts_grant(policy: dict[str, Any]) -> list[str]:
         resource = s.get("Resource")
         resources_list = resource if isinstance(resource, list) else [resource]
         failures += _assert(
-            all(
-                isinstance(r, str) and r.endswith("/playbooks/*")
-                for r in resources_list
-            ),
+            all(isinstance(r, str) and r.endswith("/playbooks/*") for r in resources_list),
             f"playbooks statement {s.get('Sid')!r} stays scoped to the playbooks/* prefix",
             f"got resources: {resources_list}",
         )
@@ -476,8 +489,10 @@ LEGAL_HOLD_TAGGING_ACTIONS = {
 
 
 def check_i_legal_hold_grants(policy: dict[str, Any]) -> list[str]:
-    print("\nCheck I: API task-role IAM policy can list and tag held objects "
-          "(legal hold set/release, W6.5) …")
+    print(
+        "\nCheck I: API task-role IAM policy can list and tag held objects "
+        "(legal hold set/release, W6.5) …"
+    )
     failures: list[str] = []
     statements = policy.get("Properties", {}).get("PolicyDocument", {}).get("Statement", [])
 
@@ -507,8 +522,7 @@ def check_i_legal_hold_grants(policy: dict[str, Any]) -> list[str]:
     for bucket, prefix in (("uploads", "uploads/*"), ("outputs", "outputs/*")):
         arn = f"arn:aws:s3:::contract-toaster-{bucket}-dev"
         listing = [
-            s for s in statements
-            if "s3:ListBucket" in _actions(s) and s.get("Resource") == arn
+            s for s in statements if "s3:ListBucket" in _actions(s) and s.get("Resource") == arn
         ]
         failures += _assert(
             len(listing) == 1,
@@ -545,8 +559,10 @@ def check_i_legal_hold_grants(policy: dict[str, Any]) -> list[str]:
 
 
 def check_h_requote_enabled_is_gone_from_app_runner(service: dict[str, Any]) -> list[str]:
-    print("\nCheck H: App Runner RuntimeEnvironmentVariables no longer carries "
-          "REQUOTE_ENABLED (issue #628 deleted the pass it reserved for) …")
+    print(
+        "\nCheck H: App Runner RuntimeEnvironmentVariables no longer carries "
+        "REQUOTE_ENABLED (issue #628 deleted the pass it reserved for) …"
+    )
     failures: list[str] = []
 
     image_config = (
@@ -590,7 +606,9 @@ def main() -> int:
 
     policy = _api_task_role_policy(resources)
     if policy is None:
-        all_failures += _assert(False, "API task-role AWS::IAM::Policy resource found in App template")
+        all_failures += _assert(
+            False, "API task-role AWS::IAM::Policy resource found in App template"
+        )
     else:
         all_failures += check_cde_task_role_grants(policy)
         all_failures += check_f_uploads_read_grant(policy)

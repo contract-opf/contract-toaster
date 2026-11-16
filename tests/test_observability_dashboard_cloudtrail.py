@@ -66,9 +66,7 @@ def run_cdk_synth() -> None:
 
 def load_observability_template() -> dict:
     """Find and parse the ObservabilityStack nested-stack template."""
-    candidates = sorted(
-        glob.glob(str(CDK_OUT_DIR / "*Observability*.nested.template.json"))
-    )
+    candidates = sorted(glob.glob(str(CDK_OUT_DIR / "*Observability*.nested.template.json")))
     if not candidates:
         raise FileNotFoundError(
             "No Observability nested-stack template found in "
@@ -166,9 +164,7 @@ def check_ac3_alarms(template: dict) -> list[str]:
 
     alarm_blobs = [flatten(a) for a in alarms]
 
-    has_5xx_alarm = any(
-        ("5xx" in b or "5XX" in b or "HTTP5" in b) for b in alarm_blobs
-    )
+    has_5xx_alarm = any(("5xx" in b or "5XX" in b or "HTTP5" in b) for b in alarm_blobs)
     if not has_5xx_alarm:
         failures.append(
             "  AC3 FAIL: no CloudWatch alarm references App Runner 5xx errors.\n"
@@ -228,7 +224,8 @@ def check_ac4_retention_reduction_alarm(template: dict) -> list[str]:
     transform = (props.get("MetricTransformations") or [{}])[0]
     metric_name = transform.get("MetricName")
     alarms = [
-        a for a in resources_of_type(template, "AWS::CloudWatch::Alarm")
+        a
+        for a in resources_of_type(template, "AWS::CloudWatch::Alarm")
         if a["Properties"].get("AlarmName") == "contract-toaster-retention-reduction-dev"
     ]
     if len(alarms) != 1:

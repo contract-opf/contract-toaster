@@ -120,7 +120,11 @@ def normalize(text: str) -> str:
 
 def _tracked_files() -> list[str]:
     out = subprocess.run(
-        ["git", "ls-files"], cwd=REPO_ROOT, capture_output=True, text=True, check=True  # noqa: S607
+        ["git", "ls-files"],  # noqa: S607
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return [line for line in out.stdout.splitlines() if line.strip()]
 
@@ -308,9 +312,7 @@ def main(argv: list[str]) -> int:
     if path is None:
         print(
             f"\n  SKIPPED — no token list found.\n"
-            f"  Looked at: ${TOKEN_ENV}, "
-            + ", ".join(str(c) for c in TOKEN_CANDIDATES)
-            + "\n"
+            f"  Looked at: ${TOKEN_ENV}, " + ", ".join(str(c) for c in TOKEN_CANDIDATES) + "\n"
             "  This is the intended behaviour outside the private overlay: an\n"
             "  outside contributor must be able to run the checks. The private\n"
             "  scheduled scan of the published tree is the backstop.\n"
@@ -331,8 +333,7 @@ def main(argv: list[str]) -> int:
     else:
         surface = public_surface()
         print(
-            f"  Public surface: {len(surface)} tracked files "
-            "(excl. public-cut-exclude.txt paths)\n"
+            f"  Public surface: {len(surface)} tracked files (excl. public-cut-exclude.txt paths)\n"
         )
         findings = scan_surface(tokens, path)
     if findings:

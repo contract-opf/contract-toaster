@@ -503,9 +503,7 @@ _MYPY_FILE_RE = re.compile(r"^(\S+\.py):\d+:", re.MULTILINE)
 
 def _mypy_failing_files(config_text: str, cache_dir: Path) -> tuple[set[str], str]:
     """Run mypy from the repo root with `config_text` as its configuration."""
-    with tempfile.NamedTemporaryFile(
-        "w", suffix=".toml", delete=False, encoding="utf-8"
-    ) as fh:
+    with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False, encoding="utf-8") as fh:
         fh.write(config_text)
         cfg = fh.name
     try:
@@ -561,7 +559,9 @@ def check_mypy_baseline_only_shrinks() -> int:
         return failures
 
     baseline = _baseline_paths()
-    failures += _assert(len(baseline) > 0, "4a. the baseline is non-empty", f"{len(baseline)} paths")
+    failures += _assert(
+        len(baseline) > 0, "4a. the baseline is non-empty", f"{len(baseline)} paths"
+    )
     failures += _assert(
         baseline == sorted(baseline),
         "4b. the baseline is sorted (so a diff to it is readable)",
@@ -613,8 +613,7 @@ def check_mypy_baseline_only_shrinks() -> int:
     now_passing = sorted(set(baseline) - failing)
     failures += _assert(
         not now_passing,
-        "4i. mypy-baseline.txt lists no module mypy now PASSES — delete its line and "
-        "its override",
+        "4i. mypy-baseline.txt lists no module mypy now PASSES — delete its line and its override",
         f"now clean: {now_passing[:8]}",
     )
     return failures
@@ -696,7 +695,13 @@ def check_frontend_lint_script() -> int:
         "typecheck" in scripts,
         "6c. frontend/package.json still declares `typecheck` (lint.yml runs it)",
     )
-    for dep in ("eslint", "typescript-eslint", "eslint-plugin-react-hooks", "eslint-plugin-jsx-a11y", "prettier"):
+    for dep in (
+        "eslint",
+        "typescript-eslint",
+        "eslint-plugin-react-hooks",
+        "eslint-plugin-jsx-a11y",
+        "prettier",
+    ):
         failures += _assert(
             dep in pkg.get("devDependencies", {}),
             f"6d. {dep} is a pinned devDependency",

@@ -123,7 +123,13 @@ function doneDetail(reviewId: string): Record<string, unknown> {
 }
 
 function runningDetail(reviewId: string): Record<string, unknown> {
-  return { review_id: reviewId, status: 'RUNNING', decision: null, message: null, has_output: false };
+  return {
+    review_id: reviewId,
+    status: 'RUNNING',
+    decision: null,
+    message: null,
+    has_output: false,
+  };
 }
 
 function chooseFile(): void {
@@ -179,9 +185,7 @@ describe('W9-1: an answer for review A never lands on review B', () => {
 
     // Butter A, and hold its answer back.
     await butterIt();
-    await waitFor(() =>
-      expect(router.countOf(`POST /api/reviews/${REVIEW_A}/cover-note`)).toBe(1),
-    );
+    await waitFor(() => expect(router.countOf(`POST /api/reviews/${REVIEW_A}/cover-note`)).toBe(1));
 
     // B replaces A on screen while A's draft is still being written.
     resubmit();
@@ -202,9 +206,7 @@ describe('W9-1: an answer for review A never lands on review B', () => {
 
     // And B's own key is live and asks for B's note, not A's.
     await butterIt();
-    await waitFor(() =>
-      expect(router.countOf(`POST /api/reviews/${REVIEW_B}/cover-note`)).toBe(1),
-    );
+    await waitFor(() => expect(router.countOf(`POST /api/reviews/${REVIEW_B}/cover-note`)).toBe(1));
     expect(router.countOf(`POST /api/reviews/${REVIEW_A}/cover-note`)).toBe(1);
     expect((await screen.findByTestId('review-cover-note-text')).textContent).toBe('Draft for B.');
   });
@@ -327,7 +329,7 @@ describe('W9-3: a failure renders fixed copy, never its own text', () => {
     expect(banner.textContent).not.toContain('UPLOADS_BUCKET');
   });
 
-  it('a cover-note answer that is not JSON shows the fixed sentence, not the parser\'s message', async () => {
+  it("a cover-note answer that is not JSON shows the fixed sentence, not the parser's message", async () => {
     allowConsoleErrorsInThisTest(/Unexpected token/);
     stubRoutes({
       'POST /api/reviews': () => json({ review_id: REVIEW_A, resumed: false }),
@@ -389,7 +391,11 @@ describe('W9-4: a reset clears the cancel, disposition and poll channels', () =>
         json(
           call === 1
             ? runningDetail(REVIEW_A)
-            : { ...runningDetail(REVIEW_A), status: 'ERROR', failure_reason: 'unhandled_exception' },
+            : {
+                ...runningDetail(REVIEW_A),
+                status: 'ERROR',
+                failure_reason: 'unhandled_exception',
+              },
         ),
       [`POST /api/reviews/${REVIEW_A}/cancel`]: () => json({}, 500),
     });

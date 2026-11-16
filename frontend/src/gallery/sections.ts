@@ -82,15 +82,11 @@ export function buildChipSection(): HTMLElement {
   }
 
   body.append(
-    exampleGroup(
-      'Variants',
-      row(VARIANTS.map((v) => chip(v, false, v))),
+    exampleGroup('Variants', row(VARIANTS.map((v) => chip(v, false, v)))),
+    exampleGroup('With dot', row(VARIANTS.map((v) => chip(v, true, v)))),
+    codeSnippet(
+      `import { CtChip } from '../ui/react';\n\n<CtChip variant="ok" dot>\n  Active\n</CtChip>`,
     ),
-    exampleGroup(
-      'With dot',
-      row(VARIANTS.map((v) => chip(v, true, v))),
-    ),
-    codeSnippet(`import { CtChip } from '../ui/react';\n\n<CtChip variant="ok" dot>\n  Active\n</CtChip>`),
   );
 
   return section;
@@ -138,10 +134,7 @@ export function buildButtonSection(): HTMLElement {
   ];
 
   body.append(
-    exampleGroup(
-      'Variants (md)',
-      row(variants.map((v) => button({ variant: v, text: v }))),
-    ),
+    exampleGroup('Variants (md)', row(variants.map((v) => button({ variant: v, text: v })))),
     exampleGroup(
       'Sizes',
       row([
@@ -234,11 +227,10 @@ export function buildCardSection(): HTMLElement {
   }
 
   body.append(
-    exampleGroup(
-      'Padding',
-      row([card('none'), card('md'), card('lg')]),
+    exampleGroup('Padding', row([card('none'), card('md'), card('lg')])),
+    codeSnippet(
+      `import { CtCard } from '../ui/react';\n\n<CtCard pad="md">\n  <h3>Retention window</h3>\n  <p>…</p>\n</CtCard>`,
     ),
-    codeSnippet(`import { CtCard } from '../ui/react';\n\n<CtCard pad="md">\n  <h3>Retention window</h3>\n  <p>…</p>\n</CtCard>`),
   );
 
   return section;
@@ -307,11 +299,9 @@ export function buildTabBarSection(): HTMLElement {
   const panels = new Map<string, HTMLElement>();
   const panelsWrap = el('div');
   for (const tab of tabs) {
-    const panel = el(
-      'section',
-      { className: 'gallery-frame' },
-      [el('p', { text: `Panel content for "${tab.label}".` })],
-    );
+    const panel = el('section', { className: 'gallery-frame' }, [
+      el('p', { text: `Panel content for "${tab.label}".` }),
+    ]);
     panel.id = `panel-${tab.id}`;
     panel.setAttribute('role', 'tabpanel');
     panel.setAttribute('aria-labelledby', `tab-${tab.id}`);
@@ -412,7 +402,9 @@ export function buildFieldSection(): HTMLElement {
   function daysField(narrow: boolean): CtField {
     const f = field({
       label: narrow ? 'Days (narrow)' : 'Days (default)',
-      hint: narrow ? 'Marked `narrow` — keeps its own width.' : "Today's default: stretches to fill its container.",
+      hint: narrow
+        ? 'Marked `narrow` — keeps its own width.'
+        : "Today's default: stretches to fill its container.",
       type: 'number',
     });
     if (narrow) {
@@ -455,7 +447,11 @@ export function buildTableSection(): HTMLElement {
   const table = createEl<HTMLElement>('ct-table');
   const realTable = el('table');
   const thead = el('thead', {}, [
-    el('tr', {}, [el('th', { text: 'Email' }), el('th', { text: 'Status' }), el('th', { text: 'Cognito sub' })]),
+    el('tr', {}, [
+      el('th', { text: 'Email' }),
+      el('th', { text: 'Status' }),
+      el('th', { text: 'Cognito sub' }),
+    ]),
   ]);
   const tbody = el('tbody', {}, [
     el('tr', {}, [
@@ -623,8 +619,13 @@ export function buildProgressSection(): HTMLElement {
   captioned.label = 'Reviewing your document…';
 
   body.append(
-    exampleGroup('Bare / with caption', el('div', {}, [bare, el('div', { className: 'gallery-space-row' }), captioned])),
-    codeSnippet(`import { CtProgress } from '../ui/react';\n\n<CtProgress label="Reviewing your document…" />`),
+    exampleGroup(
+      'Bare / with caption',
+      el('div', {}, [bare, el('div', { className: 'gallery-space-row' }), captioned]),
+    ),
+    codeSnippet(
+      `import { CtProgress } from '../ui/react';\n\n<CtProgress label="Reviewing your document…" />`,
+    ),
   );
 
   return section;
@@ -649,7 +650,10 @@ export function buildColumnsSection(): HTMLElement {
   const basic = createEl<CtColumns>('ct-columns');
   basic.append(
     labeledCard('Column A', 'Two related panels, side by side at desktop width.'),
-    labeledCard('Column B', 'Resize the window below 640px (or shrink this frame) to see it collapse to one column.'),
+    labeledCard(
+      'Column B',
+      'Resize the window below 640px (or shrink this frame) to see it collapse to one column.',
+    ),
   );
 
   // The exact scenario the ticket names: a retention-window day count
@@ -681,7 +685,10 @@ export function buildColumnsSection(): HTMLElement {
   );
 
   body.append(
-    exampleGroup('Two columns (resize below 640px to see it collapse)', el('div', { className: 'gallery-frame' }, [basic])),
+    exampleGroup(
+      'Two columns (resize below 640px to see it collapse)',
+      el('div', { className: 'gallery-frame' }, [basic]),
+    ),
     exampleGroup(
       "Paired with ct-field's `narrow` prop — the retention-window scenario this ticket names",
       el('div', { className: 'gallery-frame' }, [fieldPair]),
@@ -700,7 +707,10 @@ export function buildColumnsSection(): HTMLElement {
 function swatch(varName: string, label?: string): HTMLElement {
   const fill = el('div', { className: 'gallery-swatch__fill' });
   fill.style.background = `var(${varName})`;
-  return el('div', { className: 'gallery-swatch' }, [fill, el('div', { className: 'gallery-swatch__label', text: label ?? varName })]);
+  return el('div', { className: 'gallery-swatch' }, [
+    fill,
+    el('div', { className: 'gallery-swatch__label', text: label ?? varName }),
+  ]);
 }
 
 export function buildTokensSection(): HTMLElement {
@@ -736,9 +746,30 @@ export function buildTokensSection(): HTMLElement {
   ];
 
   const colorSection = el('div', {}, [
-    exampleGroup('Brand ramp', el('div', { className: 'gallery-swatch-grid' }, brandTokens.map((t) => swatch(t)))),
-    exampleGroup('Status pairs', el('div', { className: 'gallery-swatch-grid' }, statusTokens.map((t) => swatch(t)))),
-    exampleGroup('Surfaces & text', el('div', { className: 'gallery-swatch-grid' }, surfaceTokens.map((t) => swatch(t)))),
+    exampleGroup(
+      'Brand ramp',
+      el(
+        'div',
+        { className: 'gallery-swatch-grid' },
+        brandTokens.map((t) => swatch(t)),
+      ),
+    ),
+    exampleGroup(
+      'Status pairs',
+      el(
+        'div',
+        { className: 'gallery-swatch-grid' },
+        statusTokens.map((t) => swatch(t)),
+      ),
+    ),
+    exampleGroup(
+      'Surfaces & text',
+      el(
+        'div',
+        { className: 'gallery-swatch-grid' },
+        surfaceTokens.map((t) => swatch(t)),
+      ),
+    ),
   ]);
 
   const spaceSteps = [1, 2, 3, 4, 5, 6, 7, 8];
@@ -787,9 +818,24 @@ export function buildTokensSection(): HTMLElement {
   );
 
   const typeSpecimens: Array<{ font: string; label: string; sample: string; size: string }> = [
-    { font: '--ct-font-display', label: 'Display — Space Grotesk', sample: 'Contract Toaster', size: '--ct-text-2xl' },
-    { font: '--ct-font-sans', label: 'Sans — Instrument Sans', sample: 'Redline saved to your downloads.', size: '--ct-text-md' },
-    { font: '--ct-font-mono', label: 'Mono — IBM Plex Mono', sample: 'rev_8f2a1c9d', size: '--ct-text-sm' },
+    {
+      font: '--ct-font-display',
+      label: 'Display — Space Grotesk',
+      sample: 'Contract Toaster',
+      size: '--ct-text-2xl',
+    },
+    {
+      font: '--ct-font-sans',
+      label: 'Sans — Instrument Sans',
+      sample: 'Redline saved to your downloads.',
+      size: '--ct-text-md',
+    },
+    {
+      font: '--ct-font-mono',
+      label: 'Mono — IBM Plex Mono',
+      sample: 'rev_8f2a1c9d',
+      size: '--ct-text-sm',
+    },
   ];
   const typeSection = exampleGroup(
     'Typography',
@@ -802,7 +848,10 @@ export function buildTokensSection(): HTMLElement {
         sample.style.fontSize = `var(${spec.size})`;
         sample.style.margin = '0';
         return el('div', { className: 'gallery-type-specimen' }, [
-          el('p', { className: 'gallery-type-specimen__meta', text: `${spec.label} — ${spec.font} @ ${spec.size}` }),
+          el('p', {
+            className: 'gallery-type-specimen__meta',
+            text: `${spec.label} — ${spec.font} @ ${spec.size}`,
+          }),
           sample,
         ]);
       }),
@@ -822,7 +871,14 @@ export function buildTokensSection(): HTMLElement {
     ]),
   );
 
-  body.append(colorSection, spacingSection, radiusSection, shadowSection, typeSection, motionSection);
+  body.append(
+    colorSection,
+    spacingSection,
+    radiusSection,
+    shadowSection,
+    typeSection,
+    motionSection,
+  );
 
   return section;
 }

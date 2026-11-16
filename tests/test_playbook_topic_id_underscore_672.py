@@ -124,7 +124,9 @@ OUTPUT_SCHEMA_PATHS = {
 OPF_SCHEMA_PATHS = {
     opf_load.OPF_VERSION: opf_load.OPF_SCHEMA_PATH,
 }
-GOLD_OPF_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.6-real-shape.opf.json"
+GOLD_OPF_PATH = (
+    REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.6-real-shape.opf.json"
+)
 
 PRIMARY_MODEL_ID = "anthropic.claude-opus-4-8"
 
@@ -247,8 +249,13 @@ def _minimal_digest_clause(template: dict[str, Any], topic_id: str) -> dict[str,
     for key in ("signed_variants", "refused_asks", "changed_openings"):
         clause[key] = []
     for key in (
-        "n_deals", "n_signed_standard", "n_opened_standard", "n_kept_standard",
-        "n_variants_total", "n_refused_total", "n_changed_openings_total",
+        "n_deals",
+        "n_signed_standard",
+        "n_opened_standard",
+        "n_kept_standard",
+        "n_variants_total",
+        "n_refused_total",
+        "n_changed_openings_total",
     ):
         clause[key] = 0
     clause["positions"] = dict.fromkeys(clause["positions"], 0)
@@ -374,8 +381,7 @@ def _response_citing(topic_ids: list[str]) -> str:
                 "section_ref": str(index),
                 "section_title": topic_id.replace("_", " ").title(),
                 "counterparty_change_summary": (
-                    f"The counterparty's draft departs from the standard position on "
-                    f"{topic_id}."
+                    f"The counterparty's draft departs from the standard position on {topic_id}."
                 ),
                 "decision": "REQUEST_CHANGE",
                 "external_rationale_for_footnote": (
@@ -476,8 +482,7 @@ def test_the_ids_issue_672_names_validate(failures: list[str]) -> None:
         ok, detail = pp.validate_model_response(_response_citing([topic_id]))
         if not ok:
             failures.append(
-                f"[2b] validate_model_response rejects a response citing "
-                f"{topic_id!r}: {detail!r}"
+                f"[2b] validate_model_response rejects a response citing {topic_id!r}: {detail!r}"
             )
 
 
@@ -515,9 +520,7 @@ def test_the_field_is_still_not_any_string(failures: list[str]) -> None:
 
     ok, _detail = pp.validate_model_response(_response_citing(["clause ferpa; DROP TABLE issues"]))
     if ok:
-        failures.append(
-            "[3b] validate_model_response accepted a free-text playbook_topic_id."
-        )
+        failures.append("[3b] validate_model_response accepted a free-text playbook_topic_id.")
 
 
 # ---------------------------------------------------------------------------
@@ -592,7 +595,7 @@ def test_a_review_citing_underscore_topic_ids_reaches_a_decision(failures: list[
     ]
     prompt_text = "\n".join(block["text"] for block in system_blocks)
     for topic_id in cited:
-        bare = topic_id[len("clause."):] if topic_id.startswith("clause.") else topic_id
+        bare = topic_id[len("clause.") :] if topic_id.startswith("clause.") else topic_id
         if bare not in REPRESENTATIVE_TOPIC_IDS:
             failures.append(f"[5z] {topic_id!r} is not in this playbook's vocabulary.")
             return
@@ -641,7 +644,9 @@ def test_a_review_citing_underscore_topic_ids_reaches_a_decision(failures: list[
             f"[5c] expected the model's REQUEST_CHANGE decision to survive; got "
             f"{(result.get('response') or {}).get('decision')!r}"
         )
-    returned = [issue.get("playbook_topic_id") for issue in (result.get("response") or {}).get("issues", [])]
+    returned = [
+        issue.get("playbook_topic_id") for issue in (result.get("response") or {}).get("issues", [])
+    ]
     if returned != cited:
         failures.append(f"[5d] expected the cited topic ids {cited!r} to survive; got {returned!r}")
 

@@ -139,8 +139,7 @@ def _expect_proven(
 ) -> dict[str, Any] | None:
     if result["status"] != "proven":
         failures.append(
-            f"[{label}] expected status 'proven', got {result['status']!r} "
-            f"({result['failures']!r})"
+            f"[{label}] expected status 'proven', got {result['status']!r} ({result['failures']!r})"
         )
         return None
     return result
@@ -169,7 +168,7 @@ def _check_offsets_index_real_text(
             if source[op["start"] : op["end"]] != op["text"]:
                 failures.append(
                     f"[{label}] {op['op']} offsets {op['start']}..{op['end']} name "
-                    f"{source[op['start']:op['end']]!r}, but the op carries {op['text']!r}"
+                    f"{source[op['start'] : op['end']]!r}, but the op carries {op['text']!r}"
                 )
             cursor = op["end"]
         if cursor != len(source):
@@ -207,7 +206,7 @@ def test_byte_exact_transcript_proves_with_true_offsets(failures: list[str]) -> 
     if PLAIN_BLOCK[deletion["start"] : deletion["end"]] != "sixty (60)":
         failures.append(
             f"[byte_exact] the delete span names "
-            f"{PLAIN_BLOCK[deletion['start']:deletion['end']]!r}, not 'sixty (60)'"
+            f"{PLAIN_BLOCK[deletion['start'] : deletion['end']]!r}, not 'sixty (60)'"
         )
     expected_final = "The Term shall be thirty (30) days from the Effective Date."
     if block["final_text"] != expected_final:
@@ -250,7 +249,7 @@ def test_straightened_punctuation_and_collapsed_whitespace_realign(
         [
             _patch(
                 "b0002",
-                _keep("Each party's obligations -- including the \"Confidentiality\" covenant"),
+                _keep('Each party\'s obligations -- including the "Confidentiality" covenant'),
                 _delete(" -- survive for sixty (60) days.", "CONF-1"),
                 _insert(" survive indefinitely.", "CONF-1"),
             )
@@ -260,9 +259,7 @@ def test_straightened_punctuation_and_collapsed_whitespace_realign(
     )
     # An em dash folds to ONE hyphen, so the model's "--" is a real
     # divergence, not noise: prove the guard notices before fixing it.
-    mismatch = _expect_rejected(
-        failures, "double_hyphen", result, bt.REASON_SOURCE_MISMATCH
-    )
+    mismatch = _expect_rejected(failures, "double_hyphen", result, bt.REASON_SOURCE_MISMATCH)
     if mismatch is not None and "block_context" not in mismatch:
         failures.append("[double_hyphen] source_mismatch carries no block_context")
 
@@ -270,7 +267,7 @@ def test_straightened_punctuation_and_collapsed_whitespace_realign(
         [
             _patch(
                 "b0002",
-                _keep("Each party's obligations - including the \"Confidentiality\" covenant"),
+                _keep('Each party\'s obligations - including the "Confidentiality" covenant'),
                 _delete(" - survive for sixty (60) days.", "CONF-1"),
                 _insert(" survive indefinitely.", "CONF-1"),
             )
@@ -586,9 +583,7 @@ def test_whole_block_ops_validate_against_the_map(failures: list[str]) -> None:
         [{"op": "delete_block", "block_id": "b0007", "issue_key": "IP-2"}],
         block_map,
     )
-    _expect_rejected(
-        failures, "block_ops_conflict", contradiction, bt.REASON_CONFLICTING_BLOCK_OP
-    )
+    _expect_rejected(failures, "block_ops_conflict", contradiction, bt.REASON_CONFLICTING_BLOCK_OP)
 
     malformed = bt.validate_block_patches(
         [],

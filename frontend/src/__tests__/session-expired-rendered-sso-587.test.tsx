@@ -144,8 +144,12 @@ function stubFetchWithExpiry(): {
     // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const pathname = new URL(String(input), 'http://localhost').pathname;
     if (expired) {
-      // eslint-disable-next-line @typescript-eslint/require-await
-      return { ok: false, status: 401, json: async () => ({ detail: 'Not authenticated.' }) } as Response;
+      return {
+        ok: false,
+        status: 401,
+        // eslint-disable-next-line @typescript-eslint/require-await
+        json: async () => ({ detail: 'Not authenticated.' }),
+      } as Response;
     }
     const body = routes[pathname];
     if (body === undefined) {

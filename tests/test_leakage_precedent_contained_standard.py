@@ -76,7 +76,9 @@ def _corpus(doc: dict[str, Any]) -> leakage_scan.ConfidentialCorpus:
     return leakage_scan.ConfidentialCorpus.from_opf_document(doc, overrides=None)
 
 
-def _scan(doc: dict[str, Any], text: str, field: str, *, replacement: bool = False) -> leakage_scan.ScanResult:
+def _scan(
+    doc: dict[str, Any], text: str, field: str, *, replacement: bool = False
+) -> leakage_scan.ScanResult:
     return leakage_scan.LeakageScanner(_corpus(doc)).scan(
         text,
         field_name=field,
@@ -88,7 +90,13 @@ def _scan(doc: dict[str, Any], text: str, field: str, *, replacement: bool = Fal
 def _replace_everywhere(node: Any, old: str, new: str) -> None:
     """Rewrite every string equal to *old* in the document, the way the
     producer repeats one passage in every record derived from it."""
-    items = node.items() if isinstance(node, dict) else enumerate(node) if isinstance(node, list) else ()
+    items = (
+        node.items()
+        if isinstance(node, dict)
+        else enumerate(node)
+        if isinstance(node, list)
+        else ()
+    )
     for key, value in list(items):
         if value == old:
             node[key] = new
@@ -235,7 +243,9 @@ def test_b_each_source_alone_is_exempt_when_contained_in_todays_standard() -> No
         _assert_standard_passes(doc)
         # The same record holding text that is not contained is held, so the
         # exemption is what freed the contained one.
-        _assert_held(_with_text(source, _NOT_CONTAINED), _NOT_CONTAINED, span=source not in _GRAM_ONLY)
+        _assert_held(
+            _with_text(source, _NOT_CONTAINED), _NOT_CONTAINED, span=source not in _GRAM_ONLY
+        )
 
 
 # --- (c) ---------------------------------------------------------------------
@@ -255,7 +265,9 @@ def test_d_a_superstring_of_todays_standard_is_still_a_gram_and_a_span() -> None
     for source in sorted(_SOURCES):
         doc = _vector_012()
         _, whole = _today(doc)
-        superstring = f"{whole}\n\nThe assigning party shall give the other party thirty days' notice."
+        superstring = (
+            f"{whole}\n\nThe assigning party shall give the other party thirty days' notice."
+        )
         _SOURCES[source](doc, superstring)
         _assert_held(doc, superstring, span=source not in _GRAM_ONLY)
         # One way only: today's own wording, inside the held text, stays ours.
@@ -264,7 +276,12 @@ def test_d_a_superstring_of_todays_standard_is_still_a_gram_and_a_span() -> None
 
 def test_the_helper_exempts_by_normalised_containment_one_way_only() -> None:
     keys = {leakage_scan._normalize("Alpha beta gamma delta.")}
-    texts = ["ALPHA  beta", "Alpha beta gamma delta.", "Alpha beta gamma delta. Epsilon.", "beta zeta"]
+    texts = [
+        "ALPHA  beta",
+        "Alpha beta gamma delta.",
+        "Alpha beta gamma delta. Epsilon.",
+        "beta zeta",
+    ]
     assert leakage_scan._without_contained_standard(texts, keys) == texts[2:]
 
 
@@ -287,7 +304,11 @@ def main() -> int:
             failed += 1
             print(f"FAIL {test.__name__}: {exc}")
     print()
-    print("All precedent-contained-standard checks passed." if not failed else f"{failed} check(s) FAILED.")
+    print(
+        "All precedent-contained-standard checks passed."
+        if not failed
+        else f"{failed} check(s) FAILED."
+    )
     return 1 if failed else 0
 
 

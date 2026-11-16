@@ -198,9 +198,7 @@ class CachingOpenRouterTransport:
         """`([(prefix_key, prefix_tokens), ...] for each breakpoint, total_tokens)`."""
         digest = hashlib.sha256()
         digest.update(str(payload.get("model")).encode("utf-8"))
-        tools_text = json.dumps(
-            [payload.get("tools"), payload.get("tool_choice")], sort_keys=True
-        )
+        tools_text = json.dumps([payload.get("tools"), payload.get("tool_choice")], sort_keys=True)
         digest.update(tools_text.encode("utf-8"))
         tokens = _tokens(tools_text) if payload.get("tools") else 0
         breakpoints: list[tuple[str, int]] = []
@@ -471,8 +469,20 @@ class TestDigestCachedAcrossReviews(_EnvTestCase):
         transport = CachingOpenRouterTransport(_accept_answer)
         bundle = _opf_bundle()
         reviews = (
-            ("rev-148-a", "Each party shall indemnify the other.", GUIDANCE_A, INSTRUCTIONS_A, "heavy"),
-            ("rev-148-b", "Neither party shall indemnify anyone.", GUIDANCE_B, INSTRUCTIONS_B, "light"),
+            (
+                "rev-148-a",
+                "Each party shall indemnify the other.",
+                GUIDANCE_A,
+                INSTRUCTIONS_A,
+                "heavy",
+            ),
+            (
+                "rev-148-b",
+                "Neither party shall indemnify anyone.",
+                GUIDANCE_B,
+                INSTRUCTIONS_B,
+                "light",
+            ),
         )
         ledger: dict[str, list[mc.ModelInvocationRecord]] = {}
         for review_id, clause, guidance, instructions, intensity in reviews:
@@ -523,7 +533,10 @@ class TestDigestCachedAcrossReviews(_EnvTestCase):
         # document token sum is not enough: the system breakpoint alone
         # (instructions + schema + digest) already exceeds it, so a critic
         # that missed the contract cache would still pass that bound.
-        for review_id, primary_request in (("rev-148-a", first_primary), ("rev-148-b", second_primary)):
+        for review_id, primary_request in (
+            ("rev-148-a", first_primary),
+            ("rev-148-b", second_primary),
+        ):
             primary_breakpoints, _total = transport.prefix_breakpoints(primary_request)
             self.assertEqual(len(primary_breakpoints), 2, review_id)
             system_prefix = primary_breakpoints[0][1]
@@ -542,7 +555,12 @@ class TestDigestCachedAcrossReviews(_EnvTestCase):
 def _payload(system: Any, user: Any) -> dict[str, Any]:
     return {
         "model": "anthropic/claude-opus-5",
-        "tools": [{"type": "function", "function": {"name": "submit_review", "parameters": {"type": "object"}}}],
+        "tools": [
+            {
+                "type": "function",
+                "function": {"name": "submit_review", "parameters": {"type": "object"}},
+            }
+        ],
         "tool_choice": {"type": "function", "function": {"name": "submit_review"}},
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
     }
@@ -551,7 +569,9 @@ def _payload(system: Any, user: Any) -> dict[str, Any]:
 class TestTheFakeProviderCache(unittest.TestCase):
     BIG = "x" * (MIN_CACHEABLE_TOKENS * 4 + 400)
 
-    def _send(self, transport: CachingOpenRouterTransport, payload: dict[str, Any]) -> dict[str, Any]:
+    def _send(
+        self, transport: CachingOpenRouterTransport, payload: dict[str, Any]
+    ) -> dict[str, Any]:
         response = transport.post("https://openrouter.test/chat/completions", json=payload)
         return {"status": response.status_code, **response.json()}
 

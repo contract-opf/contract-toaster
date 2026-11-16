@@ -185,7 +185,8 @@ class AwsImageCarriesRuntimeScripts(unittest.TestCase):
 
     def test_no_whole_directory_copy(self) -> None:
         self.assertNotIn(
-            "*", self.copied,
+            "*",
+            self.copied,
             "backend/Dockerfile copies the whole scripts/ tree; list the "
             "runtime modules instead so no tool or eval script ships",
         )
@@ -193,7 +194,8 @@ class AwsImageCarriesRuntimeScripts(unittest.TestCase):
     def test_every_runtime_import_is_copied(self) -> None:
         missing = sorted(self.closure - self.copied)
         self.assertEqual(
-            missing, [],
+            missing,
+            [],
             "backend/src imports these scripts/ modules (directly or "
             "transitively) but backend/Dockerfile does not COPY them, so the "
             f"App Runner image cannot import them: {missing}",
@@ -202,7 +204,8 @@ class AwsImageCarriesRuntimeScripts(unittest.TestCase):
     def test_nothing_outside_the_closure_is_copied(self) -> None:
         extra = sorted(self.copied - self.closure - {"*"})
         self.assertEqual(
-            extra, [],
+            extra,
+            [],
             "backend/Dockerfile COPYs scripts/ modules the backend never "
             f"imports; drop them from the image: {extra}",
         )
@@ -210,14 +213,16 @@ class AwsImageCarriesRuntimeScripts(unittest.TestCase):
     def test_layout_keeps_parents_2_pointing_at_the_repo_root(self) -> None:
         copies = [args for kw, args in _instructions(self.text) if kw == "COPY"]
         self.assertIn(
-            ["backend/src", "backend/src"], copies,
+            ["backend/src", "backend/src"],
+            copies,
             "backend/src must land at <WORKDIR>/backend/src so parents[2] of "
             "each module is the directory holding scripts/",
         )
         workdirs = [args[0] for kw, args in _instructions(self.text) if kw == "WORKDIR"]
         self.assertEqual(workdirs[0], "/app", "the repo tree is mirrored under /app")
         self.assertEqual(
-            workdirs[-1], "/app/backend",
+            workdirs[-1],
+            "/app/backend",
             "uvicorn must start from /app/backend so `src.main:app` resolves",
         )
 
@@ -236,7 +241,8 @@ class AwsImageCarriesRuntimeScripts(unittest.TestCase):
         reads = repo_root_data_reads(self.closure)
         undecided = sorted(reads - set(RUNTIME_DATA_DIRS) - set(NOT_SHIPPED))
         self.assertEqual(
-            undecided, [],
+            undecided,
+            [],
             "runtime code reads these repo-root directories, which "
             "backend/Dockerfile neither COPYs nor records as deliberately "
             f"absent: {undecided}",

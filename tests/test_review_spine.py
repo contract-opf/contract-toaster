@@ -137,7 +137,9 @@ _DOC_NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main
 
 
 def _heading_p(text: str, level: int = 1) -> str:
-    return f'<w:p><w:pPr><w:pStyle w:val="Heading{level}"/></w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>'
+    return (
+        f'<w:p><w:pPr><w:pStyle w:val="Heading{level}"/></w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>'
+    )
 
 
 def _body_p(text: str) -> str:
@@ -251,13 +253,11 @@ _SEC8_ISSUE = {
     "section_ref": "sec-8",
     "section_title": "Limitation on Liability",
     "counterparty_change_summary": (
-        "Counterparty removed the liability cap and "
-        "consequential-damages exclusion from Section 8."
+        "Counterparty removed the liability cap and consequential-damages exclusion from Section 8."
     ),
     "decision": "REQUEST_CHANGE",
     "external_rationale_for_footnote": (
-        "Section 8 must retain the standard aggregate "
-        "liability cap and mutual damages exclusions."
+        "Section 8 must retain the standard aggregate liability cap and mutual damages exclusions."
     ),
     "playbook_topic_id": "limitation-of-liability",
     "internal_precedent_citation": None,
@@ -357,9 +357,7 @@ def _primary_accept_response() -> str:
             "block_patches": [],
             "block_ops": [],
             "critic_delta": None,
-            "verdict_summary": (
-                "No changes identified relative to your standard positions."
-            ),
+            "verdict_summary": ("No changes identified relative to your standard positions."),
         }
     )
 
@@ -453,9 +451,7 @@ def _critic_accept_response() -> str:
             "block_ops": [],
             "critic_delta": None,
             # Issue #138: the critic's summary is the final one.
-            "verdict_summary": (
-                "No changes identified relative to your standard positions."
-            ),
+            "verdict_summary": ("No changes identified relative to your standard positions."),
         }
     )
 

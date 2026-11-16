@@ -101,13 +101,14 @@ def _self_test_scanner_catches_each_violation_class() -> None:
         raise AssertionError("self-test failed: flagged the allowed placeholder account ID")
     exos_lines = [line for lineno, kind, line in violations if kind == "Exos"]
     if not any("Word add-in" in line for line in exos_lines):
-        raise AssertionError("self-test failed: did not flag prose 'Exos' outside a NOTICE/trademark line")
+        raise AssertionError(
+            "self-test failed: did not flag prose 'Exos' outside a NOTICE/trademark line"
+        )
     if any("trademark" in line for line in exos_lines):
         raise AssertionError("self-test failed: flagged 'Exos' on a trademark-carveout line")
     if any("no-exos-indemnity" in line for line in exos_lines):
         raise AssertionError(
-            "self-test failed: false-positived on the no-exos-indemnity "
-            "lowercase code identifier"
+            "self-test failed: false-positived on the no-exos-indemnity lowercase code identifier"
         )
 
     clean = (
@@ -145,7 +146,9 @@ def main() -> int:
     except AssertionError as exc:
         print(f"FAIL (lint self-test): {exc}", file=sys.stderr)
         return 1
-    print("Self-test OK: scanner catches teamexos/account-id/Exos violations, skips code identifiers.")
+    print(
+        "Self-test OK: scanner catches teamexos/account-id/Exos violations, skips code identifiers."
+    )
 
     failures = scan_repo(REPO_ROOT, TARGET_FILES)
 

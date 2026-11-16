@@ -76,10 +76,12 @@ def _synthetic_paragraphs(playbook: dict, n: int = 3) -> list[dict]:
         topic_id = topic.get("id")
         if not section_ref or not topic_id:
             continue
-        paragraphs.append({
-            "heading": section_ref,
-            "text": f"Synthetic executed clause text for {topic_id}.",
-        })
+        paragraphs.append(
+            {
+                "heading": section_ref,
+                "text": f"Synthetic executed clause text for {topic_id}.",
+            }
+        )
     return paragraphs
 
 
@@ -94,8 +96,7 @@ class TestPostCorpusEndpointMounted(unittest.TestCase):
         )
         self.assertTrue(
             registered,
-            "POST /api/corpus is not registered as a route in "
-            "backend/src/main.py (issue #197).",
+            "POST /api/corpus is not registered as a route in backend/src/main.py (issue #197).",
         )
 
 
@@ -115,9 +116,7 @@ class TestPostCorpusEndpoint(unittest.TestCase):
         _put_user(self.users_table, NON_ADMIN_SUB, is_admin=False)
 
         self.client = TestClient(backend_main.app)
-        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = (
-            lambda: self.ddb
-        )
+        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = lambda: self.ddb
         self.playbook = corpus_module._load_playbook()
         self.paragraphs = _synthetic_paragraphs(self.playbook)
         self.assertTrue(self.paragraphs, "fixture must produce at least one paragraph")
@@ -127,9 +126,11 @@ class TestPostCorpusEndpoint(unittest.TestCase):
         self._mock_aws.stop()
 
     def _authenticate_as(self, sub: str) -> None:
-        backend_main.app.dependency_overrides[backend_main.get_current_user] = (
-            lambda: {"sub": sub, "email": f"{sub}@example.com", "token_use": "access"}
-        )
+        backend_main.app.dependency_overrides[backend_main.get_current_user] = lambda: {
+            "sub": sub,
+            "email": f"{sub}@example.com",
+            "token_use": "access",
+        }
 
     def _ingestion_body(self, **overrides) -> dict:
         body = {

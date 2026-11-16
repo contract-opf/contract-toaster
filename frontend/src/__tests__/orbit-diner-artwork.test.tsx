@@ -354,9 +354,7 @@ describe('issue #738 (N4) — the plain layout is the waiting room, and it works
 
     fireEvent.change(screen.getByTestId('review-playbook-dial'), { target: { value: 'msa' } });
     fireEvent.click(screen.getByTestId('review-browning-option-dark'));
-    await waitFor(() =>
-      expect(screen.getByTestId('review-browning-option-dark')).toBeChecked(),
-    );
+    await waitFor(() => expect(screen.getByTestId('review-browning-option-dark')).toBeChecked());
     // Still plain: nothing has decoded.
     expect(isPlain()).toBe(true);
   });

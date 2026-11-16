@@ -149,7 +149,9 @@ describe('CtField', () => {
         <input data-testid="ctl" type="number" />
       </CtField>,
     );
-    const host = document.querySelector('ct-field') as HTMLElement & { updateComplete: Promise<unknown> };
+    const host = document.querySelector('ct-field') as HTMLElement & {
+      updateComplete: Promise<unknown>;
+    };
     await host.updateComplete;
     expect(host).not.toHaveAttribute('narrow');
 

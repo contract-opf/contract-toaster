@@ -62,7 +62,9 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from detector_common import check_on_insert_rule_fires  # noqa: E402, I001
-from detector_common import check_on_remove_or_alter_rule_fires as _check_on_remove_or_alter_rule_fires  # noqa: E402
+from detector_common import (  # noqa: E402
+    check_on_remove_or_alter_rule_fires as _check_on_remove_or_alter_rule_fires,
+)
 import generate_gold_fixtures  # noqa: E402
 import playbook_registry  # noqa: E402
 
@@ -127,7 +129,9 @@ def run_fixture_tests(playbook: dict) -> int:
         expected_result = detector_expectation.get("expected_result")
         rule_id = detector_expectation.get("rule_id")
         topic_id = planted_variation.get("topic_id", "")
-        hunk_for_report = planted_variation.get("inserted_hunk") or planted_variation.get("altered_hunk", "")
+        hunk_for_report = planted_variation.get("inserted_hunk") or planted_variation.get(
+            "altered_hunk", ""
+        )
         fp_tolerance = fixture.get("fp_tolerance", 0)
 
         # Evaluate every hard_rejection rule against this fixture's hunk --
@@ -148,33 +152,39 @@ def run_fixture_tests(playbook: dict) -> int:
             # Assert zero (within fp_tolerance) fires across every rule admitted
             # by this fixture's topic_id (see applies_to_topics guard above).
             if fired_rule_ids and len(fired_rule_ids) > fp_tolerance:
-                failures.append({
-                    "case_id": case_id,
-                    "rule_id": rule_id,
-                    "expected": "no_fire",
-                    "actual": f"FIRED on {fired_rule_ids}",
-                    "hunk": hunk_for_report[:120],
-                })
+                failures.append(
+                    {
+                        "case_id": case_id,
+                        "rule_id": rule_id,
+                        "expected": "no_fire",
+                        "actual": f"FIRED on {fired_rule_ids}",
+                        "hunk": hunk_for_report[:120],
+                    }
+                )
             else:
                 print(f"  PASS (no_fire): {case_id} / rule={rule_id}")
         elif expected_result == "fire":
             # Assert the named rule fires, and no other rule fires beyond fp_tolerance.
             if rule_id not in fired_rule_ids:
-                failures.append({
-                    "case_id": case_id,
-                    "rule_id": rule_id,
-                    "expected": "fire",
-                    "actual": "did not fire",
-                    "hunk": hunk_for_report[:120],
-                })
+                failures.append(
+                    {
+                        "case_id": case_id,
+                        "rule_id": rule_id,
+                        "expected": "fire",
+                        "actual": "did not fire",
+                        "hunk": hunk_for_report[:120],
+                    }
+                )
             elif len(other_rule_ids) > fp_tolerance:
-                failures.append({
-                    "case_id": case_id,
-                    "rule_id": rule_id,
-                    "expected": f"fire (and only it, within fp_tolerance={fp_tolerance})",
-                    "actual": f"also FIRED on {other_rule_ids}",
-                    "hunk": hunk_for_report[:120],
-                })
+                failures.append(
+                    {
+                        "case_id": case_id,
+                        "rule_id": rule_id,
+                        "expected": f"fire (and only it, within fp_tolerance={fp_tolerance})",
+                        "actual": f"also FIRED on {other_rule_ids}",
+                        "hunk": hunk_for_report[:120],
+                    }
+                )
             else:
                 print(f"  PASS (fire): {case_id} / rule={rule_id}")
         else:
@@ -184,13 +194,15 @@ def run_fixture_tests(playbook: dict) -> int:
             # "fire" arm above and is silently never checked, while the
             # gate still exits 0. See tests/detector/test_match_mode_and_
             # semantics_220.py's equivalent guard for the same failure mode.
-            failures.append({
-                "case_id": case_id,
-                "rule_id": rule_id,
-                "expected": "'no_fire' or 'fire'",
-                "actual": f"unrecognized detector_expectation.expected_result: {expected_result!r}",
-                "hunk": hunk_for_report[:120],
-            })
+            failures.append(
+                {
+                    "case_id": case_id,
+                    "rule_id": rule_id,
+                    "expected": "'no_fire' or 'fire'",
+                    "actual": f"unrecognized detector_expectation.expected_result: {expected_result!r}",
+                    "hunk": hunk_for_report[:120],
+                }
+            )
 
     if failures:
         print("\nFAIL: gold fixture detector expectations not met:\n")

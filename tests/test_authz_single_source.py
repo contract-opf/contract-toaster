@@ -76,6 +76,7 @@ AUTHZ_MODULE = "authz.py"
 # Check 1 -- the AST single-source rule
 # ---------------------------------------------------------------------------
 
+
 def test_no_module_outside_authz_defines_the_admin_predicate() -> None:
     """Every `backend/src` module is parsed; only `authz.py` may `def` one of
     FORBIDDEN_DEFS. `ast.walk` is used rather than a scan of `tree.body` so a
@@ -101,9 +102,7 @@ def test_no_module_outside_authz_defines_the_admin_predicate() -> None:
                 continue
             if path.name == AUTHZ_MODULE:
                 continue
-            offenders.append(
-                f"{path.relative_to(REPO_ROOT)}:{node.lineno} defines {node.name!r}"
-            )
+            offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno} defines {node.name!r}")
 
     assert not offenders, (
         "the admin predicate must live only in backend/src/authz.py "
@@ -127,6 +126,7 @@ def test_authz_module_actually_defines_both_functions() -> None:
 # ---------------------------------------------------------------------------
 # Check 2 -- the truth table
 # ---------------------------------------------------------------------------
+
 
 def test_is_admin_is_true_only_for_the_boolean_true() -> None:
     assert authz.is_admin({"cognito_sub": "s", "is_admin": True}) is True
@@ -153,6 +153,7 @@ def test_is_admin_ignores_a_forged_token_style_claim() -> None:
 # ---------------------------------------------------------------------------
 # Check 3 -- require_admin's 403, and the modules that now share it
 # ---------------------------------------------------------------------------
+
 
 def test_require_admin_raises_403_with_a_byte_identical_detail() -> None:
     detail = "Admin privilege required to view the spend ledger."
@@ -263,9 +264,7 @@ def test_update_user_rejects_a_non_boolean_is_admin_with_400() -> None:
     with _Harness() as h:
         for bad in ("yes", "true", "false", 1, 0, None):
             try:
-                users_module.update_user(
-                    TARGET_SUB, {"is_admin": bad}, _admin_caller_row(), h.ddb
-                )
+                users_module.update_user(TARGET_SUB, {"is_admin": bad}, _admin_caller_row(), h.ddb)
             except HTTPException as exc:
                 assert exc.status_code == 400, (bad, exc.status_code)
                 assert exc.detail == "is_admin must be a boolean.", exc.detail
@@ -278,16 +277,12 @@ def test_update_user_persists_a_real_bool_on_both_branches() -> None:
     """Both directions of the flag, because the promote and the demote paths
     run different guards (`would_strip_admin_access` only fires on demote)."""
     with _Harness() as h:
-        users_module.update_user(
-            TARGET_SUB, {"is_admin": True}, _admin_caller_row(), h.ddb
-        )
+        users_module.update_user(TARGET_SUB, {"is_admin": True}, _admin_caller_row(), h.ddb)
         promoted = h.row(TARGET_SUB)
         assert type(promoted["is_admin"]) is bool, type(promoted["is_admin"])
         assert authz.is_admin(promoted) is True
 
-        users_module.update_user(
-            TARGET_SUB, {"is_admin": False}, _admin_caller_row(), h.ddb
-        )
+        users_module.update_user(TARGET_SUB, {"is_admin": False}, _admin_caller_row(), h.ddb)
         demoted = h.row(TARGET_SUB)
         assert type(demoted["is_admin"]) is bool, type(demoted["is_admin"])
         assert authz.is_admin(demoted) is False

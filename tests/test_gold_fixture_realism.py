@@ -65,6 +65,7 @@ def _topics_by_id(playbook: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 # ── Check 1: generated fixture section_ref is a plausible real section label ──
 
+
 def check_generated_section_ref_is_real_section_label() -> list[str]:
     failures: list[str] = []
     playbook = _load_playbook()
@@ -153,12 +154,19 @@ def check_widened_vocabulary_fires_no_uncapped_liability() -> list[str]:
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
+
 def main() -> int:
     checks = [
-        ("1", "Generated fixture section_ref is a real section label, not the rule description",
-         check_generated_section_ref_is_real_section_label),
-        ("2", "Widened trigger vocabulary fires no-uncapped-liability on realistic drafter phrasing",
-         check_widened_vocabulary_fires_no_uncapped_liability),
+        (
+            "1",
+            "Generated fixture section_ref is a real section label, not the rule description",
+            check_generated_section_ref_is_real_section_label,
+        ),
+        (
+            "2",
+            "Widened trigger vocabulary fires no-uncapped-liability on realistic drafter phrasing",
+            check_widened_vocabulary_fires_no_uncapped_liability,
+        ),
     ]
 
     overall_pass = True

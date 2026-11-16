@@ -107,8 +107,12 @@ function stubFetch(byPath: Record<string, Body>): void {
       const url = typeof input === 'string' ? input : input.toString();
       const pathname = new URL(url, 'http://localhost').pathname;
       const body = byPath[pathname];
-      // eslint-disable-next-line @typescript-eslint/require-await
-      return { ok: body !== undefined, status: body === undefined ? 404 : 200, json: async () => body ?? {} } as Response;
+      return {
+        ok: body !== undefined,
+        status: body === undefined ? 404 : 200,
+        // eslint-disable-next-line @typescript-eslint/require-await
+        json: async () => body ?? {},
+      } as Response;
     }),
   );
 }
@@ -222,7 +226,7 @@ describe('AdminUsers — last-active-admin guard disables the dangerous actions 
 });
 
 describe('AdminUsers — self-recognition drives the Revoke-admin confirm copy (#473)', () => {
-  it('is self-aware on the caller\'s own row and generic on another', async () => {
+  it("is self-aware on the caller's own row and generic on another", async () => {
     stubUsersWithMe([ACTIVE_ADMIN, SECOND_ACTIVE_ADMIN], 'sub-admin-1');
     render(<AdminUsers />);
 
@@ -235,12 +239,10 @@ describe('AdminUsers — self-recognition drives the Revoke-admin confirm copy (
     // rather than asserting synchronously or clicking to arm the button.
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const selfCtButton = buttonWithin(selfRow, 'Revoke admin').closest('ct-button') as
-      | (HTMLElement & { confirm: string })
-      | null;
+      (HTMLElement & { confirm: string }) | null;
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const otherCtButton = buttonWithin(otherRow, 'Revoke admin').closest('ct-button') as
-      | (HTMLElement & { confirm: string })
-      | null;
+      (HTMLElement & { confirm: string }) | null;
     if (!selfCtButton || !otherCtButton) {
       throw new Error('Revoke admin button is not rendered inside a <ct-button>');
     }

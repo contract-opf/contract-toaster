@@ -109,6 +109,7 @@ def _assert(condition: bool, label: str, detail: str = "") -> list[str]:
 # Check A -- cdk synth runs cleanly; locate the Pipeline nested template.
 # ---------------------------------------------------------------------------
 
+
 def _run_cdk_synth() -> tuple[list[str], Path | None]:
     print("\nCheck A: cdk synth runs cleanly …")
     failures: list[str] = []
@@ -120,11 +121,15 @@ def _run_cdk_synth() -> tuple[list[str], Path | None]:
     if not node_modules.is_dir():
         print("  (node_modules absent -- running npm install first …)")
         install = subprocess.run(
-            ["npm", "install"], cwd=INFRA, capture_output=True, text=True,  # noqa: S607
+            ["npm", "install"],  # noqa: S607
+            cwd=INFRA,
+            capture_output=True,
+            text=True,
         )
         if install.returncode != 0:
             return _assert(
-                False, "npm install succeeded in infra/",
+                False,
+                "npm install succeeded in infra/",
                 f"stderr: {install.stderr[-500:]}",
             ), None
 
@@ -177,6 +182,7 @@ def _state_machine_definition(pipeline_template_path: Path) -> dict:
 # Checks B-E -- Choice state gates acquisition failure (synthesized ASL)
 # ---------------------------------------------------------------------------
 
+
 def check_bcde_choice_gates_acquisition(states: dict) -> list[str]:
     print("\nChecks B-E: Choice state gates semaphore_acquired == false …")
     failures: list[str] = []
@@ -212,7 +218,8 @@ def check_bcde_choice_gates_acquisition(states: dict) -> list[str]:
     # C: a choice branch keys off $.semaphore_acquired and only that branch
     # (boolean true) may target ExtractStage.
     acquired_true_branches = [
-        c for c in choices
+        c
+        for c in choices
         if c.get("Variable") == "$.semaphore_acquired" and c.get("BooleanEquals") is True
     ]
     failures += _assert(
@@ -229,7 +236,8 @@ def check_bcde_choice_gates_acquisition(states: dict) -> list[str]:
     # No branch (and no Default) reaches a real pipeline stage other than via
     # the semaphore_acquired == true branch above.
     all_targets_except_true_branch = [
-        c.get("Next") for c in choices
+        c.get("Next")
+        for c in choices
         if not (c.get("Variable") == "$.semaphore_acquired" and c.get("BooleanEquals") is True)
     ]
     default_target = choice.get("Default")
@@ -249,7 +257,8 @@ def check_bcde_choice_gates_acquisition(states: dict) -> list[str]:
     # true branch (i.e. nothing else in the whole state machine still points
     # straight at ExtractStage -- guards against a stray leftover edge).
     other_edges_into_extract = [
-        name for name, s in states.items()
+        name
+        for name, s in states.items()
         if name != choice_name and s.get("Next") == "ExtractStage"
     ]
     failures += _assert(
@@ -286,15 +295,13 @@ def check_bcde_choice_gates_acquisition(states: dict) -> list[str]:
     # the reviews row via the shared error-transition Lambda invoke before
     # failing -- i.e. it is not a bare Fail with no state update.
     fail_branch_targets = [
-        t for t in all_targets_except_true_branch
-        if states.get(t, {}).get("Type") != "Wait"
+        t for t in all_targets_except_true_branch if states.get(t, {}).get("Type") != "Wait"
     ]
     for target in fail_branch_targets:
         target_state = states.get(target, {})
-        looks_like_error_transition = (
-            target_state.get("Type") == "Task"
-            and "lambda:invoke" in json.dumps(target_state.get("Resource", ""))
-        )
+        looks_like_error_transition = target_state.get(
+            "Type"
+        ) == "Task" and "lambda:invoke" in json.dumps(target_state.get("Resource", ""))
         # Or the Wait/loop eventually reaches a distinct Task before Fail.
         if not looks_like_error_transition:
             # Walk forward looking for a Task en route to the eventual Fail.
@@ -320,6 +327,7 @@ def check_bcde_choice_gates_acquisition(states: dict) -> list[str]:
 # ---------------------------------------------------------------------------
 # Check F -- release() guards the decrement on the payload's own flag.
 # ---------------------------------------------------------------------------
+
 
 def check_f_release_guarded_on_payload_flag() -> list[str]:
     print("\nCheck F: release() guards decrement on payload semaphore_acquired flag …")
@@ -352,7 +360,9 @@ def check_f_release_guarded_on_payload_flag() -> list[str]:
     )
 
     if flag_check:
-        decrement_match = re.search(r"UpdateExpression=.*ADD current_count :neg_one", release_body, re.DOTALL)
+        decrement_match = re.search(
+            r"UpdateExpression=.*ADD current_count :neg_one", release_body, re.DOTALL
+        )
         failures += _assert(
             decrement_match is not None and flag_check.start() < decrement_match.start(),
             "release() checks the semaphore_acquired flag before the decrement UpdateExpression",
@@ -384,11 +394,14 @@ def check_f_release_guarded_on_payload_flag() -> list[str]:
 # cannot see.
 # ---------------------------------------------------------------------------
 
+
 def _extract_inline_ts_python_source(ts_text: str, const_name: str) -> str | None:
     """Extracts the Python source embedded in a `lambda.Code.fromInline(...)`
     template-string assignment in pipeline-stack.ts, e.g. `semaphoreCode` or
     `stubHandlerCode`. Returns None if the constant/shape isn't found."""
-    pattern = r"const " + re.escape(const_name) + r" = lambda\.Code\.fromInline\(\s*`\n(.*?)`\.trim\(\),"
+    pattern = (
+        r"const " + re.escape(const_name) + r" = lambda\.Code\.fromInline\(\s*`\n(.*?)`\.trim\(\),"
+    )
     match = re.search(pattern, ts_text, re.DOTALL)
     return match.group(1) if match else None
 
@@ -411,8 +424,9 @@ class _FakeSemaphoreTable:
     def delete_item(self, Key):
         self.items.pop(Key["lock_name"], None)
 
-    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues,
-                     ConditionExpression=None):
+    def update_item(
+        self, Key, UpdateExpression, ExpressionAttributeValues, ConditionExpression=None
+    ):
         lock_name = Key["lock_name"]
         item = self.items.setdefault(lock_name, {"lock_name": lock_name})
         current = item.get("current_count", 0)
@@ -420,14 +434,16 @@ class _FakeSemaphoreTable:
             max_v = ExpressionAttributeValues.get(":max")
             if "current_count" in item and max_v is not None and current >= max_v:
                 raise self._client_error_cls(
-                    {"Error": {"Code": "ConditionalCheckFailedException"}}, "UpdateItem",
+                    {"Error": {"Code": "ConditionalCheckFailedException"}},
+                    "UpdateItem",
                 )
             item["current_count"] = current + ExpressionAttributeValues[":one"]
         elif ":neg_one" in ExpressionAttributeValues:
             zero = ExpressionAttributeValues.get(":zero", 0)
             if not current > zero:
                 raise self._client_error_cls(
-                    {"Error": {"Code": "ConditionalCheckFailedException"}}, "UpdateItem",
+                    {"Error": {"Code": "ConditionalCheckFailedException"}},
+                    "UpdateItem",
                 )
             item["current_count"] = current + ExpressionAttributeValues[":neg_one"]
         else:
@@ -442,9 +458,12 @@ def _run_real_stage_chain_and_get_final_count(semaphore_src: str, stub_src: str)
     next exactly as `outputPath: '$.Payload'` does (full replacement, no
     merge). Returns the semaphore table's current_count after release()."""
     env_keys = [
-        "PIPELINE_SEMAPHORE_TABLE", "MAX_CONCURRENT_EXECUTIONS",
-        "LEASE_SECONDS", "MAX_SEMAPHORE_WAIT_ATTEMPTS",
-        "REVIEW_SUBMISSIONS_TABLE", "DAILY_SPEND_TABLE",
+        "PIPELINE_SEMAPHORE_TABLE",
+        "MAX_CONCURRENT_EXECUTIONS",
+        "LEASE_SECONDS",
+        "MAX_SEMAPHORE_WAIT_ATTEMPTS",
+        "REVIEW_SUBMISSIONS_TABLE",
+        "DAILY_SPEND_TABLE",
     ]
     saved_env = {k: os.environ.get(k) for k in env_keys}
     stack = contextlib.ExitStack()
@@ -488,7 +507,8 @@ def _run_real_stage_chain_and_get_final_count(semaphore_src: str, stub_src: str)
         #    fields unless the handler explicitly carries them forward.
         mock_review_path = REPO_ROOT / "infra" / "lambda" / "mock_review" / "handler.py"
         mock_review_spec = importlib.util.spec_from_file_location(
-            "mock_review_handler_190_check_g", mock_review_path,
+            "mock_review_handler_190_check_g",
+            mock_review_path,
         )
         mock_review_module = importlib.util.module_from_spec(mock_review_spec)
         mock_review_spec.loader.exec_module(mock_review_module)
@@ -498,7 +518,8 @@ def _run_real_stage_chain_and_get_final_count(semaphore_src: str, stub_src: str)
         #    submissions table (its documented no-op branch).
         persist_path = REPO_ROOT / "infra" / "lambda" / "persist" / "handler.py"
         persist_spec = importlib.util.spec_from_file_location(
-            "persist_handler_190_check_g", persist_path,
+            "persist_handler_190_check_g",
+            persist_path,
         )
         persist_module = importlib.util.module_from_spec(persist_spec)
         persist_spec.loader.exec_module(persist_module)
@@ -513,9 +534,7 @@ def _run_real_stage_chain_and_get_final_count(semaphore_src: str, stub_src: str)
         mock.start()
         stack.callback(mock.stop)
         persist_ddb = boto3.resource("dynamodb", region_name="us-east-1")
-        create_submissions_table(
-            persist_ddb, table_name=os.environ["REVIEW_SUBMISSIONS_TABLE"]
-        )
+        create_submissions_table(persist_ddb, table_name=os.environ["REVIEW_SUBMISSIONS_TABLE"])
 
         class _FakePersistBoto3:
             def resource(self, service_name):
@@ -538,13 +557,13 @@ def _run_real_stage_chain_and_get_final_count(semaphore_src: str, stub_src: str)
         if event.get("semaphore_acquired") is not True:
             raise AssertionError(f"acquire() did not report semaphore_acquired == True: {event!r}")
 
-        event = stub_handler(event, None)                  # ExtractStage
-        event = stub_handler(event, None)                  # RetrieveStage
-        event = mock_review_module.handler(event, None)    # MockReviewStage
-        event = stub_handler(event, None)                  # RedlineStage
-        event = persist_module.handler(event, None)        # PersistStage
-        event = stub_handler(event, None)                  # AuditStage
-        event = release(event, None)                       # ReleaseConcurrencySlot
+        event = stub_handler(event, None)  # ExtractStage
+        event = stub_handler(event, None)  # RetrieveStage
+        event = mock_review_module.handler(event, None)  # MockReviewStage
+        event = stub_handler(event, None)  # RedlineStage
+        event = persist_module.handler(event, None)  # PersistStage
+        event = stub_handler(event, None)  # AuditStage
+        event = release(event, None)  # ReleaseConcurrencySlot
 
         counter_item = tables[os.environ["PIPELINE_SEMAPHORE_TABLE"]].items.get(counter_key, {})
         return counter_item.get("current_count", 0)
@@ -595,8 +614,7 @@ def check_g_counter_round_trips_through_real_stage_chain() -> list[str]:
 
     failures += _assert(
         final_count == 0,
-        "current_count returns to its pre-acquire baseline (0) after one full "
-        "successful review",
+        "current_count returns to its pre-acquire baseline (0) after one full successful review",
         f"current_count after ReleaseConcurrencySlot = {final_count!r} -- nonzero "
         "means the counter leaked (release() no-op'd because semaphore_acquired "
         "did not survive the real stage chain).",
@@ -608,6 +626,7 @@ def check_g_counter_round_trips_through_real_stage_chain() -> list[str]:
 # ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
+
 
 def main() -> int:
     print("Concurrency semaphore acquisition-gate + release-drift guard (issue #190)")

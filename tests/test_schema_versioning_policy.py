@@ -54,7 +54,7 @@ REQUIRED_RULE_PATTERNS = [
     (
         "supported-versions-declared",
         re.compile(r"supported\s+(schema\s+)?versions?", re.IGNORECASE),
-        'engine declares supported schema versions',
+        "engine declares supported schema versions",
     ),
     (
         "fail-closed-unsupported",
@@ -62,7 +62,7 @@ REQUIRED_RULE_PATTERNS = [
             r"(reject|refused?|fail.clos|unsupported.+schema|schema.+unsupported)",
             re.IGNORECASE,
         ),
-        'uploads with unsupported schema are rejected (fail-closed)',
+        "uploads with unsupported schema are rejected (fail-closed)",
     ),
     (
         "major-bump-migration",
@@ -70,7 +70,7 @@ REQUIRED_RULE_PATTERNS = [
             r"(major\s+bump|schema\s+major|migration|migrate).*(non.retired|all.+playbook|rollback)",
             re.IGNORECASE | re.DOTALL,
         ),
-        'schema major bump requires migration for non-retired playbooks and rollback re-validation',
+        "schema major bump requires migration for non-retired playbooks and rollback re-validation",
     ),
     (
         "rollback-revalidation",
@@ -78,7 +78,7 @@ REQUIRED_RULE_PATTERNS = [
             r"rollback.{0,120}(re.?valid|re.?check|supported\s+version)",
             re.IGNORECASE | re.DOTALL,
         ),
-        'rollback target validated against its declared schema version',
+        "rollback target validated against its declared schema version",
     ),
     (
         "gc-gated",
@@ -86,7 +86,7 @@ REQUIRED_RULE_PATTERNS = [
             r"(GC|governance.council|GC.gated|gc.gated)",
             re.IGNORECASE,
         ),
-        'schema changes go through the GC-gated approval path',
+        "schema changes go through the GC-gated approval path",
     ),
 ]
 
@@ -99,9 +99,7 @@ REQUIRED_RULE_PATTERNS = [
 # We accept any of those forms. If the section is absent we return None.
 # ---------------------------------------------------------------------------
 
-SUPPORTED_VERSIONS_LINE_RE = re.compile(
-    r"supported\s+schema\s+versions?[:\s]+(.+)", re.IGNORECASE
-)
+SUPPORTED_VERSIONS_LINE_RE = re.compile(r"supported\s+schema\s+versions?[:\s]+(.+)", re.IGNORECASE)
 SUPPORTED_VERSIONS_LIST_RE = re.compile(
     r"-\s+`?(https://contract-opf\.github\.io/playbooks/schema/v\d+\.json)`?", re.IGNORECASE
 )
@@ -151,6 +149,7 @@ def is_schema_supported(schema_id: str, supported: list[str]) -> bool:
 # ---------------------------------------------------------------------------
 # Test helpers
 # ---------------------------------------------------------------------------
+
 
 def check_section_exists(doc_text: str) -> list[str]:
     """Check A: the '## Schema versioning' section exists."""
@@ -227,6 +226,7 @@ def check_non_retired_playbooks(supported: list[str] | None) -> list[str]:
         ]
 
     import json
+
     failures = []
     playbooks_dir = REPO_ROOT / "playbooks"
     for pb_path in sorted(playbooks_dir.glob("*.json")):
@@ -264,6 +264,7 @@ def check_non_retired_playbooks(supported: list[str] | None) -> list[str]:
 # main
 # ---------------------------------------------------------------------------
 
+
 def main() -> int:
     if not GOVERNANCE_DOC.exists():
         print(f"FAIL: {GOVERNANCE_DOC} not found.")
@@ -282,9 +283,11 @@ def main() -> int:
     supported = extract_supported_versions(section_text) if section_text else None
 
     # Check B — required rule patterns
-    b_failures = check_required_rules(section_text) if section_text else [
-        "  SKIP: section absent — see Check A failure."
-    ]
+    b_failures = (
+        check_required_rules(section_text)
+        if section_text
+        else ["  SKIP: section absent — see Check A failure."]
+    )
     checks.append(("B", "Required rule text present in section", b_failures))
 
     # Check C — fail-closed behavior

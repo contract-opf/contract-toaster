@@ -119,10 +119,9 @@ def test_prompt_tells_the_model_not_to_copy_any_marker(failures: list[str]) -> N
             "[10c] the overlay names the markers but never says they are not "
             "part of the contract -- naming a thing is not disclaiming it."
         )
-    if "NEVER copy the \"[pNNNN]\" markers into any output field" not in prompt:
+    if 'NEVER copy the "[pNNNN]" markers into any output field' not in prompt:
         failures.append(
-            "[10d] the overlay does not carry the explicit no-copy rule for "
-            "the block-id marker."
+            "[10d] the overlay does not carry the explicit no-copy rule for the block-id marker."
         )
 
 
@@ -237,8 +236,7 @@ def test_block_marker_stripped_from_a_keep_segment(failures: list[str]) -> None:
     got = _v3_first_segment(poisoned)
     if got != BODY:
         failures.append(
-            f"[12a] the leading block-id marker was not stripped from a keep segment; "
-            f"got {got!r}"
+            f"[12a] the leading block-id marker was not stripped from a keep segment; got {got!r}"
         )
 
 
@@ -266,7 +264,9 @@ def test_an_insert_segment_is_never_edited(failures: list[str]) -> None:
     leading `"## "` there is the model's own text, and stripping it would be
     the backstop editing model judgment -- the invariant every normalization
     in `validate_model_response` is bound by."""
-    authored = "## Mutual Confidentiality\nEach party shall hold the other's information in confidence."
+    authored = (
+        "## Mutual Confidentiality\nEach party shall hold the other's information in confidence."
+    )
     raw = json.dumps(
         {
             "decision": "REQUEST_CHANGE",
@@ -301,9 +301,7 @@ def test_an_insert_segment_is_never_edited(failures: list[str]) -> None:
         return
     got = parsed["block_patches"][0]["segments"][1]["text"]
     if got != authored:
-        failures.append(
-            f"[12d] an insert segment was edited by the marker backstop; got {got!r}"
-        )
+        failures.append(f"[12d] an insert segment was edited by the marker backstop; got {got!r}")
 
 
 def test_a_non_leading_marker_in_a_keep_segment_is_left_alone(failures: list[str]) -> None:
@@ -316,9 +314,7 @@ def test_a_non_leading_marker_in_a_keep_segment_is_left_alone(failures: list[str
     inner = f"{BODY}\n## Term\nThis Agreement commences on the Effective Date"
     got = _v3_first_segment(_v3_transcript_response(inner))
     if got != inner:
-        failures.append(
-            f"[13a] a non-leading '## ' must be left alone, got {got!r}"
-        )
+        failures.append(f"[13a] a non-leading '## ' must be left alone, got {got!r}")
 
 
 def test_hash_text_that_is_not_a_marker_is_left_alone(failures: list[str]) -> None:
@@ -328,9 +324,7 @@ def test_hash_text_that_is_not_a_marker_is_left_alone(failures: list[str]) -> No
     for text in (f"##{HEADING} means the following: {BODY}", f"# {HEADING}\n{BODY}"):
         got = _v3_first_segment(_v3_transcript_response(text))
         if got != text:
-            failures.append(
-                f"[13b] {text[:24]!r}... must pass through unchanged, got {got!r}"
-            )
+            failures.append(f"[13b] {text[:24]!r}... must pass through unchanged, got {got!r}")
 
 
 def main() -> int:

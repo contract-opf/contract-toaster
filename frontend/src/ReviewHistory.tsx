@@ -243,9 +243,7 @@ interface ReviewGuidanceDetail extends ReceiptSource {
 }
 
 type LoadState<T> =
-  | { status: 'loading' }
-  | { status: 'ready'; data: T }
-  | { status: 'failed'; message: string };
+  { status: 'loading' } | { status: 'ready'; data: T } | { status: 'failed'; message: string };
 
 type GuidanceState =
   | { status: 'loading' }
@@ -555,15 +553,12 @@ export default function ReviewHistory(): React.ReactElement {
       // reader loses nothing they already had, and the message says what
       // failed. Only a failed FIRST page replaces the view with the error.
       if (token) {
-        setMoreError(
-          toUserMessage(err, "We couldn't load more of your history."),
-        );
+        setMoreError(toUserMessage(err, "We couldn't load more of your history."));
         return;
       }
       setLoad({
         status: 'failed',
-        message:
-          toUserMessage(err, "We couldn't load your history. Please try again."),
+        message: toUserMessage(err, "We couldn't load your history. Please try again."),
       });
     } finally {
       // Unconditional: a superseded "Show more" still ends, and the reload
@@ -667,8 +662,7 @@ export default function ReviewHistory(): React.ReactElement {
         ...current,
         [reviewId]: {
           status: 'failed',
-          message:
-            toUserMessage(err, "We couldn't load the instructions for this review."),
+          message: toUserMessage(err, "We couldn't load the instructions for this review."),
         },
       }));
     }
@@ -731,8 +725,7 @@ export default function ReviewHistory(): React.ReactElement {
         throw new UserFacingError(
           downloadFailureMessage(
             response.status,
-            errorDetail ??
-              `GET /api/reviews/${reviewId}/${kind} returned HTTP ${response.status}`,
+            errorDetail ?? `GET /api/reviews/${reviewId}/${kind} returned HTTP ${response.status}`,
           ),
         );
       }
@@ -760,39 +753,36 @@ export default function ReviewHistory(): React.ReactElement {
    * than re-fetching the whole list, so "Show more"'s already-appended
    * pages are never discarded by a single row's edit.
    */
-  const setRowDisposition = useCallback(
-    async (reviewId: string, outcome: AttorneyDisposition) => {
-      setDispositionSaving((current) => ({ ...current, [reviewId]: outcome }));
-      setDispositionMessage((current) => {
-        const next = { ...current };
-        delete next[reviewId];
-        return next;
-      });
-      try {
-        const result = await recordDisposition(reviewId, outcome);
-        setLoad((current) =>
-          current.status === 'ready'
-            ? {
-                status: 'ready',
-                data: current.data.map((row) =>
-                  row.review_id === reviewId
-                    ? { ...row, attorney_disposition: result.attorney_disposition }
-                    : row,
-                ),
-              }
-            : current,
-        );
-      } catch (err) {
-        setDispositionMessage((current) => ({
-          ...current,
-          [reviewId]: toUserMessage(err, DISPOSITION_ERROR_COPY),
-        }));
-      } finally {
-        setDispositionSaving((current) => ({ ...current, [reviewId]: null }));
-      }
-    },
-    [],
-  );
+  const setRowDisposition = useCallback(async (reviewId: string, outcome: AttorneyDisposition) => {
+    setDispositionSaving((current) => ({ ...current, [reviewId]: outcome }));
+    setDispositionMessage((current) => {
+      const next = { ...current };
+      delete next[reviewId];
+      return next;
+    });
+    try {
+      const result = await recordDisposition(reviewId, outcome);
+      setLoad((current) =>
+        current.status === 'ready'
+          ? {
+              status: 'ready',
+              data: current.data.map((row) =>
+                row.review_id === reviewId
+                  ? { ...row, attorney_disposition: result.attorney_disposition }
+                  : row,
+              ),
+            }
+          : current,
+      );
+    } catch (err) {
+      setDispositionMessage((current) => ({
+        ...current,
+        [reviewId]: toUserMessage(err, DISPOSITION_ERROR_COPY),
+      }));
+    } finally {
+      setDispositionSaving((current) => ({ ...current, [reviewId]: null }));
+    }
+  }, []);
 
   // "Butter it" (issue #499) — same shape as setRowDisposition above: keyed
   // per-row state. `coverNote.ts`'s `{ ok: false }` (a 502 -- "the model had
@@ -827,7 +817,7 @@ export default function ReviewHistory(): React.ReactElement {
           // only null on a row that has genuinely never been generated
           // for. A fresh, non-cached generation's own cost always wins.
           lastRealCostCents: outcome.cached
-            ? current[reviewId]?.lastRealCostCents ?? outcome.lastGenerationCostUsdCents ?? null
+            ? (current[reviewId]?.lastRealCostCents ?? outcome.lastGenerationCostUsdCents ?? null)
             : outcome.costUsdCents,
         },
       }));
@@ -914,7 +904,13 @@ export default function ReviewHistory(): React.ReactElement {
             }}
           >
             <div className="ct-row ct-row--wrap">
-              <span style={{ fontSize: 'var(--ct-text-sm)', fontWeight: 600, color: 'var(--ct-text-muted)' }}>
+              <span
+                style={{
+                  fontSize: 'var(--ct-text-sm)',
+                  fontWeight: 600,
+                  color: 'var(--ct-text-muted)',
+                }}
+              >
                 Filter:
               </span>
               {(['all', 'redline', 'clean', 'failed'] as const).map((filterKey) => {
@@ -933,7 +929,9 @@ export default function ReviewHistory(): React.ReactElement {
                     style={{
                       background: active ? 'var(--ct-accent)' : 'var(--ct-neutral-bg)',
                       color: active ? 'var(--ct-accent-contrast)' : 'var(--ct-text)',
-                      border: active ? '1px solid var(--ct-accent)' : '1px solid var(--ct-neutral-border)',
+                      border: active
+                        ? '1px solid var(--ct-accent)'
+                        : '1px solid var(--ct-neutral-border)',
                       padding: '0.25rem 0.65rem',
                       borderRadius: '16px',
                       fontSize: 'var(--ct-text-sm)',
@@ -961,10 +959,7 @@ export default function ReviewHistory(): React.ReactElement {
                   outstanding `load.data.length` is how many are LOADED, not
                   how many exist. "Showing 25 of 25" read as the whole
                   history to a reviewer with 26. */}
-              <span
-                className="ct-muted"
-                data-testid="history-count"
-              >
+              <span className="ct-muted" data-testid="history-count">
                 {nextToken
                   ? `Showing ${filteredRows.length} of the ${load.data.length} loaded, more below`
                   : `Showing ${filteredRows.length} of ${load.data.length}`}
@@ -1006,7 +1001,11 @@ export default function ReviewHistory(): React.ReactElement {
                   </tr>
                 ) : filteredRows.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="ct-table__empty" data-testid="review-history-empty-filter">
+                    <td
+                      colSpan={7}
+                      className="ct-table__empty"
+                      data-testid="review-history-empty-filter"
+                    >
                       No reviews match the selected filter.
                       <br />
                       <button
@@ -1049,7 +1048,10 @@ export default function ReviewHistory(): React.ReactElement {
                             className="ct-table__mono"
                             data-testid={`history-toasted-${row.review_id}`}
                           >
-                            <time title={formatEpochSeconds(row.created_at)} style={{ cursor: 'help' }}>
+                            <time
+                              title={formatEpochSeconds(row.created_at)}
+                              style={{ cursor: 'help' }}
+                            >
                               {formatRelativeTime(row.created_at)
                                 ? `${formatRelativeTime(row.created_at)} · `
                                 : ''}
@@ -1382,7 +1384,11 @@ export default function ReviewHistory(): React.ReactElement {
                                 {describeDisposition(row.attorney_disposition)}
                               </span>
                               {DISPOSITIONABLE_STATUSES.has(row.status) && (
-                                <div className="ct-actions" role="group" aria-label="Record how this review landed">
+                                <div
+                                  className="ct-actions"
+                                  role="group"
+                                  aria-label="Record how this review landed"
+                                >
                                   {DISPOSITION_CHOICES.map((choice) => (
                                     <CtButton
                                       key={choice.value}
@@ -1396,7 +1402,9 @@ export default function ReviewHistory(): React.ReactElement {
                                       disabled={Boolean(dispositionSaving[row.review_id])}
                                       loading={dispositionSaving[row.review_id] === choice.value}
                                       data-testid={`history-disposition-${choice.value.toLowerCase()}-${row.review_id}`}
-                                      onClick={() => void setRowDisposition(row.review_id, choice.value)}
+                                      onClick={() =>
+                                        void setRowDisposition(row.review_id, choice.value)
+                                      }
                                     >
                                       {choice.label}
                                     </CtButton>
@@ -1535,7 +1543,9 @@ export default function ReviewHistory(): React.ReactElement {
                                     </CtBanner>
                                   )}
                                   {coverNote[row.review_id] && (
-                                    <CtCard data-testid={`history-cover-note-card-${row.review_id}`}>
+                                    <CtCard
+                                      data-testid={`history-cover-note-card-${row.review_id}`}
+                                    >
                                       <p className="ct-muted" style={{ margin: 0 }}>
                                         <small>
                                           Draft cover note — copy it into your own email client.

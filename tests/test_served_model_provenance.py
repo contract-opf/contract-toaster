@@ -110,7 +110,9 @@ class TestServedModelCapture(unittest.TestCase):
     def test_served_model_and_generation_id_are_captured(self):
         client = _client([_body(model="deepseek/deepseek-v4-pro", generation_id="gen-abc123")])
         client.invoke(
-            system_prompt="s", user_prompt="u", model_id="deepseek/deepseek-v4-pro",
+            system_prompt="s",
+            user_prompt="u",
+            model_id="deepseek/deepseek-v4-pro",
             max_output_tokens=64,
         )
         self.assertEqual(client.last_served_model, "deepseek/deepseek-v4-pro")
@@ -126,7 +128,9 @@ class TestServedModelCapture(unittest.TestCase):
         # anthropic/claude-opus-4.8 until the owner removed that from
         # `selectable`). No capability descriptor is read on this path.
         content = client.invoke(
-            system_prompt="s", user_prompt="u", model_id="anthropic/claude-opus-5",
+            system_prompt="s",
+            user_prompt="u",
+            model_id="anthropic/claude-opus-5",
             max_output_tokens=64,
         )
         self.assertEqual(content, "{}")
@@ -137,13 +141,19 @@ class TestServedModelCapture(unittest.TestCase):
         """A second call that omits them must not inherit the first call's
         ids -- that would attribute one generation's provenance to another,
         which is worse than recording nothing."""
-        client = _client([
-            _body(model="moonshotai/kimi-k3", generation_id="gen-1"),
-            _body(),
-        ])
-        client.invoke(system_prompt="s", user_prompt="u", model_id="moonshotai/kimi-k3", max_output_tokens=64)
+        client = _client(
+            [
+                _body(model="moonshotai/kimi-k3", generation_id="gen-1"),
+                _body(),
+            ]
+        )
+        client.invoke(
+            system_prompt="s", user_prompt="u", model_id="moonshotai/kimi-k3", max_output_tokens=64
+        )
         self.assertEqual(client.last_served_model, "moonshotai/kimi-k3")
-        client.invoke(system_prompt="s", user_prompt="u", model_id="moonshotai/kimi-k3", max_output_tokens=64)
+        client.invoke(
+            system_prompt="s", user_prompt="u", model_id="moonshotai/kimi-k3", max_output_tokens=64
+        )
         self.assertIsNone(client.last_served_model)
         self.assertIsNone(client.last_generation_id)
 
@@ -152,7 +162,9 @@ class TestServedModelCapture(unittest.TestCase):
         must show BOTH ids, not quietly agree with the request."""
         client = _client([_body(model="deepseek/deepseek-chat-v3", generation_id="gen-x")])
         client.invoke(
-            system_prompt="s", user_prompt="u", model_id="deepseek/deepseek-v4-pro",
+            system_prompt="s",
+            user_prompt="u",
+            model_id="deepseek/deepseek-v4-pro",
             max_output_tokens=64,
         )
         self.assertNotEqual(client.last_served_model, "deepseek/deepseek-v4-pro")
@@ -162,17 +174,25 @@ class TestServedModelCapture(unittest.TestCase):
         """A provider shipping a non-string here is a provider bug, not a
         reason to write `"{'a': 1}"` into the ledger as a model id."""
         client = _client([_body(model={"weird": True}, generation_id=17)])
-        client.invoke(system_prompt="s", user_prompt="u", model_id="anthropic/claude-opus-5", max_output_tokens=64)
+        client.invoke(
+            system_prompt="s",
+            user_prompt="u",
+            model_id="anthropic/claude-opus-5",
+            max_output_tokens=64,
+        )
         self.assertIsNone(client.last_served_model)
         self.assertIsNone(client.last_generation_id)
 
     def test_nothing_logs_the_response_body(self):
-        client = _client([
-            _body(model="m", generation_id="g", content=SECRET_BODY)
-        ])
+        client = _client([_body(model="m", generation_id="g", content=SECRET_BODY)])
         with self.assertLogs(level="DEBUG") as captured:
             logging.getLogger("test").debug("anchor")
-            client.invoke(system_prompt="s", user_prompt="u", model_id="anthropic/claude-opus-5", max_output_tokens=64)
+            client.invoke(
+                system_prompt="s",
+                user_prompt="u",
+                model_id="anthropic/claude-opus-5",
+                max_output_tokens=64,
+            )
         joined = "\n".join(captured.output)
         self.assertNotIn(SECRET_BODY, joined)
 
@@ -180,8 +200,13 @@ class TestServedModelCapture(unittest.TestCase):
 class TestLedgerCarriesBothIds(unittest.TestCase):
     def test_record_has_served_and_generation_fields_defaulting_empty(self):
         record = model_client.ModelInvocationRecord(
-            review_id="r", pass_name="primary", model_id="asked/for",
-            attempt_number=1, outcome="success", input_tokens_est=1, output_tokens_est=1,
+            review_id="r",
+            pass_name="primary",
+            model_id="asked/for",
+            attempt_number=1,
+            outcome="success",
+            input_tokens_est=1,
+            output_tokens_est=1,
         )
         # Defaults keep every existing construction site in #81/#82/#204
         # working unchanged.
@@ -197,11 +222,13 @@ class TestLedgerCarriesBothIds(unittest.TestCase):
         for module, pass_name in ((primary_review_pass, "primary"), (critic_review_pass, "critic")):
             source = Path(module.__file__).read_text()
             self.assertIn(
-                "served_model_id=", source,
+                "served_model_id=",
+                source,
                 f"{pass_name} pass never stamps served_model_id on its ledger record",
             )
             self.assertIn(
-                "generation_id=", source,
+                "generation_id=",
+                source,
                 f"{pass_name} pass never stamps generation_id on its ledger record",
             )
 

@@ -835,15 +835,11 @@ def system_prompt_ngrams_from_blocks(
     if not system_blocks:
         return []
 
-    norm_exempt = [
-        norm for norm in (_normalize(text or "") for text in exempt_texts) if norm
-    ]
+    norm_exempt = [norm for norm in (_normalize(text or "") for text in exempt_texts) if norm]
     # Only these may act as a containment FILTER over a candidate; see
     # "Bounding the exemption" above.
     norm_exempt_containable = [
-        norm
-        for norm in norm_exempt
-        if len(norm) >= _MIN_SYSTEM_PROMPT_NGRAM_CHARS
+        norm for norm in norm_exempt if len(norm) >= _MIN_SYSTEM_PROMPT_NGRAM_CHARS
     ]
     # Carved out of each block before the split; see `restorable_texts` above.
     # Longest first, so a part that contains a shorter one is carved whole.
@@ -873,10 +869,7 @@ def system_prompt_ngrams_from_blocks(
                     continue
                 if any(norm in exempt for exempt in norm_exempt):
                     continue
-                if any(
-                    _contains_token(norm, exempt)
-                    for exempt in norm_exempt_containable
-                ):
+                if any(_contains_token(norm, exempt) for exempt in norm_exempt_containable):
                     continue
                 seen.add(norm)
                 grams.append(candidate)
@@ -1113,11 +1106,7 @@ def _without_contained_standard(texts: list[str], standard_keys: set[str]) -> li
     text and which is never a check-4 span. The predicate is exactly
     `_opf_prior_form_texts`' (#179), and runs one way: a text that CONTAINS
     the standard plus more wording, or only overlaps it, is kept."""
-    return [
-        text
-        for text in texts
-        if not any(_normalize(text) in key for key in standard_keys)
-    ]
+    return [text for text in texts if not any(_normalize(text) in key for key in standard_keys)]
 
 
 def _opf_prior_form_texts(opf_doc: dict[str, Any]) -> list[str]:
@@ -1165,9 +1154,7 @@ def _opf_prior_form_texts(opf_doc: dict[str, Any]) -> list[str]:
                 texts.extend(_texts_of(form.get("parts")))
     return list(
         dict.fromkeys(
-            text
-            for text in texts
-            if not any(_normalize(text) in key for key in standard_keys)
+            text for text in texts if not any(_normalize(text) in key for key in standard_keys)
         )
     )
 
@@ -1523,8 +1510,7 @@ def _opf_unaliased_slugs(
     slugs = [
         slug
         for slug in deal_aliases.deal_document_ids(opf_doc)
-        if not _is_single_token_slug(slug)
-        and not _is_public_clause_phrase_slug(slug, phrase_keys)
+        if not _is_single_token_slug(slug) and not _is_public_clause_phrase_slug(slug, phrase_keys)
     ]
     if not slugs:
         return []
@@ -1553,9 +1539,7 @@ def _opf_unaliased_slugs(
     ]
 
 
-def _opf_deal_ids(
-    opf_doc: dict[str, Any], overrides: dict[str, Any] | None = None
-) -> list[str]:
+def _opf_deal_ids(opf_doc: dict[str, Any], overrides: dict[str, Any] | None = None) -> list[str]:
     """The check-3 ids that stand for past deals (issue #173, replacing
     #172's slugs): the alias of every deal the document carries
     (`deal_aliases.alias_map`, in alias order) -- the only name the digest
@@ -1671,8 +1655,7 @@ def _opf_past_counterparty_names(opf_doc: dict[str, Any]) -> list[str]:
         return []
     _statements, fallbacks = _opf_manifest_texts(opf_doc)
     ours = [
-        _slug_key(text)
-        for text in [*_opf_standard_texts(opf_doc), *fallbacks, *dossier_standards]
+        _slug_key(text) for text in [*_opf_standard_texts(opf_doc), *fallbacks, *dossier_standards]
     ]
     perspective = opf_doc.get("perspective")
     party = perspective.get("party") if isinstance(perspective, dict) else None
@@ -1775,18 +1758,14 @@ def without_names_the_document_carries(
         return corpus
     texts = [text for text in document_texts if isinstance(text, str) and text]
     kept = [
-        name
-        for name in names
-        if not any(_counterparty_name_match(text, [name]) for text in texts)
+        name for name in names if not any(_counterparty_name_match(text, [name]) for text in texts)
     ]
     if len(kept) == len(names):
         return corpus
     return dataclasses.replace(corpus, counterparty_names=kept)
 
 
-def _without_public_vocabulary(
-    grams: list[str], vocabulary: set[str]
-) -> list[str]:
+def _without_public_vocabulary(grams: list[str], vocabulary: set[str]) -> list[str]:
     """Drop the grams that are the playbook's public clause vocabulary rather
     than its confidential reasoning (issue #616). Two rules, both narrow:
 
@@ -2116,9 +2095,7 @@ class ConfidentialCorpus:
         )
         playbook_ngrams.extend(digest_precedent_texts)
         playbook_ngrams.extend(
-            _without_contained_standard(
-                _opf_evidence_precedent_texts(opf_doc), standard_keys
-            )
+            _without_contained_standard(_opf_evidence_precedent_texts(opf_doc), standard_keys)
         )
         standard_clause_ngrams.extend(_opf_standard_texts(opf_doc))
         # Issue #177 (OPF 0.6): our former forms' wording, never one that
@@ -2127,9 +2104,7 @@ class ConfidentialCorpus:
         prior_form_texts = _opf_prior_form_texts(opf_doc)
         why_changed_texts = _opf_why_changed_texts(opf_doc)
         playbook_ngrams.extend(
-            text
-            for text in [*prior_form_texts, *why_changed_texts]
-            if text not in playbook_ngrams
+            text for text in [*prior_form_texts, *why_changed_texts] if text not in playbook_ngrams
         )
 
         # Issue #163: the manifest, read directly. Only what the lists above
@@ -2140,9 +2115,7 @@ class ConfidentialCorpus:
             text for text in dict.fromkeys(manifest_statements) if text not in playbook_ngrams
         )
         standard_clause_ngrams.extend(
-            text
-            for text in dict.fromkeys(manifest_fallbacks)
-            if text not in standard_clause_ngrams
+            text for text in dict.fromkeys(manifest_fallbacks) if text not in standard_clause_ngrams
         )
 
         # Issue #40: the critic dossiers, read directly now that they reach
@@ -2161,9 +2134,7 @@ class ConfidentialCorpus:
         dossier_blocked = [t for t in dossier_blocked if t not in contained_excerpts]
         dossier_excerpts = [t for t in dossier_excerpts if t not in contained_excerpts]
         standard_clause_ngrams.extend(
-            text
-            for text in dict.fromkeys(dossier_standards)
-            if text not in standard_clause_ngrams
+            text for text in dict.fromkeys(dossier_standards) if text not in standard_clause_ngrams
         )
         playbook_ngrams.extend(
             text
@@ -2218,14 +2189,10 @@ class ConfidentialCorpus:
         ):
             verbatim_spans.extend(
                 text
-                for text in dict.fromkeys(
-                    _without_public_vocabulary(candidates, vocabulary)
-                )
+                for text in dict.fromkeys(_without_public_vocabulary(candidates, vocabulary))
                 if text not in verbatim_spans and text not in standard_clause_ngrams
             )
-        blocked_playbook_ngrams = _without_public_vocabulary(
-            playbook_ngrams, vocabulary
-        )
+        blocked_playbook_ngrams = _without_public_vocabulary(playbook_ngrams, vocabulary)
         blocked_standard_clause_ngrams = _without_public_vocabulary(
             standard_clause_ngrams, vocabulary
         )
@@ -2253,9 +2220,7 @@ class ConfidentialCorpus:
             # counterparty's name a precedent text puts in the prompt (a
             # parties recital), read from the document's own party records.
             counterparty_names=list(
-                dict.fromkeys(
-                    [*(counterparty_names or []), *_opf_past_counterparty_names(opf_doc)]
-                )
+                dict.fromkeys([*(counterparty_names or []), *_opf_past_counterparty_names(opf_doc)])
             ),
             precedent_verbatim_spans=verbatim_spans,
         )
@@ -2286,9 +2251,7 @@ class LeakageScanner:
     def __init__(self, corpus: ConfidentialCorpus):
         self._corpus = corpus
 
-    def _find_ngram_match(
-        self, raw_text: str, norm_text: str, ngrams: list[str]
-    ) -> str | None:
+    def _find_ngram_match(self, raw_text: str, norm_text: str, ngrams: list[str]) -> str | None:
         """Word-boundary/token-level match (issue #264) -- a gram must occur
         as a standalone token/phrase, not merely as a raw substring embedded
         inside a larger, unrelated word. See `_contains_token`."""
@@ -2354,9 +2317,7 @@ class LeakageScanner:
         internal_channel = channel == CHANNEL_INTERNAL
 
         # 1. System-prompt leakage -- never acceptable on any channel.
-        match = self._find_ngram_match(
-            raw_text, norm_text, self._corpus.system_prompt_ngrams
-        )
+        match = self._find_ngram_match(raw_text, norm_text, self._corpus.system_prompt_ngrams)
         if match is not None:
             return ScanResult(
                 blocked=True, category=CATEGORY_SYSTEM_PROMPT, rule_id="system-prompt-ngram"
@@ -2367,9 +2328,7 @@ class LeakageScanner:
         #    external channel; permitted internally, where naming a playbook
         #    position is the entire point of the note.
         if not internal_channel:
-            match = self._find_ngram_match(
-                raw_text, norm_text, self._corpus.playbook_ngrams
-            )
+            match = self._find_ngram_match(raw_text, norm_text, self._corpus.playbook_ngrams)
             if match is not None:
                 return ScanResult(
                     blocked=True, category=CATEGORY_PLAYBOOK, rule_id="playbook-ngram"
@@ -2379,9 +2338,7 @@ class LeakageScanner:
         #     for replacement-text fields (see docstring above) and on the
         #     internal channel (same reasoning as check 2).
         if not is_replacement_text and not internal_channel:
-            match = self._find_ngram_match(
-                raw_text, norm_text, self._corpus.standard_clause_ngrams
-            )
+            match = self._find_ngram_match(raw_text, norm_text, self._corpus.standard_clause_ngrams)
             if match is not None:
                 return ScanResult(
                     blocked=True, category=CATEGORY_PLAYBOOK, rule_id="standard-clause-ngram"
@@ -3129,9 +3086,7 @@ def main() -> None:  # pragma: no cover - manual/CLI smoke entry point
     print("Clean:", scanner.scan("No issues found. Acceptable as-is."))
     print(
         "Leaky:",
-        scanner.scan(
-            "Acceptable. Standard liability cap is $150,000 aggregate."
-        ),
+        scanner.scan("Acceptable. Standard liability cap is $150,000 aggregate."),
     )
 
 

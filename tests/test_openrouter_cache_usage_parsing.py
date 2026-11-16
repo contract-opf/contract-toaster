@@ -247,9 +247,10 @@ class TestRequestCarriesCacheBlocksAndUsageInclude(unittest.TestCase):
         system = fake.calls[0]["system_prompt"]
         self.assertIsInstance(system, list)
         self.assertEqual(system[-1].get("cache_control"), {"type": "ephemeral"})
-        self.assertEqual(pp.render_system_prompt(system), pp.render_system_prompt(
-            pp.assemble_system_blocks(playbook)
-        ))
+        self.assertEqual(
+            pp.render_system_prompt(system),
+            pp.render_system_prompt(pp.assemble_system_blocks(playbook)),
+        )
 
 
 class TestOwnerDecisionRecorded(unittest.TestCase):

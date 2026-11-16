@@ -150,14 +150,10 @@ class TestBedrockCapabilities(unittest.TestCase):
         # field on models.embedding -- Titan is not a chat model these
         # capabilities apply to, and absence must not be silently upgraded
         # to a guess.
-        self.assertEqual(
-            mc.bedrock_model_capabilities(_BEDROCK_EMBEDDING_MODEL_ID), _ALL_FALSE
-        )
+        self.assertEqual(mc.bedrock_model_capabilities(_BEDROCK_EMBEDDING_MODEL_ID), _ALL_FALSE)
 
     def test_unknown_model_id_is_all_false_not_a_keyerror(self) -> None:
-        self.assertEqual(
-            mc.bedrock_model_capabilities(_BEDROCK_UNKNOWN_MODEL_ID), _ALL_FALSE
-        )
+        self.assertEqual(mc.bedrock_model_capabilities(_BEDROCK_UNKNOWN_MODEL_ID), _ALL_FALSE)
 
     def test_absent_field_on_a_known_model_id_defaults_false(self) -> None:
         # Independent of the shipped policy file's current values: an
@@ -198,9 +194,7 @@ class TestOpenRouterCapabilities(unittest.TestCase):
         # several other test files still stand on it (see
         # tests/test_structured_output_request.py) even though the primary
         # pin is now also capability-False, for the different reason below.
-        self.assertEqual(
-            mc.openrouter_model_capabilities(_OPENROUTER_CRITIC_MODEL_ID), _ALL_FALSE
-        )
+        self.assertEqual(mc.openrouter_model_capabilities(_OPENROUTER_CRITIC_MODEL_ID), _ALL_FALSE)
 
     def test_pinned_primary_is_structured_outputs_false_after_the_zdr_correction(self) -> None:
         # Issue #142: anthropic/claude-opus-5's ZDR endpoint (the only kind
@@ -228,9 +222,7 @@ class TestOpenRouterCapabilities(unittest.TestCase):
         )
 
     def test_unlisted_model_id_is_all_false_not_a_keyerror(self) -> None:
-        self.assertEqual(
-            mc.openrouter_model_capabilities(_OPENROUTER_UNKNOWN_MODEL_ID), _ALL_FALSE
-        )
+        self.assertEqual(mc.openrouter_model_capabilities(_OPENROUTER_UNKNOWN_MODEL_ID), _ALL_FALSE)
 
     def test_preflight_role_is_scanned_even_when_not_also_selectable(self) -> None:
         """Issue #491 fix round 1: `models.preflight` used to resolve True

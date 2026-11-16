@@ -45,9 +45,7 @@ describe('CtProgress', () => {
   });
 
   it('removes aria-valuetext and re-hides the caption when label is cleared', () => {
-    const { rerender } = render(
-      <CtProgress data-testid="p" label="Reviewing your document…" />,
-    );
+    const { rerender } = render(<CtProgress data-testid="p" label="Reviewing your document…" />);
     const el = screen.getByTestId('p');
     expect(el).toHaveAttribute('aria-valuetext', 'Reviewing your document…');
 

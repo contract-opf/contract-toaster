@@ -677,9 +677,7 @@ export default function AdminPlaybooks(): React.ReactElement | null {
         }
         options.onSuccess?.();
       } catch (err) {
-        setActionError(
-          toUserMessage(err, options.fallback),
-        );
+        setActionError(toUserMessage(err, options.fallback));
       } finally {
         setPendingAction(null);
       }
@@ -712,50 +710,44 @@ export default function AdminPlaybooks(): React.ReactElement | null {
     [refreshAfterVersionChange, runAction],
   );
 
-  const downloadVersion = useCallback(
-    async (playbookId: string, version: string) => {
-      const path = `/api/admin/playbooks/${encodeURIComponent(playbookId)}/versions/${encodeURIComponent(version)}/download`;
-      setActionError(null);
-      setPendingAction(`download:${version}`);
-      try {
-        const response = await authorizedFetch(path);
-        if (response.status === 403) {
-          setIsForbidden(true);
-          return;
-        }
-        if (response.status === 410) {
-          throw new UserFacingError('This playbook version is no longer available in storage.');
-        }
-        if (!response.ok) {
-          throw await responseError(
-            response,
-            `GET playbook version download ${playbookId}/${version}`,
-            "We couldn't download that playbook version. Please try again.",
-          );
-        }
-        const data = (await response.json()) as { url?: string };
-        if (!data.url) {
-          throw new UserFacingError(
-            friendlyErrorMessage(
-              `GET playbook version download ${playbookId}/${version} returned no url`,
-              "We couldn't download that playbook version. Please try again.",
-            ),
-          );
-        }
-        triggerBrowserDownload(data.url);
-      } catch (err) {
-        setActionError(
-          toUserMessage(
-            err,
+  const downloadVersion = useCallback(async (playbookId: string, version: string) => {
+    const path = `/api/admin/playbooks/${encodeURIComponent(playbookId)}/versions/${encodeURIComponent(version)}/download`;
+    setActionError(null);
+    setPendingAction(`download:${version}`);
+    try {
+      const response = await authorizedFetch(path);
+      if (response.status === 403) {
+        setIsForbidden(true);
+        return;
+      }
+      if (response.status === 410) {
+        throw new UserFacingError('This playbook version is no longer available in storage.');
+      }
+      if (!response.ok) {
+        throw await responseError(
+          response,
+          `GET playbook version download ${playbookId}/${version}`,
+          "We couldn't download that playbook version. Please try again.",
+        );
+      }
+      const data = (await response.json()) as { url?: string };
+      if (!data.url) {
+        throw new UserFacingError(
+          friendlyErrorMessage(
+            `GET playbook version download ${playbookId}/${version} returned no url`,
             "We couldn't download that playbook version. Please try again.",
           ),
         );
-      } finally {
-        setPendingAction(null);
       }
-    },
-    [],
-  );
+      triggerBrowserDownload(data.url);
+    } catch (err) {
+      setActionError(
+        toUserMessage(err, "We couldn't download that playbook version. Please try again."),
+      );
+    } finally {
+      setPendingAction(null);
+    }
+  }, []);
 
   // Issue #595 retired the standalone `approveVersion`. Approval on its own
   // is no longer an action this screen offers — it is the first half of
@@ -832,10 +824,7 @@ export default function AdminPlaybooks(): React.ReactElement | null {
         refreshAfterVersionChange(playbookId);
       } catch (err) {
         setActionError(
-          toUserMessage(
-            err,
-            "We couldn't approve and activate that version. Please try again.",
-          ),
+          toUserMessage(err, "We couldn't approve and activate that version. Please try again."),
         );
         // Re-read even on failure: a half-completed sequence must show the
         // approval it really did record, not the pre-click state.
@@ -1025,9 +1014,7 @@ export default function AdminPlaybooks(): React.ReactElement | null {
         invalidateCatalog();
         showHistoryFor(targetId);
       } catch (err) {
-        setUploadError(
-          toUserMessage(err, "We couldn't upload that version. Please try again."),
-        );
+        setUploadError(toUserMessage(err, "We couldn't upload that version. Please try again."));
       } finally {
         setUploading(false);
       }
@@ -1107,7 +1094,7 @@ export default function AdminPlaybooks(): React.ReactElement | null {
       const version = createVersion;
       if (version === null) {
         setCreateError(
-          "That file carries no version identifier and none could be derived from it. " +
+          'That file carries no version identifier and none could be derived from it. ' +
             'Choose an OPF document with an identity block.',
         );
         return;
@@ -1173,9 +1160,7 @@ export default function AdminPlaybooks(): React.ReactElement | null {
         invalidateCatalog();
         showHistoryFor(created.playbook_id);
       } catch (err) {
-        setCreateError(
-          toUserMessage(err, "We couldn't upload that playbook. Please try again."),
-        );
+        setCreateError(toUserMessage(err, "We couldn't upload that playbook. Please try again."));
       } finally {
         setCreating(false);
       }
@@ -1253,7 +1238,13 @@ export default function AdminPlaybooks(): React.ReactElement | null {
               borderBottom: '1px solid var(--ct-border)',
             }}
           >
-            <span style={{ fontSize: 'var(--ct-text-sm)', fontWeight: 600, color: 'var(--ct-text-muted)' }}>
+            <span
+              style={{
+                fontSize: 'var(--ct-text-sm)',
+                fontWeight: 600,
+                color: 'var(--ct-text-muted)',
+              }}
+            >
               Catalog
             </span>
             <div className="ct-row ct-row--wrap" style={{ gap: '0.75rem' }}>
@@ -1290,7 +1281,11 @@ export default function AdminPlaybooks(): React.ReactElement | null {
                   </tr>
                 ) : filteredPlaybooks.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="ct-table__empty" data-testid="admin-playbooks-empty-filter">
+                    <td
+                      colSpan={5}
+                      className="ct-table__empty"
+                      data-testid="admin-playbooks-empty-filter"
+                    >
                       No playbooks match &ldquo;{playbookSearchQuery}&rdquo;.
                       <br />
                       <button
@@ -1355,7 +1350,10 @@ export default function AdminPlaybooks(): React.ReactElement | null {
                       </td>
                       <td className="ct-table__mono">{entry.playbook_id}</td>
                       <td data-testid={`playbook-status-${entry.playbook_id}`}>
-                        <CtChip variant={catalogChipVariant(entry.status)} dot={entry.status === 'active'}>
+                        <CtChip
+                          variant={catalogChipVariant(entry.status)}
+                          dot={entry.status === 'active'}
+                        >
                           {catalogStatusLabel(entry.status)}
                         </CtChip>
                       </td>
@@ -1491,389 +1489,398 @@ export default function AdminPlaybooks(): React.ReactElement | null {
             }
           }}
         >
-        <div
-          ref={historyDialogRef}
-          role="dialog"
-          aria-modal="true"
-          aria-label={`Version history — ${historyPlaybook?.display_name ?? historyPlaybookId}`}
-          tabIndex={-1}
-          className="ct-overlay__panel"
-        >
-        <CtCard data-testid="admin-playbooks-versions-panel">
-          <CtToolbar
-            title={`Version history — ${historyPlaybook?.display_name ?? historyPlaybookId}`}
+          <div
+            ref={historyDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Version history — ${historyPlaybook?.display_name ?? historyPlaybookId}`}
+            tabIndex={-1}
+            className="ct-overlay__panel"
           >
-            <div slot="actions">
-              <CtButton
-                type="button"
-                variant="primary"
-                size="sm"
-                data-testid="admin-playbooks-upload-toggle"
-                onClick={() => {
-                  setUploadResult(null);
-                  setUploadError(null);
-                  if (historyPlaybookId) {
-                    setUploadPlaybookId(historyPlaybookId);
-                  }
-                  setUploadOpen((open) => !open);
-                }}
+            <CtCard data-testid="admin-playbooks-versions-panel">
+              <CtToolbar
+                title={`Version history — ${historyPlaybook?.display_name ?? historyPlaybookId}`}
               >
-                Upload version
-              </CtButton>
-              <CtButton
-                type="button"
-                variant="secondary"
-                size="sm"
-                data-testid="admin-playbooks-versions-close"
-                onClick={closeHistory}
-              >
-                Close
-              </CtButton>
-            </div>
-          </CtToolbar>
-
-          {/* Permanent, not conditional: an upload is never self-activating,
-              and an admin who is not told that will read a refused activation
-              as a bug. See this module's docstring, constraint 1. */}
-          <CtBanner variant="muted" data-testid="admin-playbooks-activation-note">
-            Activating a version checks its content against the approved hash recorded for it.
-            A version whose exact bytes were never approved is refused — uploading is not the
-            same as putting a version in front of a counterparty. Approving is that separate
-            act, and it goes live in the same step: &ldquo;Approve &amp; activate&rdquo; records
-            approval of this version&apos;s exact bytes and then activates it, so every new
-            review runs against it.
-          </CtBanner>
-
-          {versionsLoad.status === 'failed' ? (
-            <div className="ct-stack">
-              <CtBanner variant="danger" data-testid="admin-playbooks-versions-error">
-                {versionsLoad.message}
-              </CtBanner>
-              <div className="ct-actions" role="group">
-                <CtButton
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  data-testid="admin-playbooks-versions-retry"
-                  onClick={() => historyPlaybookId && void loadVersions(historyPlaybookId)}
-                >
-                  Try again
-                </CtButton>
-              </div>
-            </div>
-          ) : versions === null ? (
-            <CtProgress
-              data-testid="admin-playbooks-versions-loading"
-              label="Loading version history…"
-            />
-          ) : (
-            <>
-              {versions.length >= 2 && (
-                <div
-                  style={{
-                    marginBottom: '1rem',
-                    padding: '0.75rem',
-                    borderRadius: '6px',
-                    background: 'var(--ct-surface-sunken)',
-                    border: '1px solid var(--ct-border)',
-                  }}
-                >
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
+                <div slot="actions">
+                  <CtButton
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    data-testid="admin-playbooks-upload-toggle"
+                    onClick={() => {
+                      setUploadResult(null);
+                      setUploadError(null);
+                      if (historyPlaybookId) {
+                        setUploadPlaybookId(historyPlaybookId);
+                      }
+                      setUploadOpen((open) => !open);
                     }}
                   >
-                    <span style={{ fontSize: 'var(--ct-text-sm)', fontWeight: 600 }}>
-                      Version Comparison
-                    </span>
+                    Upload version
+                  </CtButton>
+                  <CtButton
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    data-testid="admin-playbooks-versions-close"
+                    onClick={closeHistory}
+                  >
+                    Close
+                  </CtButton>
+                </div>
+              </CtToolbar>
+
+              {/* Permanent, not conditional: an upload is never self-activating,
+              and an admin who is not told that will read a refused activation
+              as a bug. See this module's docstring, constraint 1. */}
+              <CtBanner variant="muted" data-testid="admin-playbooks-activation-note">
+                Activating a version checks its content against the approved hash recorded for it. A
+                version whose exact bytes were never approved is refused — uploading is not the same
+                as putting a version in front of a counterparty. Approving is that separate act, and
+                it goes live in the same step: &ldquo;Approve &amp; activate&rdquo; records approval
+                of this version&apos;s exact bytes and then activates it, so every new review runs
+                against it.
+              </CtBanner>
+
+              {versionsLoad.status === 'failed' ? (
+                <div className="ct-stack">
+                  <CtBanner variant="danger" data-testid="admin-playbooks-versions-error">
+                    {versionsLoad.message}
+                  </CtBanner>
+                  <div className="ct-actions" role="group">
                     <CtButton
                       type="button"
-                      variant="ghost"
+                      variant="secondary"
                       size="sm"
-                      data-testid="playbook-diff-toggle"
-                      onClick={() => {
-                        if (!diffOpen) {
-                          const activeVer =
-                            versions.find((v) => v.status === 'active')?.version ??
-                            versions[0].version;
-                          const otherVer =
-                            versions.find((v) => v.version !== activeVer)?.version ??
-                            versions[1]?.version ??
-                            '';
-                          setDiffVersionA(activeVer);
-                          setDiffVersionB(otherVer);
-                        }
-                        setDiffOpen((o) => !o);
-                      }}
+                      data-testid="admin-playbooks-versions-retry"
+                      onClick={() => historyPlaybookId && void loadVersions(historyPlaybookId)}
                     >
-                      {diffOpen ? 'Hide comparison' : 'Compare versions'}
+                      Try again
                     </CtButton>
                   </div>
-
-                  {diffOpen && (
+                </div>
+              ) : versions === null ? (
+                <CtProgress
+                  data-testid="admin-playbooks-versions-loading"
+                  label="Loading version history…"
+                />
+              ) : (
+                <>
+                  {versions.length >= 2 && (
                     <div
-                      className="ct-stack"
-                      style={{ marginTop: '0.75rem', gap: '0.75rem' }}
-                      data-testid="playbook-diff-panel"
+                      style={{
+                        marginBottom: '1rem',
+                        padding: '0.75rem',
+                        borderRadius: '6px',
+                        background: 'var(--ct-surface-sunken)',
+                        border: '1px solid var(--ct-border)',
+                      }}
                     >
                       <div
-                        className="ct-row"
-                        style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                        }}
                       >
-                        <label
-                          style={{
-                            fontSize: 'var(--ct-text-sm)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.35rem',
+                        <span style={{ fontSize: 'var(--ct-text-sm)', fontWeight: 600 }}>
+                          Version Comparison
+                        </span>
+                        <CtButton
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          data-testid="playbook-diff-toggle"
+                          onClick={() => {
+                            if (!diffOpen) {
+                              const activeVer =
+                                versions.find((v) => v.status === 'active')?.version ??
+                                versions[0].version;
+                              const otherVer =
+                                versions.find((v) => v.version !== activeVer)?.version ??
+                                versions[1]?.version ??
+                                '';
+                              setDiffVersionA(activeVer);
+                              setDiffVersionB(otherVer);
+                            }
+                            setDiffOpen((o) => !o);
                           }}
                         >
-                          <span>Version A:</span>
-                          <select
-                            value={diffVersionA}
-                            onChange={(e) => setDiffVersionA(e.target.value)}
-                            data-testid="playbook-diff-select-a"
-                            style={{
-                              fontSize: 'var(--ct-text-sm)',
-                              padding: '0.2rem 0.4rem',
-                              borderRadius: '4px',
-                              background: 'var(--ct-bg)',
-                            }}
-                          >
-                            {versions.map((v) => (
-                              <option key={v.version} value={v.version}>
-                                v{v.version} ({v.status})
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-
-                        <label
-                          style={{
-                            fontSize: 'var(--ct-text-sm)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.35rem',
-                          }}
-                        >
-                          <span>Version B:</span>
-                          <select
-                            value={diffVersionB}
-                            onChange={(e) => setDiffVersionB(e.target.value)}
-                            data-testid="playbook-diff-select-b"
-                            style={{
-                              fontSize: 'var(--ct-text-sm)',
-                              padding: '0.2rem 0.4rem',
-                              borderRadius: '4px',
-                              background: 'var(--ct-bg)',
-                            }}
-                          >
-                            {versions.map((v) => (
-                              <option key={v.version} value={v.version}>
-                                v{v.version} ({v.status})
-                              </option>
-                            ))}
-                          </select>
-                        </label>
+                          {diffOpen ? 'Hide comparison' : 'Compare versions'}
+                        </CtButton>
                       </div>
 
-                      {(() => {
-                        const verA = versions.find((v) => v.version === diffVersionA);
-                        const verB = versions.find((v) => v.version === diffVersionB);
-                        if (!verA || !verB) return null;
-                        const sameHash =
-                          verA.content_hash &&
-                          verB.content_hash &&
-                          verA.content_hash === verB.content_hash;
-                        return (
+                      {diffOpen && (
+                        <div
+                          className="ct-stack"
+                          style={{ marginTop: '0.75rem', gap: '0.75rem' }}
+                          data-testid="playbook-diff-panel"
+                        >
                           <div
-                            style={{
-                              display: 'grid',
-                              gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-                              gap: '0.75rem',
-                              padding: '0.75rem',
-                              borderRadius: '4px',
-                              background: 'var(--ct-surface-raised)',
-                              border: '1px solid var(--ct-border)',
-                              fontSize: 'var(--ct-text-sm)',
-                            }}
+                            className="ct-row"
+                            style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}
                           >
-                            <div>
-                              <div style={{ fontWeight: 600, marginBottom: '0.35rem' }}>
-                                Version {verA.version} ({verA.status})
-                              </div>
-                              <div className="ct-muted">
-                                Hash:{' '}
-                                <span className="ct-table__mono">
-                                  {verA.content_hash ? shortenHash(verA.content_hash) : '—'}
-                                </span>
-                              </div>
-                              <div className="ct-muted">
-                                Uploaded by: {verA.uploaded_by || '—'}
-                              </div>
-                              <div style={{ marginTop: '0.4rem' }}>
-                                <strong>Note:</strong> {verA.notes || '—'}
-                              </div>
-                            </div>
-                            <div>
-                              <div style={{ fontWeight: 600, marginBottom: '0.35rem' }}>
-                                Version {verB.version} ({verB.status})
-                              </div>
-                              <div className="ct-muted">
-                                Hash:{' '}
-                                <span className="ct-table__mono">
-                                  {verB.content_hash ? shortenHash(verB.content_hash) : '—'}
-                                </span>
-                              </div>
-                              <div className="ct-muted">
-                                Uploaded by: {verB.uploaded_by || '—'}
-                              </div>
-                              <div style={{ marginTop: '0.4rem' }}>
-                                <strong>Note:</strong> {verB.notes || '—'}
-                              </div>
-                            </div>
-                            <div
+                            <label
                               style={{
-                                gridColumn: '1 / -1',
-                                paddingTop: '0.4rem',
-                                borderTop: '1px solid var(--ct-border)',
+                                fontSize: 'var(--ct-text-sm)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.35rem',
                               }}
                             >
-                              <CtChip variant={sameHash ? 'ok' : 'warn'}>
-                                {sameHash ? 'Identical content bytes' : 'Content bytes differ'}
-                              </CtChip>
-                            </div>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  )}
-                </div>
-              )}
-              <CtTable>
-              <table data-testid="playbook-versions-table">
-                <thead>
-                  <tr>
-                    <th>Version</th>
-                    <th>Status</th>
-                    <th>Content hash</th>
-                    <th>Uploaded by</th>
-                    <th>Uploaded</th>
-                    <th>Note</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {versions.length === 0 ? (
-                    <tr>
-                      <td
-                        colSpan={7}
-                        className="ct-table__empty"
-                        data-testid="admin-playbooks-versions-empty"
-                      >
-                        No versions uploaded for this playbook yet.
-                      </td>
-                    </tr>
-                  ) : (
-                    versions.map((row) => {
-                      // The three facts the whole Actions cell below is a
-                      // function of. Named once here rather than recomputed
-                      // inline, because issues #476/#485/#594/#595 have each
-                      // added a case to that decision and an inline chain of
-                      // them stopped being readable.
-                      const approved = isApproved(row);
-                      const isActive = row.status === 'active';
-                      // A row with no content_hash at all (written before
-                      // issue #478) has nothing an approval could name, so it
-                      // is neither approvable nor merged-actionable — it
-                      // keeps the plain Activate and lets the server state
-                      // the Gate-7 refusal in its own words.
-                      const canApprove = row.content_hash !== undefined && !approved;
-
-                      return (
-                      <tr key={row.version} data-testid={`playbook-version-row-${row.version}`}>
-                        <td className="ct-table__mono">{row.version}</td>
-                        <td data-testid={`playbook-version-status-${row.version}`}>
-                          <CtChip variant={versionChipVariant(row.status)}>{row.status}</CtChip>
-                        </td>
-                        <td
-                          className="ct-table__mono"
-                          data-testid={`playbook-version-hash-${row.version}`}
-                          title={row.content_hash ?? ''}
-                        >
-                          {row.content_hash ? shortenHash(row.content_hash) : '—'}
-                        </td>
-                        <td className="ct-table__mono">{row.uploaded_by || '—'}</td>
-                        <td className="ct-table__mono">{formatTimestamp(row.uploaded_at)}</td>
-                        <td>
-                          {notesVersion === row.version ? (
-                            <div className="ct-stack">
-                              <CtField label={`Note for version ${row.version}`}>
-                                <textarea
-                                  data-testid={`playbook-version-notes-input-${row.version}`}
-                                  rows={3}
-                                  value={notesDraft}
-                                  onChange={(e) => setNotesDraft(e.target.value)}
-                                />
-                              </CtField>
-                              <div className="ct-actions">
-                                <CtButton
-                                  type="button"
-                                  variant="primary"
-                                  size="sm"
-                                  data-testid={`playbook-version-notes-save-${row.version}`}
-                                  disabled={pendingAction === `notes:${row.version}`}
-                                  onClick={() =>
-                                    void saveNotes(row.playbook_id, row.version, notesDraft)
-                                  }
-                                >
-                                  Save note
-                                </CtButton>
-                                <CtButton
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  data-testid={`playbook-version-notes-cancel-${row.version}`}
-                                  onClick={() => setNotesVersion(null)}
-                                >
-                                  Cancel
-                                </CtButton>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="ct-stack">
-                              <span>{row.notes === '' ? '—' : linkifyText(row.notes)}</span>
-                              <CtButton
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                data-testid={`playbook-version-notes-edit-${row.version}`}
-                                onClick={() => {
-                                  setActionError(null);
-                                  setNotesVersion(row.version);
-                                  setNotesDraft(row.notes);
+                              <span>Version A:</span>
+                              <select
+                                value={diffVersionA}
+                                onChange={(e) => setDiffVersionA(e.target.value)}
+                                data-testid="playbook-diff-select-a"
+                                style={{
+                                  fontSize: 'var(--ct-text-sm)',
+                                  padding: '0.2rem 0.4rem',
+                                  borderRadius: '4px',
+                                  background: 'var(--ct-bg)',
                                 }}
                               >
-                                {row.notes === '' ? 'Add a note' : 'Edit note'}
-                              </CtButton>
-                            </div>
-                          )}
-                        </td>
-                        <td>
-                          <div className="ct-actions" role="group">
-                            <CtButton
-                              type="button"
-                              variant="secondary"
-                              size="sm"
-                              data-testid={`playbook-version-download-${row.version}`}
-                              disabled={pendingAction === `download:${row.version}`}
-                              onClick={() => void downloadVersion(row.playbook_id, row.version)}
+                                {versions.map((v) => (
+                                  <option key={v.version} value={v.version}>
+                                    v{v.version} ({v.status})
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+
+                            <label
+                              style={{
+                                fontSize: 'var(--ct-text-sm)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.35rem',
+                              }}
                             >
-                              Download
-                            </CtButton>
-                            {/* The APPROVAL STATE of this row, as a note —
+                              <span>Version B:</span>
+                              <select
+                                value={diffVersionB}
+                                onChange={(e) => setDiffVersionB(e.target.value)}
+                                data-testid="playbook-diff-select-b"
+                                style={{
+                                  fontSize: 'var(--ct-text-sm)',
+                                  padding: '0.2rem 0.4rem',
+                                  borderRadius: '4px',
+                                  background: 'var(--ct-bg)',
+                                }}
+                              >
+                                {versions.map((v) => (
+                                  <option key={v.version} value={v.version}>
+                                    v{v.version} ({v.status})
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          </div>
+
+                          {(() => {
+                            const verA = versions.find((v) => v.version === diffVersionA);
+                            const verB = versions.find((v) => v.version === diffVersionB);
+                            if (!verA || !verB) return null;
+                            const sameHash =
+                              verA.content_hash &&
+                              verB.content_hash &&
+                              verA.content_hash === verB.content_hash;
+                            return (
+                              <div
+                                style={{
+                                  display: 'grid',
+                                  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                                  gap: '0.75rem',
+                                  padding: '0.75rem',
+                                  borderRadius: '4px',
+                                  background: 'var(--ct-surface-raised)',
+                                  border: '1px solid var(--ct-border)',
+                                  fontSize: 'var(--ct-text-sm)',
+                                }}
+                              >
+                                <div>
+                                  <div style={{ fontWeight: 600, marginBottom: '0.35rem' }}>
+                                    Version {verA.version} ({verA.status})
+                                  </div>
+                                  <div className="ct-muted">
+                                    Hash:{' '}
+                                    <span className="ct-table__mono">
+                                      {verA.content_hash ? shortenHash(verA.content_hash) : '—'}
+                                    </span>
+                                  </div>
+                                  <div className="ct-muted">
+                                    Uploaded by: {verA.uploaded_by || '—'}
+                                  </div>
+                                  <div style={{ marginTop: '0.4rem' }}>
+                                    <strong>Note:</strong> {verA.notes || '—'}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div style={{ fontWeight: 600, marginBottom: '0.35rem' }}>
+                                    Version {verB.version} ({verB.status})
+                                  </div>
+                                  <div className="ct-muted">
+                                    Hash:{' '}
+                                    <span className="ct-table__mono">
+                                      {verB.content_hash ? shortenHash(verB.content_hash) : '—'}
+                                    </span>
+                                  </div>
+                                  <div className="ct-muted">
+                                    Uploaded by: {verB.uploaded_by || '—'}
+                                  </div>
+                                  <div style={{ marginTop: '0.4rem' }}>
+                                    <strong>Note:</strong> {verB.notes || '—'}
+                                  </div>
+                                </div>
+                                <div
+                                  style={{
+                                    gridColumn: '1 / -1',
+                                    paddingTop: '0.4rem',
+                                    borderTop: '1px solid var(--ct-border)',
+                                  }}
+                                >
+                                  <CtChip variant={sameHash ? 'ok' : 'warn'}>
+                                    {sameHash ? 'Identical content bytes' : 'Content bytes differ'}
+                                  </CtChip>
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <CtTable>
+                    <table data-testid="playbook-versions-table">
+                      <thead>
+                        <tr>
+                          <th>Version</th>
+                          <th>Status</th>
+                          <th>Content hash</th>
+                          <th>Uploaded by</th>
+                          <th>Uploaded</th>
+                          <th>Note</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {versions.length === 0 ? (
+                          <tr>
+                            <td
+                              colSpan={7}
+                              className="ct-table__empty"
+                              data-testid="admin-playbooks-versions-empty"
+                            >
+                              No versions uploaded for this playbook yet.
+                            </td>
+                          </tr>
+                        ) : (
+                          versions.map((row) => {
+                            // The three facts the whole Actions cell below is a
+                            // function of. Named once here rather than recomputed
+                            // inline, because issues #476/#485/#594/#595 have each
+                            // added a case to that decision and an inline chain of
+                            // them stopped being readable.
+                            const approved = isApproved(row);
+                            const isActive = row.status === 'active';
+                            // A row with no content_hash at all (written before
+                            // issue #478) has nothing an approval could name, so it
+                            // is neither approvable nor merged-actionable — it
+                            // keeps the plain Activate and lets the server state
+                            // the Gate-7 refusal in its own words.
+                            const canApprove = row.content_hash !== undefined && !approved;
+
+                            return (
+                              <tr
+                                key={row.version}
+                                data-testid={`playbook-version-row-${row.version}`}
+                              >
+                                <td className="ct-table__mono">{row.version}</td>
+                                <td data-testid={`playbook-version-status-${row.version}`}>
+                                  <CtChip variant={versionChipVariant(row.status)}>
+                                    {row.status}
+                                  </CtChip>
+                                </td>
+                                <td
+                                  className="ct-table__mono"
+                                  data-testid={`playbook-version-hash-${row.version}`}
+                                  title={row.content_hash ?? ''}
+                                >
+                                  {row.content_hash ? shortenHash(row.content_hash) : '—'}
+                                </td>
+                                <td className="ct-table__mono">{row.uploaded_by || '—'}</td>
+                                <td className="ct-table__mono">
+                                  {formatTimestamp(row.uploaded_at)}
+                                </td>
+                                <td>
+                                  {notesVersion === row.version ? (
+                                    <div className="ct-stack">
+                                      <CtField label={`Note for version ${row.version}`}>
+                                        <textarea
+                                          data-testid={`playbook-version-notes-input-${row.version}`}
+                                          rows={3}
+                                          value={notesDraft}
+                                          onChange={(e) => setNotesDraft(e.target.value)}
+                                        />
+                                      </CtField>
+                                      <div className="ct-actions">
+                                        <CtButton
+                                          type="button"
+                                          variant="primary"
+                                          size="sm"
+                                          data-testid={`playbook-version-notes-save-${row.version}`}
+                                          disabled={pendingAction === `notes:${row.version}`}
+                                          onClick={() =>
+                                            void saveNotes(row.playbook_id, row.version, notesDraft)
+                                          }
+                                        >
+                                          Save note
+                                        </CtButton>
+                                        <CtButton
+                                          type="button"
+                                          variant="ghost"
+                                          size="sm"
+                                          data-testid={`playbook-version-notes-cancel-${row.version}`}
+                                          onClick={() => setNotesVersion(null)}
+                                        >
+                                          Cancel
+                                        </CtButton>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="ct-stack">
+                                      <span>{row.notes === '' ? '—' : linkifyText(row.notes)}</span>
+                                      <CtButton
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        data-testid={`playbook-version-notes-edit-${row.version}`}
+                                        onClick={() => {
+                                          setActionError(null);
+                                          setNotesVersion(row.version);
+                                          setNotesDraft(row.notes);
+                                        }}
+                                      >
+                                        {row.notes === '' ? 'Add a note' : 'Edit note'}
+                                      </CtButton>
+                                    </div>
+                                  )}
+                                </td>
+                                <td>
+                                  <div className="ct-actions" role="group">
+                                    <CtButton
+                                      type="button"
+                                      variant="secondary"
+                                      size="sm"
+                                      data-testid={`playbook-version-download-${row.version}`}
+                                      disabled={pendingAction === `download:${row.version}`}
+                                      onClick={() =>
+                                        void downloadVersion(row.playbook_id, row.version)
+                                      }
+                                    >
+                                      Download
+                                    </CtButton>
+                                    {/* The APPROVAL STATE of this row, as a note —
                                 never a control. Since issue #595 the only
                                 approval control is the merged action below.
 
@@ -1897,24 +1904,24 @@ export default function AdminPlaybooks(): React.ReactElement | null {
                                 A row with no content_hash at all (written
                                 before issue #478) has nothing an approval
                                 could name, so it gets neither. */}
-                            {approved ? (
-                              <span
-                                className="ct-muted"
-                                data-testid={`playbook-version-approved-note-${row.version}`}
-                              >
-                                Approved
-                              </span>
-                            ) : isActive && row.content_hash !== undefined ? (
-                              <span
-                                className="ct-muted"
-                                data-testid={`playbook-version-unapproved-active-note-${row.version}`}
-                              >
-                                Never approved — it went live without one (the deploy seed
-                                bypasses the approval gate).
-                              </span>
-                            ) : null}
+                                    {approved ? (
+                                      <span
+                                        className="ct-muted"
+                                        data-testid={`playbook-version-approved-note-${row.version}`}
+                                      >
+                                        Approved
+                                      </span>
+                                    ) : isActive && row.content_hash !== undefined ? (
+                                      <span
+                                        className="ct-muted"
+                                        data-testid={`playbook-version-unapproved-active-note-${row.version}`}
+                                      >
+                                        Never approved — it went live without one (the deploy seed
+                                        bypasses the approval gate).
+                                      </span>
+                                    ) : null}
 
-                            {/* The one ACTION that puts a version live.
+                                    {/* The one ACTION that puts a version live.
                                 Issue #595 collapsed Approve + Activate into
                                 it: approval is the precheck activation
                                 requires, so two clicks bought nothing. Still
@@ -1927,50 +1934,54 @@ export default function AdminPlaybooks(): React.ReactElement | null {
                                 path must not demand re-approval), and a
                                 hashless row keeps it too so the server can
                                 state the Gate-7 refusal in its own words. */}
-                            {isActive ? (
-                              // Activating the already-active version can't
-                              // mean anything — no button to click, not a
-                              // disabled one (issue #476). The status chip
-                              // already says "active"; this is a quiet
-                              // acknowledgement in the actions column so an
-                              // admin isn't left wondering where the button
-                              // went.
-                              <span
-                                className="ct-muted"
-                                data-testid={`playbook-version-active-note-${row.version}`}
-                              >
-                                Currently active
-                              </span>
-                            ) : canApprove ? (
-                              <CtButton
-                                type="button"
-                                variant="secondary"
-                                size="sm"
-                                data-testid={`playbook-version-approve-activate-${row.version}`}
-                                disabled={pendingAction === `approve-activate:${row.version}`}
-                                onClick={() =>
-                                  void approveAndActivateVersion(
-                                    row.playbook_id,
-                                    row.version,
-                                    row.content_hash as string,
-                                  )
-                                }
-                              >
-                                Approve &amp; activate
-                              </CtButton>
-                            ) : (
-                              <CtButton
-                                type="button"
-                                variant="secondary"
-                                size="sm"
-                                data-testid={`playbook-version-activate-${row.version}`}
-                                disabled={pendingAction === `activate:${row.version}`}
-                                onClick={() => void activateVersion(row.playbook_id, row.version)}
-                              >
-                                Activate
-                              </CtButton>
-                            )}
-                            {/* Only a `retired` row was ever actually active
+                                    {isActive ? (
+                                      // Activating the already-active version can't
+                                      // mean anything — no button to click, not a
+                                      // disabled one (issue #476). The status chip
+                                      // already says "active"; this is a quiet
+                                      // acknowledgement in the actions column so an
+                                      // admin isn't left wondering where the button
+                                      // went.
+                                      <span
+                                        className="ct-muted"
+                                        data-testid={`playbook-version-active-note-${row.version}`}
+                                      >
+                                        Currently active
+                                      </span>
+                                    ) : canApprove ? (
+                                      <CtButton
+                                        type="button"
+                                        variant="secondary"
+                                        size="sm"
+                                        data-testid={`playbook-version-approve-activate-${row.version}`}
+                                        disabled={
+                                          pendingAction === `approve-activate:${row.version}`
+                                        }
+                                        onClick={() =>
+                                          void approveAndActivateVersion(
+                                            row.playbook_id,
+                                            row.version,
+                                            row.content_hash as string,
+                                          )
+                                        }
+                                      >
+                                        Approve &amp; activate
+                                      </CtButton>
+                                    ) : (
+                                      <CtButton
+                                        type="button"
+                                        variant="secondary"
+                                        size="sm"
+                                        data-testid={`playbook-version-activate-${row.version}`}
+                                        disabled={pendingAction === `activate:${row.version}`}
+                                        onClick={() =>
+                                          void activateVersion(row.playbook_id, row.version)
+                                        }
+                                      >
+                                        Activate
+                                      </CtButton>
+                                    )}
+                                    {/* Only a `retired` row was ever actually active
                                 (activate/rollback are the sole writers of
                                 that status — see playbook_versions.py), so
                                 it is the sole authoritative "has something to
@@ -1979,31 +1990,33 @@ export default function AdminPlaybooks(): React.ReactElement | null {
                                 than a disabled button with nowhere to go
                                 (issue #476). The backend's own 409 is still
                                 what is rendered if it disagrees. */}
-                            {row.status === 'retired' && (
-                              <CtButton
-                                type="button"
-                                variant="secondary"
-                                size="sm"
-                                data-testid={`playbook-version-rollback-${row.version}`}
-                                disabled={pendingAction === `rollback:${row.version}`}
-                                onClick={() => void rollBackVersion(row.playbook_id, row.version)}
-                              >
-                                Roll back
-                              </CtButton>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </CtTable>
-            </>
-          )}
-        </CtCard>
-        </div>
+                                    {row.status === 'retired' && (
+                                      <CtButton
+                                        type="button"
+                                        variant="secondary"
+                                        size="sm"
+                                        data-testid={`playbook-version-rollback-${row.version}`}
+                                        disabled={pendingAction === `rollback:${row.version}`}
+                                        onClick={() =>
+                                          void rollBackVersion(row.playbook_id, row.version)
+                                        }
+                                      >
+                                        Roll back
+                                      </CtButton>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </CtTable>
+                </>
+              )}
+            </CtCard>
+          </div>
         </div>
       )}
 
@@ -2034,10 +2047,9 @@ export default function AdminPlaybooks(): React.ReactElement | null {
                 derived server-side from the uploaded document's own
                 agreement_type, never typed by an operator. */}
             <CtBanner variant="muted" data-testid="admin-playbooks-create-identity-note">
-              The playbook_id is read from the document itself — its
-              agreement_type — not typed here. If the file's agreement_type
-              already matches an existing playbook, the server refuses and
-              names it: upload a new version onto that one instead.
+              The playbook_id is read from the document itself — its agreement_type — not typed
+              here. If the file's agreement_type already matches an existing playbook, the server
+              refuses and names it: upload a new version onto that one instead.
             </CtBanner>
 
             {createError && (

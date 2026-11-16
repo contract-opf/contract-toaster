@@ -74,7 +74,9 @@ import reconciliation as recon  # noqa: E402
 try:
     import jsonschema
 except ImportError as _exc:  # pragma: no cover
-    raise ImportError("test_bundle_overrides.py requires jsonschema (requirements-dev.txt).") from _exc
+    raise ImportError(
+        "test_bundle_overrides.py requires jsonschema (requirements-dev.txt)."
+    ) from _exc
 
 FIXTURE_PATH = REPO_ROOT / "tests" / "fixtures" / "opf" / "synthetic-eiaa.opf.json"
 # OPF 0.3 gold fixture. The #294 override semantics under test here are
@@ -153,10 +155,14 @@ def check_1_posture_override_changes_hash_preserves_opf() -> list[str]:
     try:
         jsonschema.validate(instance=with_override, schema=_load_bundle_schema())
     except jsonschema.ValidationError as exc:
-        failures.append(f"  [1a] bundle with a valid posture override failed schema validation: {exc.message}")
+        failures.append(
+            f"  [1a] bundle with a valid posture override failed schema validation: {exc.message}"
+        )
 
     if with_override.get("opf") != opf_doc:
-        failures.append("  [1b] embedded OPF is not deep-equal to the input after a posture override")
+        failures.append(
+            "  [1b] embedded OPF is not deep-equal to the input after a posture override"
+        )
 
     if canonicalize.content_hash(baseline) == canonicalize.content_hash(with_override):
         failures.append("  [1c] bundle hash unchanged after adding a posture override")
@@ -188,9 +194,13 @@ def check_2_stale_edit_guard() -> list[str]:
     except bind_bundle.BindBundleError as exc:
         message = str(exc)
         if _STALE_POSTURE_DIGEST not in message:
-            failures.append(f"  [2b] error message does not name the given digest {_STALE_POSTURE_DIGEST!r}: {message!r}")
+            failures.append(
+                f"  [2b] error message does not name the given digest {_STALE_POSTURE_DIGEST!r}: {message!r}"
+            )
         if _GENESIS_POSTURE_DIGEST not in message:
-            failures.append(f"  [2c] error message does not name the genesis digest {_GENESIS_POSTURE_DIGEST!r}: {message!r}")
+            failures.append(
+                f"  [2c] error message does not name the genesis digest {_GENESIS_POSTURE_DIGEST!r}: {message!r}"
+            )
     except Exception as exc:  # noqa: BLE001
         failures.append(f"  [2d] wrong exception type raised: {type(exc).__name__}: {exc}")
 
@@ -223,8 +233,13 @@ def check_2_stale_edit_guard() -> list[str]:
             cwd=str(REPO_ROOT),
         )
         if result.returncode == 0:
-            failures.append("  [2e] CLI exited 0 for a mismatched parent_section_digest (expected exit 1)")
-        if _STALE_POSTURE_DIGEST not in result.stderr or _GENESIS_POSTURE_DIGEST not in result.stderr:
+            failures.append(
+                "  [2e] CLI exited 0 for a mismatched parent_section_digest (expected exit 1)"
+            )
+        if (
+            _STALE_POSTURE_DIGEST not in result.stderr
+            or _GENESIS_POSTURE_DIGEST not in result.stderr
+        ):
             failures.append(f"  [2f] CLI stderr does not name both digests: {result.stderr!r}")
         if out_path.exists():
             failures.append("  [2g] CLI wrote an --out file despite the stale-edit guard failing")
@@ -248,7 +263,9 @@ def check_3_floor_additions_collision_and_valid() -> list[str]:
             model_policy_path=MODEL_POLICY_PATH,
             overrides={"floor_additions": [_COLLIDING_FLOOR_ADDITION]},
         )
-        failures.append("  [3a] bind_bundle did not raise on a floor_additions id colliding with a genesis invariant")
+        failures.append(
+            "  [3a] bind_bundle did not raise on a floor_additions id colliding with a genesis invariant"
+        )
     except bind_bundle.BindBundleError as exc:
         if _COLLIDING_FLOOR_ADDITION["id"] not in str(exc):
             failures.append(f"  [3b] error message does not name the colliding id: {exc}")
@@ -271,7 +288,9 @@ def check_3_floor_additions_collision_and_valid() -> list[str]:
     try:
         jsonschema.validate(instance=bundle_doc, schema=_load_bundle_schema())
     except jsonschema.ValidationError as exc:
-        failures.append(f"  [3f] bundle with a valid floor_additions entry failed schema validation: {exc.message}")
+        failures.append(
+            f"  [3f] bundle with a valid floor_additions entry failed schema validation: {exc.message}"
+        )
 
     return failures
 
@@ -295,7 +314,9 @@ def check_4_monotonic_version() -> list[str]:
             overrides={"posture": same_version},
             previous_bundle=previous_bundle,
         )
-        failures.append("  [4a] bind_bundle did not raise for a posture version not greater than the previous bundle's")
+        failures.append(
+            "  [4a] bind_bundle did not raise for a posture version not greater than the previous bundle's"
+        )
     except bind_bundle.BindBundleError:
         pass
     except Exception as exc:  # noqa: BLE001
@@ -323,7 +344,9 @@ def check_4_monotonic_version() -> list[str]:
             previous_bundle=None,
         )
     except bind_bundle.BindBundleError as exc:
-        failures.append(f"  [4d] bind_bundle rejected version=1 against an implicit genesis (version 0) previous bundle: {exc}")
+        failures.append(
+            f"  [4d] bind_bundle rejected version=1 against an implicit genesis (version 0) previous bundle: {exc}"
+        )
 
     return failures
 
@@ -345,7 +368,9 @@ def check_5_schema_rejects_removal_key() -> list[str]:
 
     try:
         jsonschema.validate(instance=tampered, schema=_load_bundle_schema())
-        failures.append("  [5a] schema accepted an overrides.floor_removals key (expected additionalProperties: false to reject it)")
+        failures.append(
+            "  [5a] schema accepted an overrides.floor_removals key (expected additionalProperties: false to reject it)"
+        )
     except jsonschema.ValidationError:
         pass
 
@@ -384,7 +409,9 @@ def check_6_composition_posture_and_floor_union() -> list[str]:
     override_blocks = opf_prompt.compose_opf_system_blocks(opf_doc, overrides=overrides)
 
     if override_blocks[0] != _VALID_POSTURE_OVERRIDE["system_prompt"]:
-        failures.append(f"  [6a] Posture block does not equal the override's system_prompt; got {override_blocks[0]!r}")
+        failures.append(
+            f"  [6a] Posture block does not equal the override's system_prompt; got {override_blocks[0]!r}"
+        )
     if genesis_blocks[0] == override_blocks[0]:
         failures.append("  [6b] Posture block unchanged despite an override being supplied")
 
@@ -397,21 +424,31 @@ def check_6_composition_posture_and_floor_union() -> list[str]:
         if genesis_id not in floor_block:
             failures.append(f"  [6c] Floor block missing genesis invariant id {genesis_id!r}")
     if _VALID_FLOOR_ADDITION["id"] not in floor_block:
-        failures.append(f"  [6d] Floor block missing floor_additions id {_VALID_FLOOR_ADDITION['id']!r}")
+        failures.append(
+            f"  [6d] Floor block missing floor_additions id {_VALID_FLOOR_ADDITION['id']!r}"
+        )
     if floor_block.find(genesis_ids[0]) > floor_block.find(_VALID_FLOOR_ADDITION["id"]):
-        failures.append("  [6e] Floor block does not list genesis invariants before floor_additions (stable order)")
+        failures.append(
+            "  [6e] Floor block does not list genesis invariants before floor_additions (stable order)"
+        )
 
     resolved = opf_prompt.resolve_floor_invariants(opf_doc, overrides)
     if len(resolved) != len(genesis_ids) + 1:
-        failures.append(f"  [6f] resolve_floor_invariants returned {len(resolved)} invariants, expected {len(genesis_ids) + 1}")
+        failures.append(
+            f"  [6f] resolve_floor_invariants returned {len(resolved)} invariants, expected {len(genesis_ids) + 1}"
+        )
     if [inv["id"] for inv in resolved] != genesis_ids + [_VALID_FLOOR_ADDITION["id"]]:  # noqa: RUF005
-        failures.append(f"  [6g] resolve_floor_invariants order is not genesis-first-stable: {[inv['id'] for inv in resolved]!r}")
+        failures.append(
+            f"  [6g] resolve_floor_invariants order is not genesis-first-stable: {[inv['id'] for inv in resolved]!r}"
+        )
 
     # No overrides -> unaffected (byte-identical to pre-#294 behavior).
     if opf_prompt.compose_opf_system_blocks(opf_doc) != genesis_blocks:
         failures.append("  [6h] compose_opf_system_blocks(opf_doc) without overrides is not stable")
     if opf_prompt.resolve_floor_invariants(opf_doc) != opf_doc["floor"]["invariants"]:
-        failures.append("  [6i] resolve_floor_invariants(opf_doc) without overrides must equal genesis invariants verbatim")
+        failures.append(
+            "  [6i] resolve_floor_invariants(opf_doc) without overrides must equal genesis invariants verbatim"
+        )
 
     return failures
 
@@ -422,7 +459,9 @@ def check_6_composition_posture_and_floor_union() -> list[str]:
 
 
 def _verdict_response(invariant_id: str, violated: bool, evidence_quote: str = "") -> str:
-    return json.dumps({"invariant_id": invariant_id, "violated": violated, "evidence_quote": evidence_quote})
+    return json.dumps(
+        {"invariant_id": invariant_id, "violated": violated, "evidence_quote": evidence_quote}
+    )
 
 
 def _accept_result() -> dict[str, Any]:
@@ -445,7 +484,9 @@ def check_7_floor_addition_judged_alongside_genesis() -> list[str]:
 
     genesis_ids = [inv["id"] for inv in opf_doc["floor"]["invariants"]]
     responses = [_verdict_response(genesis_id, False) for genesis_id in genesis_ids]
-    responses.append(_verdict_response(_VALID_FLOOR_ADDITION["id"], True, "indemnification is uncapped"))
+    responses.append(
+        _verdict_response(_VALID_FLOOR_ADDITION["id"], True, "indemnification is uncapped")
+    )
     client = model_client.FakeBedrockClient({_MODEL_ID: responses})
 
     judgment = floor_judge.judge_floor_invariants(
@@ -458,9 +499,13 @@ def check_7_floor_addition_judged_alongside_genesis() -> list[str]:
         failures.append(f"  [7a] judgment unexpectedly fail_closed; unjudged={judgment.unjudged!r}")
 
     fires = floor_judge.floor_fires(judgment)
-    addition_fires = [f for f in fires if f.get("provenance") == f"floor:{_VALID_FLOOR_ADDITION['id']}"]
+    addition_fires = [
+        f for f in fires if f.get("provenance") == f"floor:{_VALID_FLOOR_ADDITION['id']}"
+    ]
     if len(addition_fires) != 1:
-        failures.append(f"  [7b] expected exactly one fire for the floor_additions entry; got {fires!r}")
+        failures.append(
+            f"  [7b] expected exactly one fire for the floor_additions entry; got {fires!r}"
+        )
         return failures
 
     result = recon.reconcile(
@@ -469,7 +514,9 @@ def check_7_floor_addition_judged_alongside_genesis() -> list[str]:
         detector_fires=fires,
     )
     if result["decision"] != "REQUEST_CHANGE":
-        failures.append(f"  [7c] a violated floor_addition must force REQUEST_CHANGE exactly like a genesis violation; got {result['decision']!r}")
+        failures.append(
+            f"  [7c] a violated floor_addition must force REQUEST_CHANGE exactly like a genesis violation; got {result['decision']!r}"
+        )
 
     return failures
 
@@ -515,7 +562,9 @@ def check_8_cli_end_to_end() -> list[str]:
             cwd=str(REPO_ROOT),
         )
         if result.returncode != 0:
-            failures.append(f"  [8a] CLI exited {result.returncode}\nstdout={result.stdout}\nstderr={result.stderr}")
+            failures.append(
+                f"  [8a] CLI exited {result.returncode}\nstdout={result.stdout}\nstderr={result.stderr}"
+            )
             return failures
         with open(out_path, encoding="utf-8") as f:
             written = json.load(f)
@@ -554,9 +603,13 @@ def check_8_cli_end_to_end() -> list[str]:
             cwd=str(REPO_ROOT),
         )
         if result_2.returncode == 0:
-            failures.append("  [8e] CLI exited 0 for a non-monotonic posture version via --previous-bundle (expected exit 1)")
+            failures.append(
+                "  [8e] CLI exited 0 for a non-monotonic posture version via --previous-bundle (expected exit 1)"
+            )
         if out_path_2.exists():
-            failures.append("  [8f] CLI wrote an --out file despite the monotonic-version guard failing")
+            failures.append(
+                "  [8f] CLI wrote an --out file despite the monotonic-version guard failing"
+            )
 
     return failures
 
@@ -574,7 +627,9 @@ def check_9_governance_doc_section_present() -> list[str]:
     text = GOVERNANCE_DOC_PATH.read_text(encoding="utf-8")
 
     if "Single-item corrections" not in text:
-        failures.append("  [9b] docs/playbook-governance.md has no 'Single-item corrections' section")
+        failures.append(
+            "  [9b] docs/playbook-governance.md has no 'Single-item corrections' section"
+        )
     if "overrides.posture" not in text:
         failures.append("  [9c] governance doc does not name the overrides.posture lever")
     if "floor_additions" not in text:
@@ -582,24 +637,60 @@ def check_9_governance_doc_section_present() -> list[str]:
     if "#293" not in text and "pen_rules" not in text:
         failures.append("  [9e] governance doc does not name the pen_rules (#293) lever")
     if "curation pin" not in text and "curation pins" not in text:
-        failures.append("  [9f] governance doc does not note that evidence corrections go to engine curation pins")
+        failures.append(
+            "  [9f] governance doc does not note that evidence corrections go to engine curation pins"
+        )
     if "re-run" not in text.lower() and "re-running" not in text.lower():
-        failures.append("  [9g] governance doc does not state that a correction never requires re-running the playbook engine")
+        failures.append(
+            "  [9g] governance doc does not state that a correction never requires re-running the playbook engine"
+        )
 
     return failures
 
 
 def main() -> int:
     checks = [
-        ("1", "posture override changes bundle hash, preserves embedded OPF", check_1_posture_override_changes_hash_preserves_opf),
-        ("2", "stale-edit guard (mismatched parent_section_digest) fails closed", check_2_stale_edit_guard),
-        ("3", "floor_additions id collision rejected; non-colliding id accepted", check_3_floor_additions_collision_and_valid),
+        (
+            "1",
+            "posture override changes bundle hash, preserves embedded OPF",
+            check_1_posture_override_changes_hash_preserves_opf,
+        ),
+        (
+            "2",
+            "stale-edit guard (mismatched parent_section_digest) fails closed",
+            check_2_stale_edit_guard,
+        ),
+        (
+            "3",
+            "floor_additions id collision rejected; non-colliding id accepted",
+            check_3_floor_additions_collision_and_valid,
+        ),
         ("4", "monotonic posture versioning via --previous-bundle", check_4_monotonic_version),
-        ("5", "schema rejects an overrides.floor_removals-style key", check_5_schema_rejects_removal_key),
-        ("6", "composition redirects Posture + unions Floor additions", check_6_composition_posture_and_floor_union),
-        ("7", "judged Floor addition forces REQUEST_CHANGE like a genesis violation", check_7_floor_addition_judged_alongside_genesis),
-        ("8", "CLI --posture-override / --floor-additions / --previous-bundle round-trip", check_8_cli_end_to_end),
-        ("9", "governance doc documents the three GC correction levers", check_9_governance_doc_section_present),
+        (
+            "5",
+            "schema rejects an overrides.floor_removals-style key",
+            check_5_schema_rejects_removal_key,
+        ),
+        (
+            "6",
+            "composition redirects Posture + unions Floor additions",
+            check_6_composition_posture_and_floor_union,
+        ),
+        (
+            "7",
+            "judged Floor addition forces REQUEST_CHANGE like a genesis violation",
+            check_7_floor_addition_judged_alongside_genesis,
+        ),
+        (
+            "8",
+            "CLI --posture-override / --floor-additions / --previous-bundle round-trip",
+            check_8_cli_end_to_end,
+        ),
+        (
+            "9",
+            "governance doc documents the three GC correction levers",
+            check_9_governance_doc_section_present,
+        ),
     ]
 
     overall_pass = True

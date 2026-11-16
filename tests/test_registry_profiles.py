@@ -149,25 +149,31 @@ def _build_registry(
         anchor_map_path = "standard-forms/precision-fixture-v1.0.0.anchor-map.json"
         fixtures_dir = "tests/gold-fixtures-precision-fixture"
 
-        _write_json(root / playbook_path, {
-            "playbook": {"id": "precision-fixture", "version": "1.0.0"},
-            "topics": [
-                {"id": "t1", "section_anchors": ["sec-1", "sec-2"]},
-            ],
-            "hard_rejections": [],
-            "anchor_migrations": precision_anchor_migrations or [],
-        })
+        _write_json(
+            root / playbook_path,
+            {
+                "playbook": {"id": "precision-fixture", "version": "1.0.0"},
+                "topics": [
+                    {"id": "t1", "section_anchors": ["sec-1", "sec-2"]},
+                ],
+                "hard_rejections": [],
+                "anchor_migrations": precision_anchor_migrations or [],
+            },
+        )
         _write_json(root / section_config_path, {"sections": []})
         if not omit_precision_anchor_map_file:
-            _write_json(root / anchor_map_path, {
-                "schema_version": "1",
-                "anchors": {
-                    "sec-1": _sha256_text("Section One"),
-                    "sec-2": _sha256_text("Section Two"),
+            _write_json(
+                root / anchor_map_path,
+                {
+                    "schema_version": "1",
+                    "anchors": {
+                        "sec-1": _sha256_text("Section One"),
+                        "sec-2": _sha256_text("Section Two"),
+                    },
+                    "coverage_exempt_anchors": [],
+                    "coverage_exempt_rationales": {},
                 },
-                "coverage_exempt_anchors": [],
-                "coverage_exempt_rationales": {},
-            })
+            )
         (root / fixtures_dir).mkdir(parents=True, exist_ok=True)
 
         registry["playbooks"]["precision-fixture"] = {
@@ -182,10 +188,13 @@ def _build_registry(
     if include_knowledge:
         playbook_path = "playbooks/knowledge-fixture-v1.0.0.json"
         fixtures_dir = "tests/gold-fixtures-knowledge-fixture"
-        _write_json(root / playbook_path, {
-            "playbook": {"id": "knowledge-fixture", "version": "1.0.0"},
-            "topics": [],
-        })
+        _write_json(
+            root / playbook_path,
+            {
+                "playbook": {"id": "knowledge-fixture", "version": "1.0.0"},
+                "topics": [],
+            },
+        )
         (root / fixtures_dir).mkdir(parents=True, exist_ok=True)
 
         registry["playbooks"]["knowledge-fixture"] = {
@@ -225,6 +234,7 @@ class _RegistryPatch:
 # Check 1 — profile() unit-tested for both shapes
 # ---------------------------------------------------------------------------
 
+
 def check_profile_both_shapes() -> list[str]:
     failures = []
 
@@ -262,8 +272,10 @@ def check_profile_both_shapes() -> list[str]:
     # Asymmetric shapes must also classify as knowledge -- profile requires
     # BOTH fields, not either.
     only_anchor_map = PE(
-        playbook_id="x", playbook_path=Path("p.json"),
-        anchor_map_path=Path("a.json"), section_config_path=None,
+        playbook_id="x",
+        playbook_path=Path("p.json"),
+        anchor_map_path=Path("a.json"),
+        section_config_path=None,
         fixtures_dir=Path("fixtures"),
     )
     if playbook_registry.profile(only_anchor_map) != "knowledge":
@@ -274,8 +286,10 @@ def check_profile_both_shapes() -> list[str]:
         )
 
     only_section_config = PE(
-        playbook_id="x", playbook_path=Path("p.json"),
-        anchor_map_path=None, section_config_path=Path("s.json"),
+        playbook_id="x",
+        playbook_path=Path("p.json"),
+        anchor_map_path=None,
+        section_config_path=Path("s.json"),
         fixtures_dir=Path("fixtures"),
     )
     if playbook_registry.profile(only_section_config) != "knowledge":
@@ -292,6 +306,7 @@ def check_profile_both_shapes() -> list[str]:
 # Check 2 — guard rail: resolve_playbook() on a knowledge-profile entry
 # works, and NO modified gate hard-fails (raises) on a null anchor map.
 # ---------------------------------------------------------------------------
+
 
 def check_guard_rail_no_hard_fail_on_null_anchor_map() -> list[str]:
     failures = []
@@ -314,9 +329,7 @@ def check_guard_rail_no_hard_fail_on_null_anchor_map() -> list[str]:
                     "registry entry."
                 )
             if playbook_registry.profile(entry) != "knowledge":
-                failures.append(
-                    "  profile(resolve_playbook('knowledge-fixture')) != 'knowledge'."
-                )
+                failures.append("  profile(resolve_playbook('knowledge-fixture')) != 'knowledge'.")
 
             for label, fn in (
                 ("tests/lint-acceptable-variations.py", _LINT_ACCEPTABLE_VARIATIONS.main),
@@ -362,6 +375,7 @@ def check_guard_rail_no_hard_fail_on_null_anchor_map() -> list[str]:
 # assertable, and is the property check 2 cannot see on its own, is that the
 # skip names the knowledge entry and ONLY the knowledge entry.
 
+
 def check_precision_entry_still_enforced() -> list[str]:
     failures = []
 
@@ -377,8 +391,7 @@ def check_precision_entry_still_enforced() -> list[str]:
             for label, fn in gates:
                 code, output = _run(fn)
                 skip_lines = [
-                    line for line in output.splitlines()
-                    if "SKIP (knowledge profile)" in line
+                    line for line in output.splitlines() if "SKIP (knowledge profile)" in line
                 ]
                 if not any("knowledge-fixture" in line for line in skip_lines):
                     failures.append(
@@ -424,10 +437,15 @@ def check_precision_entry_still_enforced() -> list[str]:
 # main
 # ---------------------------------------------------------------------------
 
+
 def main() -> int:
     checks = [
         ("1", "profile() classifies both shapes correctly", check_profile_both_shapes),
-        ("2", "guard rail: no gate hard-fails on a null anchor map", check_guard_rail_no_hard_fail_on_null_anchor_map),
+        (
+            "2",
+            "guard rail: no gate hard-fails on a null anchor map",
+            check_guard_rail_no_hard_fail_on_null_anchor_map,
+        ),
         ("3", "precision entries lose no enforcement", check_precision_entry_still_enforced),
     ]
 

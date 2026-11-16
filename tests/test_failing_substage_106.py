@@ -87,6 +87,7 @@ REVIEW_ID = "00000000-0000-4000-a000-000000000106"
 # the file this one is the sibling of.
 # ---------------------------------------------------------------------------
 
+
 class FakeReviewsTable:
     """Generic-enough SET interpreter to apply whatever UpdateExpression
     record_stage_failure (or _write_progress_stage) emits."""
@@ -94,8 +95,14 @@ class FakeReviewsTable:
     def __init__(self, status: str = "PENDING"):
         self.item: dict[str, Any] = {"review_id": REVIEW_ID, "status": status}
 
-    def update_item(self, Key, UpdateExpression, ConditionExpression=None,
-                    ExpressionAttributeNames=None, ExpressionAttributeValues=None):
+    def update_item(
+        self,
+        Key,
+        UpdateExpression,
+        ConditionExpression=None,
+        ExpressionAttributeNames=None,
+        ExpressionAttributeValues=None,
+    ):
         # `_write_progress_stage`'s write is conditioned on status == RUNNING
         # and `record_stage_failure`'s guard is "not already the success
         # terminal" -- this fake does not model DynamoDB's real conditional
@@ -187,8 +194,10 @@ def _drive_pipeline(fake_run_review: Any, *extra_patches: Any) -> FakeReviewsTab
         ):
             stack.enter_context(patcher)
         pr.run_real_pipeline(
-            REVIEW_ID, _payload(),
-            dynamodb_resource=FakeDDB(reviews_table), s3_client=s3,
+            REVIEW_ID,
+            _payload(),
+            dynamodb_resource=FakeDDB(reviews_table),
+            s3_client=s3,
             model_client=object(),
         )
     return reviews_table
@@ -252,8 +261,12 @@ class TestFailingSubstageNamedInsteadOfRunReviewUmbrella(unittest.TestCase):
         for: a code defect past the last reported sub-stage used to be
         reported identically to a bare model failure."""
         table = _run_with_spine_reporting_then_raising(
-            (review_spine.PROGRESS_PRIMARY_PASS, review_spine.PROGRESS_CRITIC_PASS,
-             review_spine.PROGRESS_RECONCILIATION, review_spine.PROGRESS_REDLINE),
+            (
+                review_spine.PROGRESS_PRIMARY_PASS,
+                review_spine.PROGRESS_CRITIC_PASS,
+                review_spine.PROGRESS_RECONCILIATION,
+                review_spine.PROGRESS_REDLINE,
+            ),
             RuntimeError("leakage scan blew up"),
         )
         self.assertEqual(table.item["failing_stage"], review_spine.PROGRESS_REDLINE)
@@ -280,7 +293,8 @@ class TestFailingSubstageNamedInsteadOfRunReviewUmbrella(unittest.TestCase):
         already-pinned behavior (tests/test_review_failure_reason_442.py)
         and must not regress."""
         table = _run_with_spine_reporting_then_raising(
-            (), RuntimeError("blew up before the first progress report"),
+            (),
+            RuntimeError("blew up before the first progress report"),
         )
         self.assertEqual(table.item["failing_stage"], "run_review")
 
@@ -301,8 +315,12 @@ class TestFailingSubstageNamedInsteadOfRunReviewUmbrella(unittest.TestCase):
         stage earlier.
         """
         table = _run_with_spine_returning_then_persist_raising(
-            (review_spine.PROGRESS_PRIMARY_PASS, review_spine.PROGRESS_CRITIC_PASS,
-             review_spine.PROGRESS_RECONCILIATION, review_spine.PROGRESS_REDLINE),
+            (
+                review_spine.PROGRESS_PRIMARY_PASS,
+                review_spine.PROGRESS_CRITIC_PASS,
+                review_spine.PROGRESS_RECONCILIATION,
+                review_spine.PROGRESS_REDLINE,
+            ),
             RuntimeError("the redline object could not be written"),
         )
         self.assertEqual(table.item["failing_stage"], "persist_result")

@@ -251,9 +251,7 @@ describe('the classified reason beats the stage guess (issue #442)', () => {
     const panel = await screen.findByTestId('review-failure');
     expect(panel).toHaveTextContent(/cannot honestly turn into review instructions/i);
     expect(panel).toHaveTextContent(/an admin needs to check/i);
-    expect(screen.getByTestId('review-failure-reason')).toHaveTextContent(
-      'opf_knowledge_refused',
-    );
+    expect(screen.getByTestId('review-failure-reason')).toHaveTextContent('opf_knowledge_refused');
   });
 
   it('explains a playbook missing its digest, distinctly from a refusal (#479)', async () => {
@@ -313,9 +311,7 @@ describe('unnormalizable_input no longer sends the reader to re-save a .docx (#5
     await submitAndFail(null, 'unnormalizable_input', 'ERROR', note);
 
     const panel = await screen.findByTestId('review-failure');
-    expect(panel).toHaveTextContent(
-      /a tracked change the tool could not safely read/i,
-    );
+    expect(panel).toHaveTextContent(/a tracked change the tool could not safely read/i);
     expect(panel).toHaveTextContent(/review that tracked change directly/i);
     // The old, flatly-wrong copy must be gone.
     expect(panel).not.toHaveTextContent(/could not be read as a word document/i);

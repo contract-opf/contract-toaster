@@ -74,6 +74,7 @@ def rel(p: Path) -> str:
 
 # ── Check 1 — no hard-coded literal living list in docs-lint.py ──────────────
 
+
 def check_no_hardcoded_living_list():
     failures = []
     text = DOCS_LINT.read_text(encoding="utf-8")
@@ -92,6 +93,7 @@ def check_no_hardcoded_living_list():
 
 
 # ── Check 2 — the derived set is exactly today's nine living docs ────────────
+
 
 def check_derived_set_matches():
     failures = []
@@ -117,6 +119,7 @@ def check_derived_set_matches():
 
 # ── Check 3 — historical packets have left the top level of docs/ ────────────
 
+
 def check_historical_packets_moved():
     failures = []
     reports = DOCS_DIR / "reports"
@@ -140,6 +143,7 @@ def check_historical_packets_moved():
 
 
 # ── Check 4 — the derivation follows the index, and refuses an empty set ─────
+
 
 def _emit_index(docs_sync, entries):
     """An INDEX.md built by docs_sync's own emitter — the same code path
@@ -165,9 +169,15 @@ def check_derivation_follows_index():
             docs_sync,
             [
                 entry(path="ARCHITECTURE.md", scope="Root design doc.", kind="living"),
-                entry(path="docs/threat-model.md", scope="Security home.", kind="living",
-                      anchors=["identity-and-authorization"]),
-                entry(path="docs/evaluation.md", scope="Quality bar — deliberately NOT living here."),
+                entry(
+                    path="docs/threat-model.md",
+                    scope="Security home.",
+                    kind="living",
+                    anchors=["identity-and-authorization"],
+                ),
+                entry(
+                    path="docs/evaluation.md", scope="Quality bar — deliberately NOT living here."
+                ),
             ],
         )
         p = tmp_path / "variant.md"
@@ -183,12 +193,19 @@ def check_derivation_follows_index():
         #     line must give the kind back, or `project --write` would drop it.
         reparsed = docs_sync.parse_index(p)
         if reparsed.parse_errors:
-            failures.append(f"  docs_sync cannot parse its own emitted index: {reparsed.parse_errors}")
-        for path_, kind_ in (("ARCHITECTURE.md", "living"), ("docs/threat-model.md", "living"),
-                             ("docs/evaluation.md", None)):
+            failures.append(
+                f"  docs_sync cannot parse its own emitted index: {reparsed.parse_errors}"
+            )
+        for path_, kind_ in (
+            ("ARCHITECTURE.md", "living"),
+            ("docs/threat-model.md", "living"),
+            ("docs/evaluation.md", None),
+        ):
             actual = reparsed.entries[path_].kind if path_ in reparsed.entries else "<absent>"
             if actual != kind_:
-                failures.append(f"  kind for {path_} did not round-trip: expected {kind_!r}, got {actual!r}")
+                failures.append(
+                    f"  kind for {path_} did not round-trip: expected {kind_!r}, got {actual!r}"
+                )
 
         # (c) No tag anywhere must be refused, not silently scanned as empty.
         none_tagged = _emit_index(
@@ -227,14 +244,26 @@ def check_derivation_follows_index():
 
 def main() -> int:
     checks = [
-        ("1", "scripts/docs-lint.py has no hard-coded LIVING_DOCS literal",
-         check_no_hardcoded_living_list),
-        ("2", "The derived living set is exactly the nine `kind: living` docs",
-         check_derived_set_matches),
-        ("3", "Historical packets live under docs/reports/, not the top of docs/",
-         check_historical_packets_moved),
-        ("4", "The derivation follows docs/INDEX.md and refuses an empty set",
-         check_derivation_follows_index),
+        (
+            "1",
+            "scripts/docs-lint.py has no hard-coded LIVING_DOCS literal",
+            check_no_hardcoded_living_list,
+        ),
+        (
+            "2",
+            "The derived living set is exactly the nine `kind: living` docs",
+            check_derived_set_matches,
+        ),
+        (
+            "3",
+            "Historical packets live under docs/reports/, not the top of docs/",
+            check_historical_packets_moved,
+        ),
+        (
+            "4",
+            "The derivation follows docs/INDEX.md and refuses an empty set",
+            check_derivation_follows_index,
+        ),
     ]
 
     overall_pass = True

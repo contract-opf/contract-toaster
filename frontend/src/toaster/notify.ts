@@ -171,7 +171,7 @@ export function notifyToastDone(outcome: { failed: boolean; outcomeLabel: string
   if (typeof document === 'undefined' || document.visibilityState !== 'hidden') return;
 
   const title = outcome.failed
-    ? "That one burnt — tap for why"
+    ? 'That one burnt — tap for why'
     : `Toast's ready — ${(outcome.outcomeLabel ?? 'ready').toLowerCase()}`;
 
   try {

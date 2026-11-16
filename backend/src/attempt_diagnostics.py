@@ -139,9 +139,7 @@ def _projected(diagnostic: dict[str, Any]) -> dict[str, Any]:
     placeholder), matching the pass side, which omits `schema_error`
     entirely on a non-schema failure."""
     record = {
-        field: _clipped(diagnostic[field])
-        for field in _DIAGNOSTIC_FIELDS
-        if field in diagnostic
+        field: _clipped(diagnostic[field]) for field in _DIAGNOSTIC_FIELDS if field in diagnostic
     }
     schema_error = diagnostic.get("schema_error")
     if isinstance(schema_error, dict):
@@ -222,9 +220,7 @@ def make_attempt_diagnostic_write(
             s3_client.put_object(
                 Bucket=os.environ["OUTPUTS_BUCKET"],
                 Key=attempt_diagnostics_key(review_id),
-                Body=json.dumps(
-                    document, sort_keys=True, indent=2, default=str
-                ).encode("utf-8"),
+                Body=json.dumps(document, sort_keys=True, indent=2, default=str).encode("utf-8"),
                 ContentType="application/json",
                 **(extra_put_kwargs() if extra_put_kwargs else {}),
             )
@@ -233,8 +229,7 @@ def make_attempt_diagnostic_write(
             # thing that carries model output, so nothing from it -- not the
             # message, not the offending value -- is interpolated here.
             logger.warning(
-                "attempt diagnostic write failed for review_id=%s -- review "
-                "outcome unaffected",
+                "attempt diagnostic write failed for review_id=%s -- review outcome unaffected",
                 review_id,
             )
 

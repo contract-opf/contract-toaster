@@ -271,7 +271,9 @@ def main() -> int:
         print("  PASS")
 
     print()
-    print("Gate 3: RUNBOOK updated — no 'manually segment' procedure, cap-misconfiguration cause named")
+    print(
+        "Gate 3: RUNBOOK updated — no 'manually segment' procedure, cap-misconfiguration cause named"
+    )
     if g3:
         for f in g3:
             print(f)

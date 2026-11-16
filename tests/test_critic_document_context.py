@@ -324,8 +324,7 @@ def test_tasking_states_there_is_no_minimum_number_of_findings(failures: list[st
     flat = " ".join(pp.CRITIC_TASKING_BLOCK.split()).lower()
     if "there is no minimum number of findings" not in flat:
         failures.append(
-            "[2k] The tasking must state explicitly that there is NO MINIMUM NUMBER OF "
-            "FINDINGS."
+            "[2k] The tasking must state explicitly that there is NO MINIMUM NUMBER OF FINDINGS."
         )
     if "empty critique" not in flat:
         failures.append(
@@ -442,8 +441,7 @@ def test_oversized_document_fails_closed_without_any_model_call(failures: list[s
 
     if result.get("status") != "ERROR":
         failures.append(
-            f"[3a] Expected status=ERROR for an oversized critic prompt; "
-            f"got {result!r}"
+            f"[3a] Expected status=ERROR for an oversized critic prompt; got {result!r}"
         )
     if result.get("reason") != "document_too_large":
         failures.append(
@@ -491,7 +489,9 @@ def test_a_document_under_the_cap_still_runs(failures: list[str]) -> None:
     if result.get("status") != "OK":
         failures.append(f"[3h] A normal-sized document must still reach the model; got {result!r}")
     if len(client.calls) != 1:
-        failures.append(f"[3i] Expected exactly 1 model call under the cap; got {len(client.calls)}")
+        failures.append(
+            f"[3i] Expected exactly 1 model call under the cap; got {len(client.calls)}"
+        )
 
 
 def test_the_cap_is_enforced_at_the_boundary_the_parameter_names(
@@ -507,9 +507,7 @@ def test_the_cap_is_enforced_at_the_boundary_the_parameter_names(
         max_input_tokens=1,
     )
     if result.get("reason") != "document_too_large":
-        failures.append(
-            f"[3j] A cap of 1 token must reject even a small prompt; got {result!r}"
-        )
+        failures.append(f"[3j] A cap of 1 token must reject even a small prompt; got {result!r}")
     if len(client.calls) != 0:
         failures.append(f"[3k] Expected 0 model calls under a cap of 1; got {len(client.calls)}")
 

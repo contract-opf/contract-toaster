@@ -155,7 +155,7 @@ def _catch_all_segment(collapsed: str) -> str | None:
     start = collapsed.find(marker)
     if start == -1:
         return None
-    rest = collapsed[start + len(marker):]
+    rest = collapsed[start + len(marker) :]
     nxt = rest.find("- pattern:")
     return rest if nxt == -1 else rest[:nxt]
 
@@ -280,10 +280,7 @@ def check_cache_control_headers() -> list[str]:
     issue's Fix section calls out -- mirrors that policy instead of being
     left with no Cache-Control at all.
     """
-    print(
-        "\nCheck 4: CustomHeaders sets Cache-Control (no-cache default, "
-        "immutable /assets/**) …"
-    )
+    print("\nCheck 4: CustomHeaders sets Cache-Control (no-cache default, immutable /assets/**) …")
     failures: list[str] = []
 
     template = _load_frontend_template()
@@ -319,7 +316,7 @@ def check_cache_control_headers() -> list[str]:
     failures += _assert(
         has_assets_pattern,
         "CustomHeaders has a dedicated /assets/** pattern",
-        "Expected a `pattern: \"/assets/**\"` entry to carry the long-lived "
+        'Expected a `pattern: "/assets/**"` entry to carry the long-lived '
         "cache override for Vite's content-hashed built assets.",
     )
 
@@ -439,9 +436,7 @@ def check_spa_rewrite_rule_present() -> list[str]:
         return failures
 
     rewrite_rules = [
-        r
-        for r in custom_rules
-        if isinstance(r, dict) and r.get("Target") == "/index.html"
+        r for r in custom_rules if isinstance(r, dict) and r.get("Target") == "/index.html"
     ]
     failures += _assert(
         len(rewrite_rules) >= 1,
@@ -455,8 +450,7 @@ def check_spa_rewrite_rule_present() -> list[str]:
     status = rule.get("Status")
     failures += _assert(
         status in ("200", "404-200"),
-        "The /index.html rewrite rule uses a rewrite status (200 or 404-200), "
-        "not a redirect",
+        "The /index.html rewrite rule uses a rewrite status (200 or 404-200), not a redirect",
         f"Status was: {status!r}",
     )
 

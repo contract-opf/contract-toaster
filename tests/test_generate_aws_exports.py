@@ -67,6 +67,7 @@ def _write_sample_outputs(dir_path: Path) -> Path:
 # Test 1 + 2: end-to-end script run emits real values in the expected shape
 # ---------------------------------------------------------------------------
 
+
 def test_script_emits_real_cognito_and_api_values():
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
@@ -115,6 +116,7 @@ def test_script_emits_real_cognito_and_api_values():
 # Test: extract_config / build_aws_exports_source unit-level behavior
 # ---------------------------------------------------------------------------
 
+
 def test_extract_config_reads_expected_output_keys():
     config = extract_config(SAMPLE_OUTPUTS["ContractToasterStack-dev"], region="us-east-1")
     assert config.user_pool_id == "us-east-1_SampLe123"
@@ -138,6 +140,7 @@ def test_build_aws_exports_source_is_valid_looking_ts():
 # ---------------------------------------------------------------------------
 # Test 3: missing --outputs file is a clean error, not a traceback / bad write
 # ---------------------------------------------------------------------------
+
 
 def test_missing_outputs_file_errors_cleanly():
     with tempfile.TemporaryDirectory() as tmp:
@@ -167,6 +170,7 @@ def test_missing_outputs_file_errors_cleanly():
 # ---------------------------------------------------------------------------
 # Test 4: ambiguous multi-stack outputs file requires --stack
 # ---------------------------------------------------------------------------
+
 
 def test_ambiguous_multi_stack_outputs_requires_stack_flag():
     with tempfile.TemporaryDirectory() as tmp:
@@ -217,6 +221,7 @@ def test_ambiguous_multi_stack_outputs_requires_stack_flag():
 # ---------------------------------------------------------------------------
 # Main runner
 # ---------------------------------------------------------------------------
+
 
 def main() -> int:
     tests = [

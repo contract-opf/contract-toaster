@@ -56,7 +56,9 @@ def shown_refs(opf_doc: dict[str, Any]) -> set[tuple[str, str, str]]:
     def walk(node: Any) -> None:
         if isinstance(node, dict):
             if isinstance(node.get("document_id"), str) and "clause_path" in node:
-                found.add((node["document_id"], str(node.get("version")), str(node.get("clause_path"))))
+                found.add(
+                    (node["document_id"], str(node.get("version")), str(node.get("clause_path")))
+                )
             for value in node.values():
                 walk(value)
         elif isinstance(node, list):
@@ -84,7 +86,9 @@ def check_citation(citation: Any, shown: set[tuple[str, str, str]]) -> tuple[str
     return STATUS_RESOLVED, refs[:_MAX_BASIS]
 
 
-def annotate_findings(findings: list[Any], opf_doc: dict[str, Any] | None) -> tuple[list[Any], dict[str, int]]:
+def annotate_findings(
+    findings: list[Any], opf_doc: dict[str, Any] | None
+) -> tuple[list[Any], dict[str, int]]:
     """Copies of *findings* with each issue's citation checked, plus counts
     `{"checked", "resolved", "unresolved"}`. A non-OPF review (no digest)
     returns the findings untouched."""

@@ -108,13 +108,17 @@ EXPECTED_STAGE_TOKENS = {
 # cdk synth + template/ASL extraction helpers.
 # ---------------------------------------------------------------------------
 
+
 def _run_cdk_synth() -> subprocess.CompletedProcess:
     if CDK_OUT.exists():
         shutil.rmtree(CDK_OUT)
     node_modules = INFRA / "node_modules"
     if not node_modules.is_dir():
         install = subprocess.run(
-            ["npm", "install"], cwd=INFRA, capture_output=True, text=True,  # noqa: S607
+            ["npm", "install"],  # noqa: S607
+            cwd=INFRA,
+            capture_output=True,
+            text=True,
         )
         if install.returncode != 0:
             raise RuntimeError(f"npm install failed: {install.stderr[-500:]}")
@@ -223,6 +227,7 @@ class SynthFixture:
 # Structural checks -- synthesized ASL (defect 3).
 # ---------------------------------------------------------------------------
 
+
 class TestEachStageRecordsItsOwnRealName(SynthFixture, unittest.TestCase):
     def test_nine_distinct_error_transition_states_exist(self) -> None:
         missing = [name for name in EXPECTED_STAGE_TOKENS if name not in self.asl_states]
@@ -235,12 +240,14 @@ class TestEachStageRecordsItsOwnRealName(SynthFixture, unittest.TestCase):
             actual = payload.get("failing_stage")
             with self.subTest(state=state_name):
                 self.assertEqual(
-                    actual, expected_token,
+                    actual,
+                    expected_token,
                     f"{state_name}'s Payload.failing_stage is {actual!r}, "
                     f"expected {expected_token!r}",
                 )
                 self.assertNotEqual(
-                    actual, "pipeline",
+                    actual,
+                    "pipeline",
                     f"{state_name} still carries the hardcoded 'pipeline' literal",
                 )
 
@@ -250,9 +257,15 @@ class TestEachStageRecordsItsOwnRealName(SynthFixture, unittest.TestCase):
         # state (an equal-Next check would still pass a shared state).
         catch_targets = {}
         for real_stage_state in (
-            "AcquireConcurrencySlot", "MarkReviewRunning", "ExtractStage",
-            "RetrieveStage", "MockReviewStage", "RedlineStage", "PersistStage",
-            "AuditStage", "ReleaseConcurrencySlot",
+            "AcquireConcurrencySlot",
+            "MarkReviewRunning",
+            "ExtractStage",
+            "RetrieveStage",
+            "MockReviewStage",
+            "RedlineStage",
+            "PersistStage",
+            "AuditStage",
+            "ReleaseConcurrencySlot",
         ):
             state = self.asl_states.get(real_stage_state)
             self.assertIsNotNone(state, f"missing state {real_stage_state}")
@@ -260,7 +273,8 @@ class TestEachStageRecordsItsOwnRealName(SynthFixture, unittest.TestCase):
             self.assertEqual(len(catches), 1, f"{real_stage_state} should have exactly 1 Catch")
             catch_targets[real_stage_state] = catches[0]["Next"]
         self.assertEqual(
-            len(set(catch_targets.values())), len(catch_targets),
+            len(set(catch_targets.values())),
+            len(catch_targets),
             f"two or more stages still share one error-transition state: {catch_targets}",
         )
 
@@ -268,6 +282,7 @@ class TestEachStageRecordsItsOwnRealName(SynthFixture, unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Structural checks -- errorHandlerFn's inline Lambda source (defects 1/2/4).
 # ---------------------------------------------------------------------------
+
 
 class TestErrorHandlerSourceStructure(SynthFixture, unittest.TestCase):
     def test_source_extracted_from_template_matches_source_extracted_from_ts(self) -> None:
@@ -288,7 +303,8 @@ class TestErrorHandlerSourceStructure(SynthFixture, unittest.TestCase):
         """
         deployed = self.error_handler_zip.strip()
         self.assertLessEqual(
-            len(deployed), 4096,
+            len(deployed),
+            4096,
             f"inline handler is {len(deployed)} chars; CloudFormation rejects "
             f"Code.ZipFile over 4096 at deploy time. Move prose into the "
             f"TypeScript comment above fromInline.",
@@ -306,9 +322,7 @@ class TestErrorHandlerSourceStructure(SynthFixture, unittest.TestCase):
         # ConditionExpression must refuse to overwrite that row too, not
         # just a DONE one.
         self.assertIn('"CANCELLED"', self.error_handler_source)
-        self.assertIsNotNone(
-            re.search(r"#status\s*<>\s*:cancelled", self.error_handler_source)
-        )
+        self.assertIsNotNone(re.search(r"#status\s*<>\s*:cancelled", self.error_handler_source))
 
     def test_writes_reason_and_failed_at(self) -> None:
         self.assertIsNotNone(re.search(r"\breason\s*=\s*:", self.error_handler_source))
@@ -319,7 +333,7 @@ class TestErrorHandlerSourceStructure(SynthFixture, unittest.TestCase):
         # serializing the WHOLE event["error"] dict (Error + Cause, Cause
         # carrying the raw exception message/stack trace) straight onto the
         # row, with no dict/non-dict distinction at all.
-        self.assertNotIn(': str(error_info),', self.error_handler_source)
+        self.assertNotIn(": str(error_info),", self.error_handler_source)
         self.assertNotIn('": str(error_info)', self.error_handler_source)
         # Post-fix source must reduce a dict-shaped error to the Error NAME
         # only, conditioned on it actually being a dict.
@@ -331,6 +345,7 @@ class TestErrorHandlerSourceStructure(SynthFixture, unittest.TestCase):
 # Behavioral checks -- the REAL extracted source, real moto DynamoDB
 # semantics (never a hand-rolled fake -- see #446's own test for why).
 # ---------------------------------------------------------------------------
+
 
 class TestErrorHandlerBehavior(SynthFixture, unittest.TestCase):
     def setUp(self) -> None:
@@ -441,7 +456,8 @@ class TestErrorHandlerBehavior(SynthFixture, unittest.TestCase):
         self.assertEqual(len(sent), 1, "exactly one UpdateItem call was made")
         condition = sent[0]["ConditionExpression"]
         self.assertIn(
-            "attribute_not_exists(#status)", condition,
+            "attribute_not_exists(#status)",
+            condition,
             f"the guard refuses a row with no status on real DynamoDB: {condition!r}",
         )
         # And the absence arm must be an OR with the terminal comparisons --
@@ -484,8 +500,11 @@ class TestErrorHandlerBehavior(SynthFixture, unittest.TestCase):
 
         with self.assertRaises(ClientError) as caught:
             self.handler(
-                {"review_id": REVIEW_ID, "failing_stage": "extract",
-                 "error": {"Error": "KeyError"}},
+                {
+                    "review_id": REVIEW_ID,
+                    "failing_stage": "extract",
+                    "error": {"Error": "KeyError"},
+                },
                 None,
             )
         self.assertEqual(
@@ -524,8 +543,11 @@ class TestErrorHandlerBehavior(SynthFixture, unittest.TestCase):
     def test_records_the_real_stage_name_it_is_given(self) -> None:
         self._put(status="RUNNING")
         self.handler(
-            {"review_id": REVIEW_ID, "failing_stage": "release_semaphore_slot",
-             "error": {"Error": "TimeoutError"}},
+            {
+                "review_id": REVIEW_ID,
+                "failing_stage": "release_semaphore_slot",
+                "error": {"Error": "TimeoutError"},
+            },
             None,
         )
         item = self._get()
@@ -537,7 +559,7 @@ class TestErrorHandlerBehavior(SynthFixture, unittest.TestCase):
     def test_error_reason_is_reduced_to_the_error_name_and_no_raw_text_leaks(self) -> None:
         sensitive_cause = (
             '{"errorMessage": "KeyError: \'paragraphs\' in document '
-            'Acme Corp MSA sec 8.2 (\'Limitation of Liability\')", '
+            "Acme Corp MSA sec 8.2 ('Limitation of Liability')\", "
             '"errorType": "KeyError", "stackTrace": ["  File ..."]}'
         )
         self._put(status="RUNNING")

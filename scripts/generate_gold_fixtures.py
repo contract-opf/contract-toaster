@@ -87,6 +87,7 @@ def missing_rule_coverage(fixtures_dir: Path, playbook_path: Path) -> list[str]:
     covered = rule_ids_with_detector_coverage(fixtures_dir)
     return sorted(all_rule_ids - covered)
 
+
 # Pinned to "synthetic-generic" explicitly (not
 # eval_harness.PLAYBOOK_PATH/FIXTURES_PATH, which follow
 # playbook_registry.DEFAULT_PLAYBOOK_ID -- issue #412 repointed the registry

@@ -198,13 +198,13 @@ class PlaybookUploadTestBase(unittest.TestCase):
         _put_user(self.users_table, NON_ADMIN_SUB, is_admin=False)
 
         self.client = TestClient(backend_main.app)
-        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = (
-            lambda: self.ddb
-        )
+        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = lambda: self.ddb
         backend_main.app.dependency_overrides[backend_main.get_s3_client] = lambda: self.s3
-        backend_main.app.dependency_overrides[backend_main.get_current_user] = (
-            lambda: {"sub": ADMIN_SUB, "email": f"{ADMIN_SUB}@example.com", "token_use": "access"}
-        )
+        backend_main.app.dependency_overrides[backend_main.get_current_user] = lambda: {
+            "sub": ADMIN_SUB,
+            "email": f"{ADMIN_SUB}@example.com",
+            "token_use": "access",
+        }
 
     def tearDown(self):
         backend_main.app.dependency_overrides.clear()
@@ -213,9 +213,11 @@ class PlaybookUploadTestBase(unittest.TestCase):
     # -- helpers --------------------------------------------------------
 
     def _authenticate_as(self, sub: str) -> None:
-        backend_main.app.dependency_overrides[backend_main.get_current_user] = (
-            lambda: {"sub": sub, "email": f"{sub}@example.com", "token_use": "access"}
-        )
+        backend_main.app.dependency_overrides[backend_main.get_current_user] = lambda: {
+            "sub": sub,
+            "email": f"{sub}@example.com",
+            "token_use": "access",
+        }
 
     def _upload(
         self,
@@ -271,12 +273,13 @@ class TestOpfHtmlBundleUpload(PlaybookUploadTestBase):
         self.assertEqual(resp.status_code, 200, resp.text)
         body = resp.json()
 
-        stored = self.s3.get_object(
-            Bucket=os.environ["UPLOADS_BUCKET"], Key=body["storage_key"]
-        )["Body"].read()
+        stored = self.s3.get_object(Bucket=os.environ["UPLOADS_BUCKET"], Key=body["storage_key"])[
+            "Body"
+        ].read()
         # The key itself is content-addressed over these exact bytes.
         self.assertEqual(
-            body["storage_key"], f"playbooks/{PLAYBOOK_ID}/{hashlib.sha256(stored).hexdigest()}.json"
+            body["storage_key"],
+            f"playbooks/{PLAYBOOK_ID}/{hashlib.sha256(stored).hexdigest()}.json",
         )
         recovered = json.loads(stored)
         self.assertEqual(recovered["identity"]["content_hash"], body["opf_content_hash"])
@@ -291,9 +294,9 @@ class TestOpfHtmlBundleUpload(PlaybookUploadTestBase):
             f"playbooks/{PLAYBOOK_ID}/"
             f"{hashlib.sha256(_opf05_html_bytes()).hexdigest()}.original.opf.html"
         )
-        stored_original = self.s3.get_object(
-            Bucket=os.environ["UPLOADS_BUCKET"], Key=original_key
-        )["Body"].read()
+        stored_original = self.s3.get_object(Bucket=os.environ["UPLOADS_BUCKET"], Key=original_key)[
+            "Body"
+        ].read()
         self.assertEqual(stored_original, _opf05_html_bytes())
 
     def test_large_bundle_upload_handled(self):
@@ -352,9 +355,9 @@ class TestOpfJsonUpload(PlaybookUploadTestBase):
             hashlib.sha256(content).hexdigest(),
             filename="acme-university-0.6.opf.json",
         )
-        stored_original = self.s3.get_object(
-            Bucket=os.environ["UPLOADS_BUCKET"], Key=original_key
-        )["Body"].read()
+        stored_original = self.s3.get_object(Bucket=os.environ["UPLOADS_BUCKET"], Key=original_key)[
+            "Body"
+        ].read()
         self.assertEqual(stored_original, content)
         self.assertEqual(
             body["content_hash"], "sha256:" + hashlib.sha256(stored_original).hexdigest()
@@ -375,7 +378,9 @@ class TestLargeUploadHandling(PlaybookUploadTestBase):
     OPF 0.6 document -- no blob committed, no network access -- by padding
     a free-text field of the gold fixture and re-sealing it (`_reseal`)."""
 
-    TARGET_SIZE_BYTES = 7 * 1024 * 1024  # representative of the public twin's 6,935,610-byte playbook.opf.json
+    TARGET_SIZE_BYTES = (
+        7 * 1024 * 1024
+    )  # representative of the public twin's 6,935,610-byte playbook.opf.json
 
     def test_multi_megabyte_opf_json_upload_succeeds(self):
         doc = _opf05_doc()
@@ -400,9 +405,9 @@ class TestLargeUploadHandling(PlaybookUploadTestBase):
         # AC1: "records a draft whose bytes round-trip (GET the stored
         # artifact -> hash matches)" -- both the canonical storage key and
         # the original-artifact key, at real multi-MB size.
-        stored = self.s3.get_object(
-            Bucket=os.environ["UPLOADS_BUCKET"], Key=body["storage_key"]
-        )["Body"].read()
+        stored = self.s3.get_object(Bucket=os.environ["UPLOADS_BUCKET"], Key=body["storage_key"])[
+            "Body"
+        ].read()
         self.assertEqual(
             body["storage_key"],
             f"playbooks/{PLAYBOOK_ID}/{hashlib.sha256(stored).hexdigest()}.json",
@@ -416,9 +421,9 @@ class TestLargeUploadHandling(PlaybookUploadTestBase):
             hashlib.sha256(content).hexdigest(),
             filename="acme-university-large.opf.json",
         )
-        stored_original = self.s3.get_object(
-            Bucket=os.environ["UPLOADS_BUCKET"], Key=original_key
-        )["Body"].read()
+        stored_original = self.s3.get_object(Bucket=os.environ["UPLOADS_BUCKET"], Key=original_key)[
+            "Body"
+        ].read()
         self.assertEqual(stored_original, content)
         self.assertEqual(
             body["content_hash"], "sha256:" + hashlib.sha256(stored_original).hexdigest()
@@ -749,9 +754,9 @@ class TestLegacyV1StillWorks(PlaybookUploadTestBase):
             hashlib.sha256(content).hexdigest(),
             filename="synthetic-generic-v1.0.0.json",
         )
-        stored_original = self.s3.get_object(
-            Bucket=os.environ["UPLOADS_BUCKET"], Key=original_key
-        )["Body"].read()
+        stored_original = self.s3.get_object(Bucket=os.environ["UPLOADS_BUCKET"], Key=original_key)[
+            "Body"
+        ].read()
         self.assertEqual(stored_original, content)
         self.assertEqual(
             body["content_hash"], "sha256:" + hashlib.sha256(stored_original).hexdigest()

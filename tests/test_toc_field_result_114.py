@@ -158,10 +158,7 @@ def _docx(body: str) -> bytes:
 
 
 def _heading(text: str) -> str:
-    return (
-        '<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr>'
-        f"<w:r><w:t>{text}</w:t></w:r></w:p>"
-    )
+    return f'<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>'
 
 
 def _para(text: str) -> str:
@@ -205,8 +202,7 @@ def _struck(markup: str) -> str:
     """`markup` inside a pending tracked DELETION, as Word writes it when the
     counterparty strikes it with track changes on."""
     return (
-        '<w:del w:id="11" w:author="Counterparty" w:date="2026-01-01T00:00:00Z">'
-        f"{markup}</w:del>"
+        f'<w:del w:id="11" w:author="Counterparty" w:date="2026-01-01T00:00:00Z">{markup}</w:del>'
     )
 
 
@@ -247,7 +243,9 @@ def _toc(
         if position == 0:
             if strike_opening:
                 opening = _struck(
-                    _fld_char("begin") + _del_instr(' TOC \\o "1-3" \\h \\z \\u ') + _fld_char("separate")
+                    _fld_char("begin")
+                    + _del_instr(' TOC \\o "1-3" \\h \\z \\u ')
+                    + _fld_char("separate")
                 )
             else:
                 opening = _fld_char("begin") + instr_runs + _fld_char("separate")
@@ -270,10 +268,7 @@ _DEFINITIONS_BODY = "Confidential Information means any non-public information d
 _TERM_BODY = "This Agreement continues for one year from the Effective Date."
 
 _REAL_CLAUSES = (
-    _heading("1. Definitions")
-    + _para(_DEFINITIONS_BODY)
-    + _heading("2. Term")
-    + _para(_TERM_BODY)
+    _heading("1. Definitions") + _para(_DEFINITIONS_BODY) + _heading("2. Term") + _para(_TERM_BODY)
 )
 
 #: What the block map must look like for `_REAL_CLAUSES`, with or without a
@@ -421,7 +416,9 @@ def test_an_index_field_result_is_omitted_too(failures: list) -> None:
     )
     result = ens.extract_and_normalize(_docx(_REAL_CLAUSES + index_field))
     if _blocks(result) != _EXPECTED_BLOCKS:
-        failures.append(f"[G1] an INDEX result must not reach the block map. Got: {_blocks(result)!r}")
+        failures.append(
+            f"[G1] an INDEX result must not reach the block map. Got: {_blocks(result)!r}"
+        )
     notes = result.get("normalization_notes") or ""
     if "2 paragraph(s) of INDEX field result" not in notes:
         failures.append(f"[G2] the INDEX omission must be disclosed and counted. Got: {notes!r}")
@@ -476,12 +473,16 @@ def test_a_toc_that_was_never_updated_has_no_result_to_omit(failures: list) -> N
     """`begin` / `instrText` / `end` with no `separate` at all -- a field
     Word has never computed. There is no cached result, so there is nothing
     to drop and nothing to disclose."""
-    never_updated = "<w:p>" + _fld_char("begin") + _instr(' TOC \\o "1-3" ') + _fld_char("end") + "</w:p>"
+    never_updated = (
+        "<w:p>" + _fld_char("begin") + _instr(' TOC \\o "1-3" ') + _fld_char("end") + "</w:p>"
+    )
     result = ens.extract_and_normalize(_docx(never_updated + _REAL_CLAUSES))
     if _blocks(result) != _EXPECTED_BLOCKS:
         failures.append(f"[I1] an uncomputed TOC changes nothing. Got: {_blocks(result)!r}")
     if result.get("normalization_notes"):
-        failures.append(f"[I2] nothing dropped, nothing disclosed. Got: {result['normalization_notes']!r}")
+        failures.append(
+            f"[I2] nothing dropped, nothing disclosed. Got: {result['normalization_notes']!r}"
+        )
 
 
 def test_a_stray_end_field_character_changes_nothing(failures: list) -> None:
@@ -513,16 +514,20 @@ def test_body_text_after_the_field_end_in_the_same_paragraph_is_kept(failures: l
         + _fld_char("begin")
         + _instr(' TOC \\o "1-3" ')
         + _fld_char("separate")
-        + '<w:r><w:t>1. Definitions</w:t></w:r><w:r><w:tab/></w:r><w:r><w:t>2</w:t></w:r>'
+        + "<w:r><w:t>1. Definitions</w:t></w:r><w:r><w:tab/></w:r><w:r><w:t>2</w:t></w:r>"
         "</w:p>"
         "<w:p>" + _fld_char("end") + f'<w:r><w:t xml:space="preserve">{preamble}</w:t></w:r></w:p>'
     ) + _REAL_CLAUSES
     result = ens.extract_and_normalize(_docx(body))
     texts = [p["text"] for p in result.get("paragraphs", [])]
     if preamble not in texts:
-        failures.append(f"[K1] body text sharing a paragraph with the field end was dropped: {texts!r}")
+        failures.append(
+            f"[K1] body text sharing a paragraph with the field end was dropped: {texts!r}"
+        )
     if any("\t" in p["heading"] for p in result.get("paragraphs", [])):
-        failures.append(f"[K2] the TOC entry itself must still be dropped. Got: {_blocks(result)!r}")
+        failures.append(
+            f"[K2] the TOC entry itself must still be dropped. Got: {_blocks(result)!r}"
+        )
 
     toc = _toc([("1. Definitions", 2), ("2. Term", 3)])
     shared = toc[: -len("</w:p>")] + f'<w:r><w:t xml:space="preserve">{preamble}</w:t></w:r></w:p>'
@@ -538,7 +543,9 @@ def test_body_text_after_the_field_end_in_the_same_paragraph_is_kept(failures: l
         failures.append("[K3] the fixture must carry a revision materialization actually rewrites")
     for label, blocks in (("raw", stage_1), ("materialized", stage_5)):
         if not any(preamble in heading or preamble in text for _, heading, text in blocks):
-            failures.append(f"[K4] {label} read dropped the sentence after the TOC's own end: {blocks!r}")
+            failures.append(
+                f"[K4] {label} read dropped the sentence after the TOC's own end: {blocks!r}"
+            )
     notes = ens.extract_and_normalize(docx_bytes).get("normalization_notes") or ""
     if "1 paragraph(s) of TOC field result" not in notes:
         failures.append(f"[K5] only the entry with no outside text may be dropped. Got: {notes!r}")
@@ -553,7 +560,9 @@ def test_the_field_code_may_be_split_across_instr_text_runs(failures: list) -> N
     body = _toc([("1. Definitions", 2), ("2. Term", 3)], split_instr=True) + _REAL_CLAUSES
     result = ens.extract_and_normalize(_docx(body))
     if _blocks(result) != _EXPECTED_BLOCKS:
-        failures.append(f"[L1] a split field code must still be read as TOC. Got: {_blocks(result)!r}")
+        failures.append(
+            f"[L1] a split field code must still be read as TOC. Got: {_blocks(result)!r}"
+        )
 
 
 def test_the_raw_and_the_materialized_read_agree_on_the_block_map(failures: list) -> None:
@@ -596,7 +605,9 @@ def test_a_struck_toc_end_gives_both_reads_the_same_block_map(failures: list) ->
     real clause's id moved by two between the read the model is shown and
     the read `delete_block` resolves against. Reading the accept-all view
     only, both sides see the same unclosed field."""
-    docx_bytes = _docx(_toc([("1. Definitions", 2), ("2. Term", 3)], strike_end=True) + _THREE_CLAUSES)
+    docx_bytes = _docx(
+        _toc([("1. Definitions", 2), ("2. Term", 3)], strike_end=True) + _THREE_CLAUSES
+    )
     stage_1, stage_5, rewritten = _both_reads(docx_bytes)
     if not rewritten:
         failures.append("[O1] the fixture must carry a deletion materialization actually removes")
@@ -606,13 +617,17 @@ def test_a_struck_toc_end_gives_both_reads_the_same_block_map(failures: list) ->
         failures.append(f"[O3] every real clause must survive the unclosed field: {stage_1!r}")
 
 
-def test_a_struck_toc_begin_and_field_code_give_both_reads_the_same_block_map(failures: list) -> None:
+def test_a_struck_toc_begin_and_field_code_give_both_reads_the_same_block_map(
+    failures: list,
+) -> None:
     """The other half of the same split: `begin`, the field code (written
     as `<w:delInstrText>`, as ECMA-376 requires inside a deletion) and
     `separate` all struck. The raw upload carries a whole TOC field; the
     materialized bytes carry only its result lines and a stray `end`. Both
     reads must agree on which of those lines are clauses."""
-    docx_bytes = _docx(_toc([("1. Definitions", 2), ("2. Term", 3)], strike_opening=True) + _THREE_CLAUSES)
+    docx_bytes = _docx(
+        _toc([("1. Definitions", 2), ("2. Term", 3)], strike_opening=True) + _THREE_CLAUSES
+    )
     stage_1, stage_5, rewritten = _both_reads(docx_bytes)
     if not rewritten:
         failures.append("[P1] the fixture must carry a deletion materialization actually removes")
@@ -630,7 +645,9 @@ def test_a_stage_1_block_id_deletes_the_same_clause_in_stage_5(failures: list) -
     Definitions body instead, writing `[Intentionally omitted.]` under the
     wrong heading. The id must name the same clause on both sides, and only
     Notices may change."""
-    docx_bytes = _docx(_toc([("1. Definitions", 2), ("2. Term", 3)], strike_end=True) + _THREE_CLAUSES)
+    docx_bytes = _docx(
+        _toc([("1. Definitions", 2), ("2. Term", 3)], strike_end=True) + _THREE_CLAUSES
+    )
     stage_1_map = ens.build_block_map(ens.extract_and_normalize(docx_bytes).get("paragraphs", []))
     target = next((bid for bid, blk in stage_1_map.items() if blk["text"] == _NOTICES_BODY), None)
     if target is None:
@@ -638,7 +655,9 @@ def test_a_stage_1_block_id_deletes_the_same_clause_in_stage_5(failures: list) -
         return
 
     materialized_bytes = ens.materialize_accept_all(docx_bytes)
-    stage_5_map = ens.build_block_map(ens.extract_and_normalize(materialized_bytes).get("paragraphs", []))
+    stage_5_map = ens.build_block_map(
+        ens.extract_and_normalize(materialized_bytes).get("paragraphs", [])
+    )
     if stage_5_map.get(target, {}).get("text") != _NOTICES_BODY:
         # Not a `return`: on a regression the compile below shows the
         # consequence too -- the WRONG clause struck, with no failure.
@@ -650,7 +669,9 @@ def test_a_stage_1_block_id_deletes_the_same_clause_in_stage_5(failures: list) -
         [], [{"op": "delete_block", "block_id": target, "issue_key": "N1"}], stage_5_map
     )
     if proven["status"] != "proven":
-        failures.append(f"[Q3] the delete did not prove: {[f.get('reason') for f in proven['failures']]}")
+        failures.append(
+            f"[Q3] the delete did not prove: {[f.get('reason') for f in proven['failures']]}"
+        )
         return
     applied = rba.apply_block_transcript(
         materialized_bytes,
@@ -686,9 +707,13 @@ def test_a_toc_inside_its_block_level_content_control_is_omitted_too(failures: l
     )
     result = ens.extract_and_normalize(_docx(wrapped + _REAL_CLAUSES))
     if _blocks(result) != _EXPECTED_BLOCKS:
-        failures.append(f"[R1] a TOC inside its content control must not reach the block map. Got: {_blocks(result)!r}")
+        failures.append(
+            f"[R1] a TOC inside its content control must not reach the block map. Got: {_blocks(result)!r}"
+        )
     if "2 paragraph(s) of TOC field result" not in (result.get("normalization_notes") or ""):
-        failures.append(f"[R2] the omission must be disclosed. Got: {result.get('normalization_notes')!r}")
+        failures.append(
+            f"[R2] the omission must be disclosed. Got: {result.get('normalization_notes')!r}"
+        )
 
 
 def test_an_edit_still_compiles_against_a_document_carrying_a_toc(failures: list) -> None:
@@ -720,7 +745,9 @@ def test_an_edit_still_compiles_against_a_document_carrying_a_toc(failures: list
         block_map,
     )
     if proven["status"] != "proven":
-        failures.append(f"[N2] the clause did not prove: {[f.get('reason') for f in proven['failures']]}")
+        failures.append(
+            f"[N2] the clause did not prove: {[f.get('reason') for f in proven['failures']]}"
+        )
         return
     applied = rba.apply_block_transcript(
         docx_bytes,
@@ -747,7 +774,9 @@ _MISC_BODY = "Misc body."
 _FOUR_BODIES = [_DEFINITIONS_BODY, _TERM_BODY, _NOTICES_BODY, _MISC_BODY]
 
 
-def _assert_every_clause_survives(tag: str, docx_bytes: bytes, failures: list, *, extra: tuple = ()) -> None:
+def _assert_every_clause_survives(
+    tag: str, docx_bytes: bytes, failures: list, *, extra: tuple = ()
+) -> None:
     """Both reads (raw upload and materialized bytes) keep every real clause
     body, and agree with each other block for block."""
     stage_1, stage_5, _ = _both_reads(docx_bytes)
@@ -759,7 +788,9 @@ def _assert_every_clause_survives(tag: str, docx_bytes: bytes, failures: list, *
                 failures.append(f"[{tag}] {label} read lost {body!r}: {blocks!r}")
         notes = ens.extract_and_normalize(docx_bytes).get("normalization_notes") or ""
         if "Generated field result omitted" in notes and label == "raw":
-            failures.append(f"[{tag}] a region that swallowed clauses was still disclosed as dropped: {notes!r}")
+            failures.append(
+                f"[{tag}] a region that swallowed clauses was still disclosed as dropped: {notes!r}"
+            )
     if stage_1 != stage_5:
         failures.append(f"[{tag}] the two reads disagree: {stage_1!r} != {stage_5!r}")
 
@@ -788,11 +819,21 @@ def _ref_with_opening(opening_wrapper) -> str:
     `opening_wrapper` (struck, or hidden) so the accept-all view sees only
     its result and its `end`."""
     opening = _fld_char("begin") + _instr(" REF _Ref2 \\h ") + _fld_char("separate")
-    return "<w:p>" + opening_wrapper(opening) + "<w:r><w:t>Section 2</w:t></w:r>" + _fld_char("end") + "</w:p>"
+    return (
+        "<w:p>"
+        + opening_wrapper(opening)
+        + "<w:r><w:t>Section 2</w:t></w:r>"
+        + _fld_char("end")
+        + "</w:p>"
+    )
 
 
 def _struck_opening(opening: str) -> str:
-    return _struck(opening.replace("<w:instrText", "<w:delInstrText").replace("</w:instrText>", "</w:delInstrText>"))
+    return _struck(
+        opening.replace("<w:instrText", "<w:delInstrText").replace(
+            "</w:instrText>", "</w:delInstrText>"
+        )
+    )
 
 
 def test_a_ref_with_a_struck_or_hidden_begin_cannot_close_a_toc(failures: list) -> None:
@@ -822,15 +863,21 @@ def test_a_foreign_end_cannot_close_a_toc_over_unstyled_clauses(failures: list) 
     plain = "".join(
         _para(text)
         for text in (
-            "1. Definitions", _DEFINITIONS_BODY, "2. Term", _TERM_BODY,
-            "3. Notices", _NOTICES_BODY, "4. Miscellaneous", _MISC_BODY,
+            "1. Definitions",
+            _DEFINITIONS_BODY,
+            "2. Term",
+            _TERM_BODY,
+            "3. Notices",
+            _NOTICES_BODY,
+            "4. Miscellaneous",
+            _MISC_BODY,
         )
     )
     body = (
         _toc([("1. Definitions", 2), ("2. Term", 3)], strike_end=True)
-        + plain[: plain.index("<w:p><w:r><w:t xml:space=\"preserve\">4. Miscellaneous")]
+        + plain[: plain.index('<w:p><w:r><w:t xml:space="preserve">4. Miscellaneous')]
         + _toc([("Figure 1", 5)], strike_opening=True)
-        + plain[plain.index("<w:p><w:r><w:t xml:space=\"preserve\">4. Miscellaneous"):]
+        + plain[plain.index('<w:p><w:r><w:t xml:space="preserve">4. Miscellaneous') :]
     )
     _assert_every_clause_survives("U1", _docx(body), failures)
 
@@ -871,9 +918,13 @@ def test_the_real_heading_and_bookmark_guards_each_keep_a_region(failures: list)
         result = ens.extract_and_normalize(_docx(body))
         headings = [p["heading"] for p in result.get("paragraphs", [])]
         if "Definitions" not in headings:
-            failures.append(f"[{tag}] the real heading was dropped as TOC field result: {_blocks(result)!r}")
+            failures.append(
+                f"[{tag}] the real heading was dropped as TOC field result: {_blocks(result)!r}"
+            )
         if "Generated field result omitted" in (result.get("normalization_notes") or ""):
-            failures.append(f"[{tag}] the region must be kept, not disclosed as dropped: {result['normalization_notes']!r}")
+            failures.append(
+                f"[{tag}] the region must be kept, not disclosed as dropped: {result['normalization_notes']!r}"
+            )
 
 
 def _web_hidden(run_inner: str) -> str:
@@ -887,9 +938,11 @@ def test_the_tickets_own_shape_end_alone_in_a_trailing_paragraph(failures: list)
     with each entry's `PAGEREF` page number in `w:webHidden` runs (hidden
     in WEB layout only, so NOT hidden text: `_run_is_hidden` reads
     `w:vanish`, and the page number stays visible field result)."""
+
     def entry(heading: str, page: int, anchor: str, opening: str = "") -> str:
         return (
-            '<w:p><w:pPr><w:pStyle w:val="TOC1"/></w:pPr>' + opening
+            '<w:p><w:pPr><w:pStyle w:val="TOC1"/></w:pPr>'
+            + opening
             + f'<w:hyperlink w:anchor="{anchor}"><w:r><w:t>{heading}</w:t></w:r>'
             + _web_hidden("<w:tab/>")
             + _web_hidden('<w:fldChar w:fldCharType="begin"/>')
@@ -908,7 +961,9 @@ def test_the_tickets_own_shape_end_alone_in_a_trailing_paragraph(failures: list)
         '<w:p><w:pPr><w:pStyle w:val="TOCHeading"/></w:pPr><w:r><w:t>Contents</w:t></w:r></w:p>'
         + entry("1. Definitions", 2, "_Toc1", opening)
         + entry("2. Term", 3, "_Toc2")
-        + "<w:p>" + _fld_char("end") + "</w:p>"
+        + "<w:p>"
+        + _fld_char("end")
+        + "</w:p>"
         + "</w:sdtContent></w:sdt>"
     )
     result = ens.extract_and_normalize(_docx(toc + _REAL_CLAUSES))
@@ -924,7 +979,9 @@ def test_the_tickets_own_shape_end_alone_in_a_trailing_paragraph(failures: list)
     if any("\t" in heading for _, heading, _ in blocks):
         failures.append(f"[W2] a TOC entry became a clause: {blocks!r}")
     if "2 paragraph(s) of TOC field result" not in (result.get("normalization_notes") or ""):
-        failures.append(f"[W3] the omission must be disclosed and counted: {result.get('normalization_notes')!r}")
+        failures.append(
+            f"[W3] the omission must be disclosed and counted: {result.get('normalization_notes')!r}"
+        )
 
 
 def test_hidden_text_after_the_field_end_is_not_body_text(failures: list) -> None:
@@ -939,9 +996,13 @@ def test_hidden_text_after_the_field_end_is_not_body_text(failures: list) -> Non
     toc = toc[: -len("</w:p>")] + hidden_tail + "</w:p>"
     result = ens.extract_and_normalize(_docx(toc + _REAL_CLAUSES))
     if _blocks(result) != _EXPECTED_BLOCKS:
-        failures.append(f"[X1] hidden text after the field end kept a TOC entry: {_blocks(result)!r}")
+        failures.append(
+            f"[X1] hidden text after the field end kept a TOC entry: {_blocks(result)!r}"
+        )
     if "2 paragraph(s) of TOC field result" not in (result.get("normalization_notes") or ""):
-        failures.append(f"[X2] both entries must be dropped and disclosed: {result.get('normalization_notes')!r}")
+        failures.append(
+            f"[X2] both entries must be dropped and disclosed: {result.get('normalization_notes')!r}"
+        )
 
 
 def test_preflight_does_not_count_the_disclosure_group_as_a_paragraph(failures: list) -> None:

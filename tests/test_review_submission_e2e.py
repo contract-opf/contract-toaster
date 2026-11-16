@@ -87,7 +87,9 @@ import os  # noqa: E402
 os.environ.setdefault("REVIEW_SUBMISSIONS_TABLE", "contract-toaster-review-submissions-test")
 os.environ.setdefault("REVIEWS_TABLE", "contract-toaster-reviews-test")
 os.environ.setdefault("DAILY_SPEND_TABLE", "contract-toaster-daily-spend-test")
-os.environ.setdefault("STATE_MACHINE_ARN", "arn:aws:states:us-east-1:123456789012:stateMachine:contract-toaster-test")
+os.environ.setdefault(
+    "STATE_MACHINE_ARN", "arn:aws:states:us-east-1:123456789012:stateMachine:contract-toaster-test"
+)
 
 import reviews as _reviews_module  # noqa: E402
 
@@ -98,6 +100,7 @@ HTTPException = sys.modules["fastapi"].HTTPException
 # ---------------------------------------------------------------------------
 # In-memory fakes
 # ---------------------------------------------------------------------------
+
 
 class FakeTable:
     """A tiny in-memory stand-in for a boto3 DynamoDB Table resource."""
@@ -114,13 +117,17 @@ class FakeTable:
     def put_item(self, Item, ConditionExpression=None):
         key = Item[self.key_name]
         if ConditionExpression == "attribute_not_exists(idempotency_key)" and key in self.items:
-            raise ClientError(
-                {"Error": {"Code": "ConditionalCheckFailedException"}}, "PutItem"
-            )
+            raise ClientError({"Error": {"Code": "ConditionalCheckFailedException"}}, "PutItem")
         self.items[key] = dict(Item)
 
-    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues=None,
-                     ConditionExpression=None, ExpressionAttributeNames=None):
+    def update_item(
+        self,
+        Key,
+        UpdateExpression,
+        ExpressionAttributeValues=None,
+        ConditionExpression=None,
+        ExpressionAttributeNames=None,
+    ):
         key = Key[self.key_name]
         item = self.items.setdefault(key, dict(Key))
 
@@ -192,12 +199,15 @@ class FakeSfnClient:
         if name in self.started_names:
             raise self.exceptions.ExecutionAlreadyExists()
         self.started_names.add(name)
-        return {"executionArn": f"{stateMachineArn.replace(':stateMachine:', ':execution:')}:{name}"}
+        return {
+            "executionArn": f"{stateMachineArn.replace(':stateMachine:', ':execution:')}:{name}"
+        }
 
 
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestIdempotencyKeyDerivation(unittest.TestCase):
     def test_client_supplied_key_preferred(self):
@@ -266,9 +276,7 @@ class TestSpendReservation(unittest.TestCase):
         )
         expected_usd = attempts_per_pass * (primary_usd + critic_usd)
         expected_cents = int(round(expected_usd * 100))  # noqa: RUF046
-        self.assertEqual(
-            _reviews_module.compute_worst_case_reservation_usd_cents(), expected_cents
-        )
+        self.assertEqual(_reviews_module.compute_worst_case_reservation_usd_cents(), expected_cents)
 
     def test_reservation_matches_architecture_md_worst_case(self):
         """The reservation must match ARCHITECTURE.md's documented $11.06
@@ -449,7 +457,9 @@ class TestEnsureExecutionStartedHandlesRace(unittest.TestCase):
         try:
             _reviews_module.ensure_execution_started(racing_submission, "{}", ddb, sfn)
         except Exception as exc:  # noqa: BLE001
-            self.fail(f"ensure_execution_started must swallow ExecutionAlreadyExists, raised {exc!r}")
+            self.fail(
+                f"ensure_execution_started must swallow ExecutionAlreadyExists, raised {exc!r}"
+            )
 
 
 if __name__ == "__main__":

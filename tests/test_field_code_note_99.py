@@ -119,10 +119,7 @@ def _docx(body: str) -> bytes:
 
 
 def _heading(text: str) -> str:
-    return (
-        '<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr>'
-        f"<w:r><w:t>{text}</w:t></w:r></w:p>"
-    )
+    return f'<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>'
 
 
 def _run(text: str) -> str:
@@ -131,8 +128,7 @@ def _run(text: str) -> str:
 
 def _ins(inner: str, author: str = "counterparty", rev_id: int = 1) -> str:
     return (
-        f'<w:ins w:id="{rev_id}" w:author="{author}" '
-        f'w:date="2026-01-01T00:00:00Z">{inner}</w:ins>'
+        f'<w:ins w:id="{rev_id}" w:author="{author}" w:date="2026-01-01T00:00:00Z">{inner}</w:ins>'
     )
 
 
@@ -162,9 +158,7 @@ def _embedded_field_para(old: str, new: str) -> str:
     sentence, so the field's resolved text and the paragraph's accept-all
     text are different strings."""
     return _para(
-        _run("This Agreement commences on ")
-        + _edited_field(old, new)
-        + _run(f" {_SURROUNDING}.")
+        _run("This Agreement commences on ") + _edited_field(old, new) + _run(f" {_SURROUNDING}.")
     )
 
 
@@ -208,9 +202,7 @@ def test_extractor_stamps_the_fields_own_text_alongside_the_paragraphs(
         failures.append(
             f"[R2] field_resulting_text must be the FIELD's resolved text. Got: {rev!r}"
         )
-    if rev.get("resulting_text") != (
-        f"This Agreement commences on Feb 1 {_SURROUNDING}."
-    ):
+    if rev.get("resulting_text") != (f"This Agreement commences on Feb 1 {_SURROUNDING}."):
         failures.append(
             f"[R3] resulting_text must stay the WHOLE PARAGRAPH's accept-all text. Got: {rev!r}"
         )
@@ -230,9 +222,7 @@ def test_a_static_field_still_emits_no_field_code_revision(failures: list[str]) 
     if any(r.get("inside_field_code") for r in record["revisions"]):
         failures.append(f"[R5] a static field must emit no field-code cluster. Got: {record!r}")
     if any("field_resulting_text" in r for r in record["revisions"]):
-        failures.append(
-            f"[R6] a static field must not carry field_resulting_text. Got: {record!r}"
-        )
+        failures.append(f"[R6] a static field must not carry field_resulting_text. Got: {record!r}")
     fields = [r for r in record["revisions"] if r.get("type") == "field"]
     if len(fields) != 1 or fields[0].get("field_result") != "Exhibit A":
         failures.append(f"[R7] the static field must still RESOLVE. Got: {record!r}")
@@ -377,13 +367,13 @@ def test_a_hostile_field_result_still_fails_closed(failures: list[str]) -> None:
     never be echoed back."""
     hostile = "Feb​1"
     body = _heading("Term") + _para(
-        _run("Commences on ")
-        + _edited_field("Jan 1", hostile)
-        + _run(f" {_SURROUNDING}.")
+        _run("Commences on ") + _edited_field("Jan 1", hostile) + _run(f" {_SURROUNDING}.")
     )
     result, notes = _notes(body)
     if result.get("status") == "normalized":
-        failures.append(f"[S1] a zero-width space in the field result was not screened. Got: {result!r}")
+        failures.append(
+            f"[S1] a zero-width space in the field result was not screened. Got: {result!r}"
+        )
     if hostile in notes:
         failures.append("[S2] the screened field text was echoed back into the note")
     if normalize_input.CONTROL_CHARACTER_NOTE_PREFIX not in notes:

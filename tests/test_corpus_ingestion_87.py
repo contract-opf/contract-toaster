@@ -44,6 +44,7 @@ import playbook_registry  # noqa: E402
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 def _load_real_playbook() -> dict:
     return corpus._load_playbook()
 
@@ -58,10 +59,12 @@ def _synthetic_executed_agreement_paragraphs(playbook: dict) -> list[dict]:
         topic_id = topic.get("id")
         if not section_ref or not topic_id:
             continue
-        paragraphs.append({
-            "heading": section_ref,
-            "text": f"Synthetic executed clause text for {topic_id}.",
-        })
+        paragraphs.append(
+            {
+                "heading": section_ref,
+                "text": f"Synthetic executed clause text for {topic_id}.",
+            }
+        )
     return paragraphs
 
 
@@ -93,17 +96,23 @@ def _second_playbook() -> dict:
 # 1. Clause extraction + required metadata (including playbook_id, #45)
 # ---------------------------------------------------------------------------
 
+
 class TestClauseExtractionAndMetadata(unittest.TestCase):
     def setUp(self):
         self.playbook = _minimal_playbook()
 
     def test_extract_clauses_maps_heading_to_topic_id(self):
         paragraphs = [
-            {"heading": "Section 5 — Confidentiality", "text": "Each party shall keep confidential..."},
+            {
+                "heading": "Section 5 — Confidentiality",
+                "text": "Each party shall keep confidential...",
+            },
             {"heading": "Preamble", "text": "This agreement is made as of..."},
         ]
         clauses = corpus.extract_clauses(paragraphs, self.playbook)
-        self.assertEqual(len(clauses), 1, "Only the heading matching a topic should produce a clause.")
+        self.assertEqual(
+            len(clauses), 1, "Only the heading matching a topic should produce a clause."
+        )
         self.assertEqual(clauses[0]["playbook_topic_id"], "confidentiality")
 
     def test_extract_clauses_drops_matched_heading_with_empty_body(self):
@@ -174,6 +183,7 @@ class TestClauseExtractionAndMetadata(unittest.TestCase):
 # 2. Rejected-draft -> negative channel only (structural enforcement)
 # ---------------------------------------------------------------------------
 
+
 class TestPositiveNegativeSeparation(unittest.TestCase):
     def test_rejected_draft_forces_negative_polarity(self):
         record = corpus.build_clause_record(
@@ -201,6 +211,7 @@ class TestPositiveNegativeSeparation(unittest.TestCase):
         that contradicts document_type — the function signature must not
         accept one at all."""
         import inspect
+
         sig = inspect.signature(corpus.build_clause_record)
         self.assertNotIn("corpus_polarity", sig.parameters)
         self.assertNotIn("polarity", sig.parameters)
@@ -251,6 +262,7 @@ class TestPositiveNegativeSeparation(unittest.TestCase):
 # 3. Manifest is content-addressed and reproducible
 # ---------------------------------------------------------------------------
 
+
 class TestManifestDeterminism(unittest.TestCase):
     def test_manifest_hash_is_reproducible_for_same_clause_set(self):
         ids = ["clause_b", "clause_a", "clause_c"]
@@ -278,7 +290,10 @@ class TestManifestDeterminism(unittest.TestCase):
     def test_end_to_end_ingestion_manifest_is_reproducible(self):
         playbook = _minimal_playbook()
         paragraphs = [
-            {"heading": "Section 5 — Confidentiality", "text": "Each party shall keep confidential..."},
+            {
+                "heading": "Section 5 — Confidentiality",
+                "text": "Each party shall keep confidential...",
+            },
             {"heading": "Section 9 — Indemnification", "text": "Counterparty shall indemnify..."},
         ]
         snap_1 = corpus.run_ingestion(
@@ -302,6 +317,7 @@ class TestManifestDeterminism(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # 4. Ingestion never touches the active store; failed mid-job semantics
 # ---------------------------------------------------------------------------
+
 
 class TestStagingOnlyAndFailureSemantics(unittest.TestCase):
     def test_staging_index_is_never_active(self):
@@ -381,6 +397,7 @@ def _synthetic_paragraphs_for(playbook: dict) -> list[dict]:
 # 5. Guard: two-playbook contamination test (#45)
 # ---------------------------------------------------------------------------
 
+
 class TestTwoPlaybookContamination(unittest.TestCase):
     """Issue #45: topic ids like `confidentiality` are not globally unique
     across playbooks and must not collide. Ingesting the same-named topic
@@ -443,11 +460,14 @@ class TestTwoPlaybookContamination(unittest.TestCase):
 # 6. Real playbook smoke test (fixtures are permanent per Guard)
 # ---------------------------------------------------------------------------
 
+
 class TestRealPlaybookSmoke(unittest.TestCase):
     def test_synthetic_executed_agreement_against_real_playbook_ingests_cleanly(self):
         playbook = _load_real_playbook()
         paragraphs = _synthetic_executed_agreement_paragraphs(playbook)
-        self.assertGreater(len(paragraphs), 0, "Real playbook fixture must have topics to synthesize from.")
+        self.assertGreater(
+            len(paragraphs), 0, "Real playbook fixture must have topics to synthesize from."
+        )
 
         snapshot = corpus.run_ingestion(
             source_document_id="doc-real-playbook",

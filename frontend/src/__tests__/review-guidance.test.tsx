@@ -31,11 +31,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
-import {
-  DEFAULT_PLAYBOOKS,
-  findReviewResult,
-  pressSubmit,
-} from './support/consoleSurface';
+import { DEFAULT_PLAYBOOKS, findReviewResult, pressSubmit } from './support/consoleSurface';
 
 vi.mock('aws-amplify/auth', () => ({
   // eslint-disable-next-line @typescript-eslint/require-await

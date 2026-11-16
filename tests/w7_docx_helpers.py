@@ -115,7 +115,9 @@ def replace_in_block(stage, bt, rba, docx_bytes: bytes, target: str, replacement
         segments.append({"op": "insert", "text": replacement, "issue_key": "k1"})
     if text[index + len(target) :]:
         segments.append({"op": "keep", "text": text[index + len(target) :]})
-    proven = bt.validate_block_patches([{"block_id": block_id, "segments": segments}], [], block_map)
+    proven = bt.validate_block_patches(
+        [{"block_id": block_id, "segments": segments}], [], block_map
+    )
     out = {"proven": proven, "result": None, "accepted_text": None}
     out["expected_text"] = text[:index] + replacement + text[index + len(target) :]
     if proven["status"] != "proven":

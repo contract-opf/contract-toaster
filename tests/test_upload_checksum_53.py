@@ -76,8 +76,7 @@ DOCX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessin
 # The exact reviewer-facing sentence the issue specifies. Asserted verbatim
 # so a rewording is a deliberate change to this file, not a drift.
 EXPECTED_502_DETAIL = (
-    "The uploaded file could not be stored intact. Nothing was submitted; "
-    "please try again."
+    "The uploaded file could not be stored intact. Nothing was submitted; please try again."
 )
 
 
@@ -137,12 +136,12 @@ class UploadChecksumTestBase(unittest.TestCase):
         self.app = backend_main.app
         self.app.dependency_overrides[review_routes.get_dynamodb_resource] = lambda: self.ddb
         self.app.dependency_overrides[review_routes.get_sfn_client] = lambda: self.sfn
-        self.app.dependency_overrides[review_routes.get_dynamodb_client] = (
-            lambda: self.users_ddb_client
+        self.app.dependency_overrides[review_routes.get_dynamodb_client] = lambda: (
+            self.users_ddb_client
         )
         self.app.dependency_overrides[review_routes.get_env_name] = lambda: "dev"
-        self.app.dependency_overrides[review_routes.get_av_client] = (
-            lambda: review_routes.NullAvClient()
+        self.app.dependency_overrides[review_routes.get_av_client] = lambda: (
+            review_routes.NullAvClient()
         )
         row = _caller_row("owner-53")
         self.app.dependency_overrides[review_routes.get_active_user_row] = lambda: row
@@ -183,7 +182,9 @@ class TestTheFakeRejectsWhatS3Rejects(unittest.TestCase):
 
     def test_matching_checksum_is_accepted(self) -> None:
         s3 = RecordingS3Client()
-        s3.put_object(Bucket="b", Key="k", Body=b"the bytes", ChecksumSHA256=_b64_sha256(b"the bytes"))
+        s3.put_object(
+            Bucket="b", Key="k", Body=b"the bytes", ChecksumSHA256=_b64_sha256(b"the bytes")
+        )
         self.assertEqual(len(s3.puts), 1)
 
 

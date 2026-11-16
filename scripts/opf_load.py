@@ -497,7 +497,9 @@ def _validate_doc(doc: dict, *, require_identity: bool) -> dict:
 
     problems = opf_integrity.derivation_errors(doc)
     if problems:
-        shown = "; ".join(problems[:5]) + (f"; and {len(problems) - 5} more" if len(problems) > 5 else "")
+        shown = "; ".join(problems[:5]) + (
+            f"; and {len(problems) - 5} more" if len(problems) > 5 else ""
+        )
         raise OpfDerivedMismatchError(
             f"OPF validation failed: the document's derived sections do not follow from its evidence "
             f"and Floor ({len(problems)} problem(s): {shown}). Recompile or re-sign the playbook with "

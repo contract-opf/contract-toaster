@@ -106,8 +106,10 @@ class TestPointOfUseGuard(unittest.TestCase):
         for label, secret in WEAK.items():
             env = {} if secret is None else {"DEMO_TOKEN_SECRET": secret}
             with self.subTest(case=label), patch.dict("os.environ", env, clear=True):
-                for call in (lambda: demo_auth.issue_demo_token(row),
-                             lambda: demo_auth.verify_demo_token(token)):
+                for call in (
+                    lambda: demo_auth.issue_demo_token(row),
+                    lambda: demo_auth.verify_demo_token(token),
+                ):
                     with self.assertRaises(HTTPException) as caught:
                         call()
                     self.assertEqual(caught.exception.status_code, 503)
@@ -125,11 +127,13 @@ class TestWiredIntoLifespan(unittest.TestCase):
     def test_runs_at_top_level_right_after_the_required_env_check(self) -> None:
         source = (BACKEND_ROOT / "src" / "main.py").read_text(encoding="utf-8")
         function = next(
-            node for node in ast.walk(ast.parse(source))
+            node
+            for node in ast.walk(ast.parse(source))
             if isinstance(node, ast.AsyncFunctionDef) and node.name == "_lifespan"
         )
         body = [
-            ast.unparse(s.value) for s in function.body
+            ast.unparse(s.value)
+            for s in function.body
             if isinstance(s, ast.Expr) and not isinstance(s.value, ast.Constant)
         ]
         self.assertEqual(body[0], "startup_checks.verify_required_env()")
@@ -145,16 +149,12 @@ class TestShippedDeployFiles(unittest.TestCase):
         self.assertIn("openssl rand -hex 32", text)
 
     def test_coolify_compose_uses_a_generated_value(self) -> None:
-        compose = yaml.safe_load(
-            (DTS / "docker-compose.coolify.yml").read_text(encoding="utf-8")
-        )
+        compose = yaml.safe_load((DTS / "docker-compose.coolify.yml").read_text(encoding="utf-8"))
         value = compose["services"]["backend"]["environment"]["DEMO_TOKEN_SECRET"]
         self.assertEqual(value, "${SERVICE_PASSWORD_64_DEMOTOKEN}")
 
     def test_local_compose_still_requires_the_operator_to_set_it(self) -> None:
-        compose = yaml.safe_load(
-            (DTS / "docker-compose.yml").read_text(encoding="utf-8")
-        )
+        compose = yaml.safe_load((DTS / "docker-compose.yml").read_text(encoding="utf-8"))
         value = compose["services"]["backend"]["environment"]["DEMO_TOKEN_SECRET"]
         self.assertTrue(str(value).startswith("${DEMO_TOKEN_SECRET:?"), value)
 
@@ -162,8 +162,12 @@ class TestShippedDeployFiles(unittest.TestCase):
 def _run_tests() -> int:
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
-    for case in (TestStartupCheck, TestPointOfUseGuard, TestWiredIntoLifespan,
-                 TestShippedDeployFiles):
+    for case in (
+        TestStartupCheck,
+        TestPointOfUseGuard,
+        TestWiredIntoLifespan,
+        TestShippedDeployFiles,
+    ):
         suite.addTests(loader.loadTestsFromTestCase(case))
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     return 0 if result.wasSuccessful() else 1

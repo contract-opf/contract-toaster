@@ -136,9 +136,7 @@ def unregistered_tests(text: str) -> list[str]:
     for name, def_line in find_top_level_test_defs(text):
         name_re = re.compile(r"\b" + re.escape(name) + r"\b")
         referenced = any(
-            name_re.search(line)
-            for i, line in enumerate(lines, start=1)
-            if i != def_line
+            name_re.search(line) for i, line in enumerate(lines, start=1) if i != def_line
         )
         if not referenced:
             orphans.append(name)
@@ -148,9 +146,7 @@ def unregistered_tests(text: str) -> list[str]:
 def discover_test_files() -> list[Path]:
     """`tests/**/test_*.py`, recursively -- the file shape the issue scopes
     this to. Excludes `__pycache__`; there is nothing else to exclude."""
-    return sorted(
-        p for p in TESTS_DIR.rglob("test_*.py") if "__pycache__" not in p.parts
-    )
+    return sorted(p for p in TESTS_DIR.rglob("test_*.py") if "__pycache__" not in p.parts)
 
 
 def orphans_in_file(path: Path) -> list[str]:
@@ -291,8 +287,7 @@ def test_docstring_mentioning_the_mechanism_is_not_misclassified() -> None:
         found = orphans_in_file(fixture)
         _assert(
             found == ["test_orphaned_but_only_mentioned"],
-            "a file that merely mentions the mechanism must still be scanned "
-            "for real orphans",
+            "a file that merely mentions the mechanism must still be scanned for real orphans",
             f"got {found!r}",
         )
 

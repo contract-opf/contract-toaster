@@ -133,6 +133,7 @@ def _assert(condition: bool, label: str, detail: str = "") -> list[str]:
 # Check A — Seven required tables defined in data-stack.ts
 # ---------------------------------------------------------------------------
 
+
 def check_a_table_names() -> list[str]:
     print("\nCheck A: Seven required tables defined in data-stack.ts …")
     failures: list[str] = []
@@ -183,6 +184,7 @@ def check_a_table_names() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check B — KMS encryption with correct per-class key
 # ---------------------------------------------------------------------------
+
 
 def check_b_kms_encryption() -> list[str]:
     print("\nCheck B: Tables encrypted with per-class CMKs …")
@@ -242,6 +244,7 @@ def check_b_kms_encryption() -> list[str]:
 # Check C — PITR enabled
 # ---------------------------------------------------------------------------
 
+
 def check_c_pitr() -> list[str]:
     print("\nCheck C: PITR (point-in-time recovery) enabled on required tables …")
     failures: list[str] = []
@@ -249,14 +252,16 @@ def check_c_pitr() -> list[str]:
     data_ts = _read(DATA_STACK_PATH)
 
     # PITR enabled — must appear multiple times (once per required table)
-    pitr_occurrences = len(re.findall(
-        r"pointInTimeRecovery\s*:\s*true|"
-        r"pointInTimeRecoverySpecification|"
-        r"pitrEnabled\s*:\s*true|"
-        r"pointInTimeRecovery.*enabled",
-        data_ts,
-        re.IGNORECASE,
-    ))
+    pitr_occurrences = len(
+        re.findall(
+            r"pointInTimeRecovery\s*:\s*true|"
+            r"pointInTimeRecoverySpecification|"
+            r"pitrEnabled\s*:\s*true|"
+            r"pointInTimeRecovery.*enabled",
+            data_ts,
+            re.IGNORECASE,
+        )
+    )
     failures += _assert(
         pitr_occurrences >= 6,
         f"PITR enabled on at least 6 required tables — found {pitr_occurrences} occurrence(s)",
@@ -270,6 +275,7 @@ def check_c_pitr() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check D — GSIs: owner_sub on reviews, actor + review_id on audit
 # ---------------------------------------------------------------------------
+
 
 def check_d_gsis() -> list[str]:
     print("\nCheck D: Required GSIs present on reviews and audit tables …")
@@ -352,9 +358,7 @@ _FIXTURE_TABLES: dict[str, tuple[list[dict], str]] = {
     "reviewSubmissionsTable": (ddb_fixtures.SUBMISSIONS_GSIS, "review_submissions"),
 }
 
-_GSI_BLOCK_RE = re.compile(
-    r"this\.(\w+)\.addGlobalSecondaryIndex\(\{(.*?)\}\);", re.DOTALL
-)
+_GSI_BLOCK_RE = re.compile(r"this\.(\w+)\.addGlobalSecondaryIndex\(\{(.*?)\}\);", re.DOTALL)
 
 
 def _parse_ts_gsis(data_ts: str) -> dict[str, dict[str, dict]]:
@@ -375,9 +379,7 @@ def _parse_ts_gsis(data_ts: str) -> dict[str, dict[str, dict]]:
         key_schema: list[dict[str, str]] = []
         partition = re.search(r"partitionKey:\s*\{\s*name:\s*'([^']+)'", block)
         if partition:
-            key_schema.append(
-                {"AttributeName": partition.group(1), "KeyType": "HASH"}
-            )
+            key_schema.append({"AttributeName": partition.group(1), "KeyType": "HASH"})
         sort = re.search(r"sortKey:\s*\{\s*name:\s*'([^']+)'", block)
         if sort:
             key_schema.append({"AttributeName": sort.group(1), "KeyType": "RANGE"})
@@ -438,6 +440,7 @@ def _check_d_fixture_parity(data_ts: str) -> list[str]:
 # ---------------------------------------------------------------------------
 # Check E — Audit immutability: DENY UpdateItem + DeleteItem; append-only writes
 # ---------------------------------------------------------------------------
+
 
 def check_e_audit_immutability() -> list[str]:
     print("\nCheck E: Audit immutability enforced at IAM-policy level …")
@@ -529,6 +532,7 @@ def check_e_audit_immutability() -> list[str]:
 # Check F — Audit substance whitelist documented
 # ---------------------------------------------------------------------------
 
+
 def check_f_audit_substance_whitelist() -> list[str]:
     print("\nCheck F: Audit substance whitelist documented in data-stack.ts …")
     failures: list[str] = []
@@ -567,6 +571,7 @@ def check_f_audit_substance_whitelist() -> list[str]:
 # Check G — DynamoDB Streams on audit table (feeds archive)
 # ---------------------------------------------------------------------------
 
+
 def check_g_dynamodb_streams() -> list[str]:
     print("\nCheck G: DynamoDB Streams enabled on audit table …")
     failures: list[str] = []
@@ -598,6 +603,7 @@ def check_g_dynamodb_streams() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check H — Reconciliation data shape invariants
 # ---------------------------------------------------------------------------
+
 
 def check_h_reconciliation_invariants() -> list[str]:
     print("\nCheck H: Reconciliation data shape invariants …")
@@ -678,6 +684,7 @@ def check_h_reconciliation_invariants() -> list[str]:
 # Check I — Removal policy RETAIN
 # ---------------------------------------------------------------------------
 
+
 def check_i_removal_policy() -> list[str]:
     print("\nCheck I: Removal policy RETAIN used on DynamoDB tables …")
     failures: list[str] = []
@@ -705,6 +712,7 @@ def check_i_removal_policy() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check J — cdk synth runs cleanly
 # ---------------------------------------------------------------------------
+
 
 def check_j_cdk_synth() -> list[str]:
     print("\nCheck J: cdk synth runs cleanly with DynamoDB tables …")
@@ -790,9 +798,7 @@ def check_l_status_index_synthesized() -> list[str]:
         return failures
 
     properties = table.get("Properties", {})
-    indexes = {
-        gsi.get("IndexName"): gsi for gsi in properties.get("GlobalSecondaryIndexes", [])
-    }
+    indexes = {gsi.get("IndexName"): gsi for gsi in properties.get("GlobalSecondaryIndexes", [])}
     status_index = indexes.get(STATUS_INDEX_NAME)
     failures += _assert(
         status_index is not None,
@@ -891,9 +897,7 @@ def check_m_entity_roster_table() -> list[str]:
     properties = table.get("Properties", {})
 
     failures += _assert(
-        properties.get("KeySchema") == [
-            {"AttributeName": "setting_id", "KeyType": "HASH"}
-        ],
+        properties.get("KeySchema") == [{"AttributeName": "setting_id", "KeyType": "HASH"}],
         "entity-roster table key is HASH setting_id",
         f"KeySchema: {properties.get('KeySchema')}",
     )
@@ -917,11 +921,10 @@ def check_m_entity_roster_table() -> list[str]:
         f"SSESpecification: {properties.get('SSESpecification')}",
     )
     failures += _assert(
-        properties.get("PointInTimeRecoverySpecification", {})
-        .get("PointInTimeRecoveryEnabled") is True,
+        properties.get("PointInTimeRecoverySpecification", {}).get("PointInTimeRecoveryEnabled")
+        is True,
         "entity-roster table has PITR enabled (it governs every review prompt)",
-        f"PointInTimeRecoverySpecification: "
-        f"{properties.get('PointInTimeRecoverySpecification')}",
+        f"PointInTimeRecoverySpecification: {properties.get('PointInTimeRecoverySpecification')}",
     )
     failures += _assert(
         table.get("DeletionPolicy") == "Retain",
@@ -957,6 +960,7 @@ def check_m_entity_roster_table() -> list[str]:
 # Check K — Guard: DynamoDB table references exported for downstream stacks
 # ---------------------------------------------------------------------------
 
+
 def check_k_table_exports() -> list[str]:
     print("\nCheck K: DynamoDB table references exported for downstream stack consumption …")
     failures: list[str] = []
@@ -990,6 +994,7 @@ def check_k_table_exports() -> list[str]:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> int:
     print("DynamoDB tables structural gate (issue #52)")
     print("=" * 60)
@@ -1012,10 +1017,7 @@ def main() -> int:
 
     print("\n" + "=" * 60)
     if all_failures:
-        print(
-            f"\nFAIL: {len(all_failures)} check(s) failed.\n"
-            "See output above for details."
-        )
+        print(f"\nFAIL: {len(all_failures)} check(s) failed.\nSee output above for details.")
         return 1
 
     print("\nPASS: all DynamoDB tables structural checks passed.")

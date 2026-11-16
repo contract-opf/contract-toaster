@@ -300,11 +300,11 @@ class PreflightVocabularyTestBase(unittest.TestCase):
         self.app.include_router(review_routes.router)
         self.app.dependency_overrides[review_routes.get_dynamodb_resource] = lambda: self.ddb
         self.app.dependency_overrides[review_routes.get_s3_client] = lambda: self.s3
-        self.app.dependency_overrides[review_routes.get_playbook_registry_path] = (
-            lambda: self.registry_path
+        self.app.dependency_overrides[review_routes.get_playbook_registry_path] = lambda: (
+            self.registry_path
         )
-        self.app.dependency_overrides[review_routes.get_av_client] = (
-            lambda: review_routes.NullAvClient()
+        self.app.dependency_overrides[review_routes.get_av_client] = lambda: (
+            review_routes.NullAvClient()
         )
         self.app.dependency_overrides[review_routes.get_active_user_row] = lambda: {
             "cognito_sub": "reviewer-659",
@@ -312,9 +312,7 @@ class PreflightVocabularyTestBase(unittest.TestCase):
             "status": "active",
             "is_admin": False,
         }
-        self.app.dependency_overrides[review_routes.get_preflight_model_client] = (
-            lambda: None
-        )
+        self.app.dependency_overrides[review_routes.get_preflight_model_client] = lambda: None
         self.client = TestClient(self.app)
 
     # -- the real admin upload+activate sequence -----------------------------
@@ -357,9 +355,7 @@ class PreflightVocabularyTestBase(unittest.TestCase):
             accepted_stub_basis=validated.accepted_stub_basis,
         )
         if activate:
-            playbook_versions.activate_playbook_version(
-                playbook_id, version, "admin-659", self.ddb
-            )
+            playbook_versions.activate_playbook_version(playbook_id, version, "admin-659", self.ddb)
         return storage_key
 
     def _install_opf_fixture(
@@ -375,14 +371,10 @@ class PreflightVocabularyTestBase(unittest.TestCase):
     # -- helpers -------------------------------------------------------------
 
     def _vocabulary(self) -> list[str]:
-        return review_routes._preflight_agreement_vocabulary(
-            self.registry_path, self.ddb, self.s3
-        )
+        return review_routes._preflight_agreement_vocabulary(self.registry_path, self.ddb, self.s3)
 
     def _resolve(self, playbook_id: str) -> tuple[str | None, list[str]]:
-        return review_routes._resolve_playbook_agreement_type(
-            playbook_id, self.ddb, self.s3
-        )
+        return review_routes._resolve_playbook_agreement_type(playbook_id, self.ddb, self.s3)
 
     def _preflight(self, docx_bytes: bytes, *, playbook_id: str):
         return self.client.post(
@@ -391,8 +383,7 @@ class PreflightVocabularyTestBase(unittest.TestCase):
                 "file": (
                     "in.docx",
                     docx_bytes,
-                    "application/vnd.openxmlformats-officedocument."
-                    "wordprocessingml.document",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 )
             },
             data={"playbook_id": playbook_id},
@@ -417,9 +408,7 @@ class PreflightVocabularyTestBase(unittest.TestCase):
             served_model="test/cheap-model",
             usage={"prompt_tokens": 900, "completion_tokens": 60},
         )
-        self.app.dependency_overrides[review_routes.get_preflight_model_client] = (
-            lambda: client
-        )
+        self.app.dependency_overrides[review_routes.get_preflight_model_client] = lambda: client
         return client
 
 
@@ -444,9 +433,7 @@ class TestDbInstalledOpfPlaybookReachesTheVocabulary(PreflightVocabularyTestBase
         self.assertEqual(body["classification"], "ok")
         # The enum the model was actually handed -- not just what a helper
         # returns in isolation.
-        enum = client.invocations[0]["output_schema"]["properties"][
-            "agreement_type_guess"
-        ]["enum"]
+        enum = client.invocations[0]["output_schema"]["properties"]["agreement_type_guess"]["enum"]
         self.assertIn(OPF_DIGEST_TYPE_NAME, enum)
         # And it survives `sanitize_classification`'s exact-match gate, so
         # it is what the reviewer sees.
@@ -515,7 +502,7 @@ class TestNoShippedContractTypeSurvives(PreflightVocabularyTestBase):
         )
 
     def test_other_is_always_offered_and_is_not_a_contract_type(self):
-        """"Other" is the null answer, not a type: it is offered even with
+        """ "Other" is the null answer, not a type: it is offered even with
         playbooks installed, and a vocabulary of ONLY it counts as empty
         (`_vocabulary_has_installed_types`)."""
         self._install_opf_fixture(OPF_DIGEST_PLAYBOOK_ID, OPF_DIGEST_FIXTURE)
@@ -593,9 +580,7 @@ class TestMatchVerdictUsesTheRealTypeAndAliases(PreflightVocabularyTestBase):
         self._install_opf_fixture(OPF_DIGEST_PLAYBOOK_ID, OPF_DIGEST_FIXTURE)
         # "eiaa-fixture" is one of the artifact's declared `aliases`;
         # "educational-affiliation" is its machine `id`.
-        self.assertEqual(
-            self._match("EIAA-Fixture", playbook_id=OPF_DIGEST_PLAYBOOK_ID), "likely"
-        )
+        self.assertEqual(self._match("EIAA-Fixture", playbook_id=OPF_DIGEST_PLAYBOOK_ID), "likely")
         self.assertEqual(
             self._match("Educational-Affiliation", playbook_id=OPF_DIGEST_PLAYBOOK_ID),
             "likely",
@@ -609,9 +594,7 @@ class TestMatchVerdictUsesTheRealTypeAndAliases(PreflightVocabularyTestBase):
         to `(None, [])`, so a wrong guess produced "unclear" and the amber
         `review-preflight-match-unlikely` note never rendered."""
         self._install_opf_fixture(OPF_DIGEST_PLAYBOOK_ID, OPF_DIGEST_FIXTURE)
-        self.assertEqual(
-            self._match(V1_TYPE_NAME, playbook_id=OPF_DIGEST_PLAYBOOK_ID), "unlikely"
-        )
+        self.assertEqual(self._match(V1_TYPE_NAME, playbook_id=OPF_DIGEST_PLAYBOOK_ID), "unlikely")
 
     def test_an_unresolvable_playbook_is_still_unclear_never_an_error(self):
         self.assertEqual(self._match(V1_TYPE_NAME, playbook_id="no-such-playbook"), "unclear")
@@ -668,16 +651,14 @@ class TestEmptyVocabularyDegradesToUnavailable(PreflightVocabularyTestBase):
             "playbooks": {
                 "synthetic-generic": {
                     "playbook_id": "synthetic-generic",
-                    "playbook_path": (
-                        "tests/fixtures/playbooks/synthetic-generic-v1.0.0.json"
-                    ),
+                    "playbook_path": ("tests/fixtures/playbooks/synthetic-generic-v1.0.0.json"),
                     "test_only": True,
                 }
             },
         }
         self.registry_path = Path(self.enterContext(_temp_registry(registry)))
-        self.app.dependency_overrides[review_routes.get_playbook_registry_path] = (
-            lambda: self.registry_path
+        self.app.dependency_overrides[review_routes.get_playbook_registry_path] = lambda: (
+            self.registry_path
         )
 
     def test_the_vocabulary_is_only_the_null_answer(self):
@@ -687,9 +668,7 @@ class TestEmptyVocabularyDegradesToUnavailable(PreflightVocabularyTestBase):
     def test_the_route_reports_unavailable_and_never_calls_the_model(self):
         client = self._model_client(V1_TYPE_NAME)
 
-        resp = self._preflight(
-            preflight491._nda_shaped_docx_bytes(), playbook_id=V1_PLAYBOOK_ID
-        )
+        resp = self._preflight(preflight491._nda_shaped_docx_bytes(), playbook_id=V1_PLAYBOOK_ID)
 
         self.assertEqual(resp.status_code, 200)
         body = resp.json()

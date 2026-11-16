@@ -110,8 +110,7 @@ const ASTRAL_NAMES = [
 ];
 
 /** A high surrogate with no low after it, or a low with no high before it. */
-const LONE_SURROGATE =
-  /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 
 /** Fit `name` in `box`, at the font that box is set in. */
 function fitIn(name: string, box: Box, maxLines = FILENAME_MAX_LINES): string[] {
@@ -366,10 +365,9 @@ describe('issue #739 \u2014 whitespace already in the name is not a line break',
     for (const box of [PHONE, DESKTOP]) {
       expect(fitIn(padded, box)).toEqual(fitIn(padded.trim(), box));
       for (const line of fitIn(padded, box)) {
-        expect(
-          /^\s/.test(line),
-          `line starts with whitespace: ${JSON.stringify(line)}`,
-        ).toBe(false);
+        expect(/^\s/.test(line), `line starts with whitespace: ${JSON.stringify(line)}`).toBe(
+          false,
+        );
       }
     }
   });
@@ -439,9 +437,7 @@ const DOM_BOX = 120;
 let domBox = DOM_BOX;
 function stubBoxWidth(): void {
   domBox = DOM_BOX;
-  vi.spyOn(Element.prototype, 'clientWidth', 'get').mockImplementation(function (
-    this: Element,
-  ) {
+  vi.spyOn(Element.prototype, 'clientWidth', 'get').mockImplementation(function (this: Element) {
     if (!this.classList.contains('od-toast-name')) return 1272;
     // `.od-plain .od-slice { display: none }` in the shipped stylesheet, which
     // gives every descendant of the slice a client width of zero. vitest runs
@@ -477,8 +473,7 @@ function stubMeasuring(): void {
 
 const inscription = (): HTMLElement =>
   document.querySelector<HTMLElement>('.od-toast-name') as HTMLElement;
-const slice = (): HTMLElement =>
-  document.querySelector<HTMLElement>('.od-slice') as HTMLElement;
+const slice = (): HTMLElement => document.querySelector<HTMLElement>('.od-slice') as HTMLElement;
 
 /** The 04p2 rectangle's own selector. nwsapi throws on selector syntax it
  *  does not implement, and a selector the element cannot be tested against is
@@ -727,10 +722,7 @@ describe('issue #739 — the safe rectangle does not move with the slice state',
           onAction={vi.fn()}
         />,
       );
-      expect(document.querySelector('.od-console')).toHaveAttribute(
-        'data-status',
-        attribute,
-      );
+      expect(document.querySelector('.od-console')).toHaveAttribute('data-status', attribute);
       const el = inscription();
       expect(el, `no inscription in ${status}`).toBeTruthy();
       // Reading the rule out of the stylesheet cannot prove it still selects
@@ -774,9 +766,7 @@ describe('issue #739 — the extension is never painted alone', () => {
         const last = lines[lines.length - 1];
         const where = `${JSON.stringify(name)} at ${box.width}px / ${box.font}px`;
         expect(last, `orphaned extension: ${where}`).not.toBe('docx');
-        expect(last, `last line does not carry the extension: ${where}`).toMatch(
-          /\.docx$/,
-        );
+        expect(last, `last line does not carry the extension: ${where}`).toMatch(/\.docx$/);
         expectInside(lines, box);
       }
     }
@@ -800,11 +790,7 @@ describe('issue #739 — the extension is never painted alone', () => {
     // apply, no width in the range is too narrow — so the escape hatch is gone
     // and its condition is asserted instead, which is what makes the band
     // covered rather than skipped.
-    for (
-      let consoleWidth = CONSOLE_MIN_PX;
-      consoleWidth <= CONSOLE_MAX_PX;
-      consoleWidth += 1
-    ) {
+    for (let consoleWidth = CONSOLE_MIN_PX; consoleWidth <= CONSOLE_MAX_PX; consoleWidth += 1) {
       const box = inscriptionBox(consoleWidth);
       const measure = metricsAt(box.font);
       const where = `console ${consoleWidth}px (box ${box.width}px / ${box.font}px)`;
@@ -815,9 +801,7 @@ describe('issue #739 — the extension is never painted alone', () => {
       for (const name of ORPHAN_PRONE) {
         const lines = fitFilename(name, { measure, width: box.width });
         const last = lines[lines.length - 1];
-        expect(last, `orphaned extension: ${JSON.stringify(name)} at ${where}`).not.toBe(
-          'docx',
-        );
+        expect(last, `orphaned extension: ${JSON.stringify(name)} at ${where}`).not.toBe('docx');
         expect(
           last,
           `last line does not carry the extension: ${JSON.stringify(name)} at ${where}`,

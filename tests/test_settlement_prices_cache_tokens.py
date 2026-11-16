@@ -124,8 +124,7 @@ def _expected_write_cents() -> int:
 def _expected_read_cents() -> int:
     base = _primary_base_rate()
     return _cents(
-        base * (ACTUAL_INPUT_TOKENS - CACHED_TOKENS)
-        + TICKET_READ_MULTIPLIER * base * CACHED_TOKENS
+        base * (ACTUAL_INPUT_TOKENS - CACHED_TOKENS) + TICKET_READ_MULTIPLIER * base * CACHED_TOKENS
     )
 
 
@@ -410,12 +409,18 @@ class TestClientCumulativeSettlement(_OpenRouterEnv):
                 {
                     "prompt_tokens": ACTUAL_INPUT_TOKENS,
                     "completion_tokens": 0,
-                    "prompt_tokens_details": {"cache_write_tokens": CACHED_TOKENS, "cached_tokens": 0},
+                    "prompt_tokens_details": {
+                        "cache_write_tokens": CACHED_TOKENS,
+                        "cached_tokens": 0,
+                    },
                 },
                 {
                     "prompt_tokens": ACTUAL_INPUT_TOKENS,
                     "completion_tokens": 0,
-                    "prompt_tokens_details": {"cache_write_tokens": 0, "cached_tokens": CACHED_TOKENS},
+                    "prompt_tokens_details": {
+                        "cache_write_tokens": 0,
+                        "cached_tokens": CACHED_TOKENS,
+                    },
                 },
             ]
         )
@@ -452,9 +457,9 @@ class TestClientCumulativeSettlement(_OpenRouterEnv):
 class TestMultipliersLiveInThePolicy(_OpenRouterEnv):
     def test_every_caching_entry_declares_both_multipliers(self) -> None:
         policy = model_client.load_openrouter_policy()
-        entries = [
-            (f"models.{role}", block) for role, block in policy["models"].items()
-        ] + [(f"selectable[{e['model_id']}]", e) for e in policy["selectable"]]
+        entries = [(f"models.{role}", block) for role, block in policy["models"].items()] + [
+            (f"selectable[{e['model_id']}]", e) for e in policy["selectable"]
+        ]
         caching = [(where, e) for where, e in entries if e.get("prompt_caching") is True]
         self.assertTrue(caching, "no entry declares prompt_caching")
         for where, entry in caching:

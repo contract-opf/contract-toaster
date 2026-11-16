@@ -97,6 +97,7 @@ def json_safe(value: Any) -> Any:
         return [json_safe(v) for v in value]
     return value
 
+
 # ---------------------------------------------------------------------------
 # The API-boundary projection for a `users` row (issue #453).
 #
@@ -176,7 +177,11 @@ def public_user_view(row: dict[str, Any]) -> dict[str, Any]:
             from demo_auth import default_credentials_warning  # type: ignore[no-redef]
         projected_row = dict(row)
         projected_row["default_credentials_warning"] = default_credentials_warning(row)
-    return {field: json_safe(projected_row[field]) for field in PUBLIC_USER_FIELDS if field in projected_row}
+    return {
+        field: json_safe(projected_row[field])
+        for field in PUBLIC_USER_FIELDS
+        if field in projected_row
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -399,7 +404,9 @@ def update_user(
         )
 
     if "is_admin" in updates and not isinstance(updates["is_admin"], bool):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="is_admin must be a boolean.")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="is_admin must be a boolean."
+        )
 
     caller_sub = caller_user_row.get("cognito_sub")
 
@@ -426,7 +433,9 @@ def update_user(
     # write on the count if cheap, otherwise re-read-then-write is
     # acceptable at this scale") — this is the re-read-then-write option,
     # knowingly not race-free.
-    target_is_active_admin = bool(before.get("is_admin", False)) and before.get("status") == "active"
+    target_is_active_admin = (
+        bool(before.get("is_admin", False)) and before.get("status") == "active"
+    )
     would_strip_admin_access = target_is_active_admin and (
         ("status" in updates and updates["status"] != "active")
         or ("is_admin" in updates and updates["is_admin"] is False)

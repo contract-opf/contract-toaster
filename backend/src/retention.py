@@ -125,6 +125,7 @@ def _validate_window(window_days: int | str) -> None:
             ),
         )
 
+
 # Invariant 1: only terminal reviews are ever purge-eligible -- reviews
 # outside this set are active executions and must never be counted or
 # purged, even far past the retention window.
@@ -404,7 +405,9 @@ def request_retention_change(
     }
 
 
-def _current_pending(dynamodb_resource: Any, pending_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+def _current_pending(
+    dynamodb_resource: Any, pending_id: str
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """(settings row, pending record) for `pending_id`, or 404."""
     row = (
         _settings_table(dynamodb_resource)
@@ -786,9 +789,7 @@ def _review_object_targets(
     return targets
 
 
-def _surviving_targets(
-    s3_client: Any, targets: list[tuple[str, str]]
-) -> list[str]:
+def _surviving_targets(s3_client: Any, targets: list[tuple[str, str]]) -> list[str]:
     """The targeted keys that are STILL present after the delete calls.
 
     The sweep's success record must be tied to the outcome, not to having
@@ -813,9 +814,7 @@ def _log_purge_plan(review_id: str, keys: list[str], dry_run: bool) -> None:
     at a level an operator sees, and `dry_run=True` reports the same list
     without deleting anything."""
     prefix = "DRY RUN -- would purge" if dry_run else "purging"
-    logger.warning(
-        "retention sweep: %s review %s (%d object(s))", prefix, review_id, len(keys)
-    )
+    logger.warning("retention sweep: %s review %s (%d object(s))", prefix, review_id, len(keys))
     for key in keys:
         logger.info("retention sweep: %s %s", prefix, key)
 
@@ -950,9 +949,9 @@ def run_purge_sweep_now(
         # eventually consistent and was read before this candidate's turn. A
         # hold placed since then must still win, so re-read the row strongly
         # consistently immediately before acting on it.
-        current = reviews_table.get_item(
-            Key={"review_id": review_id}, ConsistentRead=True
-        ).get("Item")
+        current = reviews_table.get_item(Key={"review_id": review_id}, ConsistentRead=True).get(
+            "Item"
+        )
         if not current:
             logger.warning("retention sweep: review %s vanished mid-sweep; skipped", review_id)
             continue
@@ -1187,7 +1186,6 @@ def _tag_or_503(
         ) from None
 
 
-
 def tag_if_held(review_id: str, dynamodb_resource: Any) -> dict[str, str]:
     """Extra `put_object` / `copy_object` kwargs for an object written under
     `review_id` (W6.6): `{"Tagging": "contract-toaster:legal-hold=true"}` while
@@ -1348,7 +1346,10 @@ def _revert_row(reviews_table: Any, before: dict[str, Any]) -> None:
         expression += "SET " + ", ".join(sets)
     if removes:
         expression += (" " if expression else "") + "REMOVE " + ", ".join(removes)
-    kwargs: dict[str, Any] = {"Key": {"review_id": before["review_id"]}, "UpdateExpression": expression}
+    kwargs: dict[str, Any] = {
+        "Key": {"review_id": before["review_id"]},
+        "UpdateExpression": expression,
+    }
     if values:
         kwargs["ExpressionAttributeValues"] = values
     try:

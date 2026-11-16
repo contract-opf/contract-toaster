@@ -249,8 +249,7 @@ def resolve_openrouter_api_key(dynamodb_resource: Any = None) -> str:
             row = _stored_row(dynamodb_resource)
         except Exception:  # degrade to the env var, never wedge a review
             logger.warning(
-                "Could not read the admin-set model key; falling back to "
-                "OPENROUTER_API_KEY.",
+                "Could not read the admin-set model key; falling back to OPENROUTER_API_KEY.",
                 exc_info=True,
             )
         else:
@@ -443,9 +442,7 @@ def clear_model_key(
         },
     )
 
-    logger.info(
-        "MODEL_KEY_CLEAR: actor=%s reverted_to=%s", actor, after["key_source"] or "none"
-    )
+    logger.info("MODEL_KEY_CLEAR: actor=%s reverted_to=%s", actor, after["key_source"] or "none")
 
     return after
 
@@ -490,10 +487,7 @@ def _selection_row_or_default(dynamodb_resource: Any) -> dict[str, Any]:
 
 def _selection_from_row(row: dict[str, Any]) -> dict[str, str]:
     """`{"primary": <id or "">, "critic": <id or "">}` out of a stored row."""
-    return {
-        role: str(row.get(f"{role}_model_id") or "").strip()
-        for role in MODEL_SELECTION_ROLES
-    }
+    return {role: str(row.get(f"{role}_model_id") or "").strip() for role in MODEL_SELECTION_ROLES}
 
 
 def _stored_selection(dynamodb_resource: Any) -> dict[str, str]:
@@ -631,9 +625,7 @@ def get_model_selection_settings(
     Carries NO API-key material of any kind: it reads a different row and
     never touches `api_key`.
     """
-    require_admin(
-        caller_user_row, "Admin privilege required to view the model selection setting."
-    )
+    require_admin(caller_user_row, "Admin privilege required to view the model selection setting.")
 
     store_available = _model_settings_table_name() is not None
     policy = model_client.load_openrouter_policy()
@@ -925,9 +917,7 @@ def env_daily_spend_cap_cents() -> int | None:
     try:
         return int(str(raw).strip())
     except (TypeError, ValueError):
-        logger.warning(
-            "DAILY_SPEND_CAP_USD_CENTS is not an integer; using the built-in default."
-        )
+        logger.warning("DAILY_SPEND_CAP_USD_CENTS is not an integer; using the built-in default.")
         return None
 
 
@@ -981,9 +971,7 @@ def get_spend_cap_settings(
     Carries NO key material: it reads a different row and never touches
     `api_key`.
     """
-    require_admin(
-        caller_user_row, "Admin privilege required to view the daily spend cap."
-    )
+    require_admin(caller_user_row, "Admin privilege required to view the daily spend cap.")
     store_available = _model_settings_table_name() is not None
     # ONE guarded read serves the stored cap AND the "who changed it when"
     # stamps, for the reason `get_model_selection_settings` gives: reading the
@@ -1066,9 +1054,7 @@ def set_daily_spend_cap_cents(
     not a whole number of cents inside the accepted bounds, and 400 on a
     deployment with no settings store.
     """
-    require_admin(
-        caller_user_row, "Admin privilege required to change the daily spend cap."
-    )
+    require_admin(caller_user_row, "Admin privilege required to change the daily spend cap.")
     if _model_settings_table_name() is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1093,8 +1079,7 @@ def set_daily_spend_cap_cents(
         table.update_item(
             Key={"setting_id": SPEND_SETTING_ID},
             UpdateExpression=(
-                "REMOVE daily_cap_usd_cents "
-                "SET spend_updated_at = :t, spend_updated_by = :a"
+                "REMOVE daily_cap_usd_cents SET spend_updated_at = :t, spend_updated_by = :a"
             ),
             ExpressionAttributeValues={":t": now, ":a": actor},
         )
@@ -1102,8 +1087,7 @@ def set_daily_spend_cap_cents(
         table.update_item(
             Key={"setting_id": SPEND_SETTING_ID},
             UpdateExpression=(
-                "SET daily_cap_usd_cents = :c, spend_updated_at = :t, "
-                "spend_updated_by = :a"
+                "SET daily_cap_usd_cents = :c, spend_updated_at = :t, spend_updated_by = :a"
             ),
             ExpressionAttributeValues={":c": requested, ":t": now, ":a": actor},
         )

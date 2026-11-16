@@ -271,9 +271,9 @@ describe('issue #737 — the second glass reads as switched off when empty', () 
     expect(announcer().textContent).toBe('Still checking');
     // One voice for the glass, not two: the decorative copy stays silent.
     expect(
-      Array.from(
-        document.querySelectorAll('[aria-live]:not([aria-live="off"])'),
-      ).filter((el) => el.textContent === 'Still checking'),
+      Array.from(document.querySelectorAll('[aria-live]:not([aria-live="off"])')).filter(
+        (el) => el.textContent === 'Still checking',
+      ),
     ).toEqual([announcer()]);
   });
 });

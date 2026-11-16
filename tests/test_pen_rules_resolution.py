@@ -93,7 +93,9 @@ def test_defaults_artifact_exists_and_is_generic(failures: list[str]) -> None:
         doc = json.loads(raw_text)
 
     if "exos" in raw_text.lower():
-        failures.append("[0b] pen-rules.defaults.json must not contain tenant-brand strings (de-brand rule).")
+        failures.append(
+            "[0b] pen-rules.defaults.json must not contain tenant-brand strings (de-brand rule)."
+        )
 
     default_block = doc.get("default")
     if not isinstance(default_block, dict):
@@ -106,7 +108,9 @@ def test_defaults_artifact_exists_and_is_generic(failures: list[str]) -> None:
         failures.append("[0e] 'default.must_not_introduce' must be a list.")
     for entry in mni:
         if not isinstance(entry, dict) or "phrase" not in entry:
-            failures.append(f"[0f] every must_not_introduce entry must be a {{'phrase': ...}} object; got {entry!r}")
+            failures.append(
+                f"[0f] every must_not_introduce entry must be a {{'phrase': ...}} object; got {entry!r}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -119,14 +123,18 @@ def test_none_bundle_returns_global_defaults(failures: list[str]) -> None:
     with open(DEFAULTS_ARTIFACT_PATH, encoding="utf-8") as f:
         expected = json.load(f)["default"]
     if resolved != expected:
-        failures.append(f"[1a] resolve_pen_rules(None, ...) must equal the global defaults artifact's 'default' block; got {resolved!r}, expected {expected!r}")
+        failures.append(
+            f"[1a] resolve_pen_rules(None, ...) must equal the global defaults artifact's 'default' block; got {resolved!r}, expected {expected!r}"
+        )
 
 
 def test_bundle_default_overrides_global(failures: list[str]) -> None:
     bundle = {"default": {"mode": "bounded_edit", "max_chars": 42, "must_not_introduce": []}}
     resolved = rte.resolve_pen_rules(bundle, "some-topic")
     if resolved["mode"] != "bounded_edit" or resolved["max_chars"] != 42:
-        failures.append(f"[1b] bundle 'default' must override the global defaults artifact wholesale; got {resolved!r}")
+        failures.append(
+            f"[1b] bundle 'default' must override the global defaults artifact wholesale; got {resolved!r}"
+        )
 
 
 def test_per_topic_overrides_bundle_default(failures: list[str]) -> None:
@@ -136,13 +144,19 @@ def test_per_topic_overrides_bundle_default(failures: list[str]) -> None:
     }
     resolved = rte.resolve_pen_rules(bundle, "topic-x")
     if resolved["max_chars"] != 7:
-        failures.append(f"[1c] per_topic override must win over bundle default for max_chars; got {resolved!r}")
+        failures.append(
+            f"[1c] per_topic override must win over bundle default for max_chars; got {resolved!r}"
+        )
     if resolved["mode"] != "bounded_edit":
-        failures.append(f"[1d] a scalar NOT overridden by per_topic must fall back to bundle default; got {resolved!r}")
+        failures.append(
+            f"[1d] a scalar NOT overridden by per_topic must fall back to bundle default; got {resolved!r}"
+        )
 
     resolved_other_topic = rte.resolve_pen_rules(bundle, "topic-y")
     if resolved_other_topic["max_chars"] != 42:
-        failures.append(f"[1e] a topic with no per_topic override must use the bundle default; got {resolved_other_topic!r}")
+        failures.append(
+            f"[1e] a topic with no per_topic override must use the bundle default; got {resolved_other_topic!r}"
+        )
 
 
 def test_floor_ref_entries_survive_every_layer(failures: list[str]) -> None:
@@ -162,7 +176,11 @@ def test_floor_ref_entries_survive_every_layer(failures: list[str]) -> None:
     )
     try:
         bundle = {
-            "default": {"mode": "replace", "max_chars": 900, "must_not_introduce": [{"phrase": "indemnify"}]},
+            "default": {
+                "mode": "replace",
+                "max_chars": 900,
+                "must_not_introduce": [{"phrase": "indemnify"}],
+            },
             "per_topic": {
                 "topic-x": {"max_chars": 300, "must_not_introduce": [{"phrase": "exclusive"}]},
             },
@@ -171,17 +189,25 @@ def test_floor_ref_entries_survive_every_layer(failures: list[str]) -> None:
 
         phrases = {entry["phrase"] for entry in resolved["must_not_introduce"]}
         if "uncapped" not in phrases:
-            failures.append(f"[2a] a global-defaults floor_ref entry must survive into the per-topic-resolved result; got {resolved!r}")
+            failures.append(
+                f"[2a] a global-defaults floor_ref entry must survive into the per-topic-resolved result; got {resolved!r}"
+            )
         if "exclusive" not in phrases:
-            failures.append(f"[2b] the most-specific (per_topic) layer's own plain entry must still be present; got {resolved!r}")
+            failures.append(
+                f"[2b] the most-specific (per_topic) layer's own plain entry must still be present; got {resolved!r}"
+            )
         if "indemnify" in phrases:
             failures.append(
                 f"[2c] a plain (non-floor_ref) entry from a LESS specific layer (bundle default) must NOT survive once a "
                 f"more specific layer (per_topic) defines its own must_not_introduce list; got {resolved!r}"
             )
-        uncapped_entry = next((e for e in resolved["must_not_introduce"] if e["phrase"] == "uncapped"), None)
+        uncapped_entry = next(
+            (e for e in resolved["must_not_introduce"] if e["phrase"] == "uncapped"), None
+        )
         if not uncapped_entry or uncapped_entry.get("floor_ref") != _REAL_FLOOR_REF:
-            failures.append(f"[2d] the surviving sticky entry must retain its floor_ref; got {uncapped_entry!r}")
+            failures.append(
+                f"[2d] the surviving sticky entry must retain its floor_ref; got {uncapped_entry!r}"
+            )
 
         # Same fixture, but topic-y has no per_topic override: bundle
         # default's plain entry ("indemnify") wins as the most-specific
@@ -189,9 +215,13 @@ def test_floor_ref_entries_survive_every_layer(failures: list[str]) -> None:
         resolved_y = rte.resolve_pen_rules(bundle, "topic-y", defaults_path=custom_defaults_path)
         phrases_y = {entry["phrase"] for entry in resolved_y["must_not_introduce"]}
         if "indemnify" not in phrases_y:
-            failures.append(f"[2e] bundle default's plain entry must apply when no per_topic override exists; got {resolved_y!r}")
+            failures.append(
+                f"[2e] bundle default's plain entry must apply when no per_topic override exists; got {resolved_y!r}"
+            )
         if "uncapped" not in phrases_y:
-            failures.append(f"[2f] the sticky floor_ref entry must survive for topic-y too; got {resolved_y!r}")
+            failures.append(
+                f"[2f] the sticky floor_ref entry must survive for topic-y too; got {resolved_y!r}"
+            )
     finally:
         custom_defaults_path.unlink(missing_ok=True)
 
@@ -220,9 +250,13 @@ def test_v1_playbook_passthrough_is_byte_identical(failures: list[str]) -> None:
     # raw topic or with resolve_pen_rules's (identical, for v1) output.
     text = "Each party's aggregate liability under this Agreement shall not exceed $150,000."
     direct = rte.check_replacement_text(topic, text)
-    via_resolve = rte.check_replacement_text({"id": "limitation-of-liability", "replacement_text": resolved}, text)
+    via_resolve = rte.check_replacement_text(
+        {"id": "limitation-of-liability", "replacement_text": resolved}, text
+    )
     if direct.passed != via_resolve.passed or direct.failure != via_resolve.failure:
-        failures.append(f"[3c] check_replacement_text must behave identically via direct topic vs. resolve_pen_rules output; got {direct!r} vs {via_resolve!r}")
+        failures.append(
+            f"[3c] check_replacement_text must behave identically via direct topic vs. resolve_pen_rules output; got {direct!r} vs {via_resolve!r}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -240,7 +274,9 @@ def test_bind_bundle_rejects_unknown_floor_ref(failures: list[str]) -> None:
         "default": {
             "mode": "replace",
             "max_chars": 500,
-            "must_not_introduce": [{"phrase": "made up phrase", "floor_ref": "not-a-real-invariant-id"}],
+            "must_not_introduce": [
+                {"phrase": "made up phrase", "floor_ref": "not-a-real-invariant-id"}
+            ],
         }
     }
     try:
@@ -250,10 +286,14 @@ def test_bind_bundle_rejects_unknown_floor_ref(failures: list[str]) -> None:
             model_policy_path=MODEL_POLICY_PATH,
             pen_rules=pen_rules,
         )
-        failures.append("[4a] bind_bundle must raise BindBundleError for an unknown floor_ref, not silently accept it.")
+        failures.append(
+            "[4a] bind_bundle must raise BindBundleError for an unknown floor_ref, not silently accept it."
+        )
     except bind_bundle.BindBundleError as exc:
         if "not-a-real-invariant-id" not in str(exc):
-            failures.append(f"[4b] BindBundleError message must list the bad floor_ref(s); got: {exc}")
+            failures.append(
+                f"[4b] BindBundleError message must list the bad floor_ref(s); got: {exc}"
+            )
 
 
 def test_bind_bundle_accepts_valid_floor_ref_and_bundle_validates(failures: list[str]) -> None:
@@ -273,11 +313,15 @@ def test_bind_bundle_accepts_valid_floor_ref_and_bundle_validates(failures: list
             pen_rules=pen_rules,
         )
     except bind_bundle.BindBundleError as exc:
-        failures.append(f"[4c] bind_bundle must accept a pen_rules doc whose floor_ref names a real invariant id; raised: {exc}")
+        failures.append(
+            f"[4c] bind_bundle must accept a pen_rules doc whose floor_ref names a real invariant id; raised: {exc}"
+        )
         return
 
     if bundle_doc.get("pen_rules") != pen_rules:
-        failures.append(f"[4d] bound bundle must carry the pen_rules doc verbatim; got {bundle_doc.get('pen_rules')!r}")
+        failures.append(
+            f"[4d] bound bundle must carry the pen_rules doc verbatim; got {bundle_doc.get('pen_rules')!r}"
+        )
 
     try:
         import jsonschema
@@ -286,7 +330,9 @@ def test_bind_bundle_accepts_valid_floor_ref_and_bundle_validates(failures: list
             schema = json.load(f)
         jsonschema.validate(instance=bundle_doc, schema=schema)
     except Exception as exc:  # noqa: BLE001 - want any schema-validation failure surfaced as a test failure
-        failures.append(f"[4e] bundle with a valid pen_rules block must still validate against bundle.schema-v2.json: {exc}")
+        failures.append(
+            f"[4e] bundle with a valid pen_rules block must still validate against bundle.schema-v2.json: {exc}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -303,7 +349,9 @@ class _RecordingModelClient:
     def __init__(self) -> None:
         self.seen_invariant_ids: list[str] = []
 
-    def invoke(self, *, model_id: str, system_prompt: str, user_prompt: str, max_output_tokens: int) -> str:
+    def invoke(
+        self, *, model_id: str, system_prompt: str, user_prompt: str, max_output_tokens: int
+    ) -> str:
         # invariant_id is always the first line of the user prompt (see
         # floor_judge._build_user_prompt).
         first_line = user_prompt.splitlines()[0]
@@ -353,7 +401,9 @@ def test_floor_judge_input_independent_of_pen_rules_presence(failures: list[str]
         )
     expected_ids = [inv["id"] for inv in invariants]
     if client_without.seen_invariant_ids != expected_ids:
-        failures.append(f"[5b] the judge must be invoked once per opf.floor.invariants entry, in order; got {client_without.seen_invariant_ids!r}, expected {expected_ids!r}")
+        failures.append(
+            f"[5b] the judge must be invoked once per opf.floor.invariants entry, in order; got {client_without.seen_invariant_ids!r}, expected {expected_ids!r}"
+        )
 
 
 def main() -> int:

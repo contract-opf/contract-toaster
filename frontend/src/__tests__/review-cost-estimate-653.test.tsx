@@ -41,9 +41,7 @@ import { DEFAULT_PLAYBOOKS, pressSubmit } from './support/consoleSurface';
 /** No price is CLAIMED — the register says so with an em dash rather than by
  *  rendering nothing. Issue #733. */
 function expectsNoPrice(label?: string): void {
-  expect(screen.getByTestId('review-cost-estimate').textContent ?? '', label).not.toMatch(
-    /\$/,
-  );
+  expect(screen.getByTestId('review-cost-estimate').textContent ?? '', label).not.toMatch(/\$/);
 }
 
 vi.mock('aws-amplify/auth', () => ({
@@ -241,9 +239,7 @@ describe('the reviewer sees what the next review costs, before submitting (#653)
     // finished review's facts sit behind an overlay, and this test is about
     // the register, which is on the page regardless.
     await waitFor(() => {
-      expect(document.querySelector('.od-console')?.getAttribute('data-terminal')).toBe(
-        'true',
-      );
+      expect(document.querySelector('.od-console')?.getAttribute('data-terminal')).toBe('true');
     });
 
     await waitFor(() => expect(estimateText()).toContain('$0.79'));

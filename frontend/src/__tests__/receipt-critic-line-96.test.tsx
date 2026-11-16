@@ -102,9 +102,9 @@ describe('the receipt critic line counts overrides (issues #96, #140)', () => {
         entry.issue_id === issueId &&
         entry.field === 'replacement_text',
     );
-    expect(
-      criticLineText({ ...BASE, critic_delta: { overrides: [...stated, ...replaced] } }),
-    ).toBe('Critic: 1 override · confidence OK');
+    expect(criticLineText({ ...BASE, critic_delta: { overrides: [...stated, ...replaced] } })).toBe(
+      'Critic: 1 override · confidence OK',
+    );
   });
 
   it("counts a drop as a drop, not also as the critic's stated decision override", () => {
@@ -112,9 +112,9 @@ describe('the receipt critic line counts overrides (issues #96, #140)', () => {
     const stated = realRecords(
       (entry) => entry.source === 'critic' && entry.issue_id === dropped[0].issue_id,
     );
-    expect(
-      criticLineText({ ...BASE, critic_delta: { overrides: [...stated, ...dropped] } }),
-    ).toBe('Critic: 1 dropped · confidence OK');
+    expect(criticLineText({ ...BASE, critic_delta: { overrides: [...stated, ...dropped] } })).toBe(
+      'Critic: 1 dropped · confidence OK',
+    );
   });
 
   it('names a retained hard rejection, never as dropped', () => {
@@ -200,8 +200,8 @@ describe('the receipt critic line counts overrides (issues #96, #140)', () => {
       }
     };
     REAL_OVERRIDES.forEach((entry) =>
-      ['primary_value', 'critic_value', 'reason', 'primary_issue', 'critic_issue'].forEach(
-        (key) => collect(entry[key]),
+      ['primary_value', 'critic_value', 'reason', 'primary_issue', 'critic_issue'].forEach((key) =>
+        collect(entry[key]),
       ),
     );
     expect(prose.size).toBeGreaterThan(0);

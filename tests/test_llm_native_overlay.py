@@ -144,9 +144,13 @@ def _load_fixture_text(name: str) -> str:
 
 def test_toaster_guidance_block_absent_when_empty(failures: list[str]) -> None:
     if pp.render_toaster_guidance_block("") is not None:
-        failures.append("[1a] render_toaster_guidance_block('') must return None -- no block for empty guidance.")
+        failures.append(
+            "[1a] render_toaster_guidance_block('') must return None -- no block for empty guidance."
+        )
     if pp.render_toaster_guidance_block("   ") is not None:
-        failures.append("[1b] render_toaster_guidance_block must treat whitespace-only guidance as empty.")
+        failures.append(
+            "[1b] render_toaster_guidance_block must treat whitespace-only guidance as empty."
+        )
 
     playbook = _sample_playbook()
     blocks_default_arg = pp.assemble_system_blocks(playbook)
@@ -157,7 +161,9 @@ def test_toaster_guidance_block_absent_when_empty(failures: list[str]) -> None:
             "today's behavior' per the issue's Scope."
         )
     if any("TOASTER_GUIDANCE" in b["text"] for b in blocks_default_arg):
-        failures.append("[1d] With no toaster_guidance supplied, no block may mention TOASTER_GUIDANCE at all.")
+        failures.append(
+            "[1d] With no toaster_guidance supplied, no block may mention TOASTER_GUIDANCE at all."
+        )
 
 
 def test_toaster_guidance_block_present_and_states_precedence(failures: list[str]) -> None:
@@ -181,17 +187,25 @@ def test_toaster_guidance_block_present_and_states_precedence(failures: list[str
         )
         return
     if control != pp.render_toaster_guidance_block(guidance_text):
-        failures.append("[2b] With only guidance supplied, the control layer is the guidance block alone.")
+        failures.append(
+            "[2b] With only guidance supplied, the control layer is the guidance block alone."
+        )
 
     if "GOVERNS" not in control:
-        failures.append("[2c] Toaster-guidance block must state explicit precedence ('GOVERNS') over conflicting playbook positions.")
+        failures.append(
+            "[2c] Toaster-guidance block must state explicit precedence ('GOVERNS') over conflicting playbook positions."
+        )
     if "Floor" not in control or "NOT" not in control.upper():
-        failures.append("[2d] Toaster-guidance block must explicitly say it does NOT reach/override the Floor.")
+        failures.append(
+            "[2d] Toaster-guidance block must explicitly say it does NOT reach/override the Floor."
+        )
 
     if blocks[0]["text"] != pp.REVIEW_GUIDANCE_BLOCK:
         failures.append("[2e] Block 0 must remain the fixed review-guidance block.")
     if pp.render_request_control_text() != "":
-        failures.append("[2f] No guidance, no instructions, medium intensity: the control layer must be empty.")
+        failures.append(
+            "[2f] No guidance, no instructions, medium intensity: the control layer must be empty."
+        )
 
     if any("cache_control" in b for b in blocks[:-1]):
         failures.append("[2g] No block before the last may carry cache_control.")
@@ -209,16 +223,24 @@ def test_toaster_guidance_block_present_and_states_precedence(failures: list[str
 
 def test_floor_block_absent_without_hard_rejections(failures: list[str]) -> None:
     if pp.render_floor_block({}) is not None:
-        failures.append("[3a] render_floor_block({}) must return None -- no hard_rejections key, no block.")
+        failures.append(
+            "[3a] render_floor_block({}) must return None -- no hard_rejections key, no block."
+        )
     if pp.render_floor_block({"hard_rejections": []}) is not None:
-        failures.append("[3b] render_floor_block must return None for an explicitly empty hard_rejections list.")
+        failures.append(
+            "[3b] render_floor_block must return None for an explicitly empty hard_rejections list."
+        )
 
     blocks = pp.assemble_system_blocks({"hard_rejections": []})
     if len(blocks) != 3:
-        failures.append(f"[3c] With no toaster_guidance and no hard_rejections, assemble_system_blocks must return exactly 3 blocks (guidance, overlay, playbook); got {len(blocks)}.")
+        failures.append(
+            f"[3c] With no toaster_guidance and no hard_rejections, assemble_system_blocks must return exactly 3 blocks (guidance, overlay, playbook); got {len(blocks)}."
+        )
         return
     if blocks[1]["text"] != pp.BINARY_DECISION_OVERLAY_BLOCK:
-        failures.append("[3d] With no Floor block, the overlay must be at index 1, immediately followed by the playbook block.")
+        failures.append(
+            "[3d] With no Floor block, the overlay must be at index 1, immediately followed by the playbook block."
+        )
     if any("MUST-NOT FLOOR" in b["text"] for b in blocks):
         failures.append("[3e] With no hard_rejections, no block may mention MUST-NOT FLOOR at all.")
 
@@ -227,18 +249,24 @@ def test_floor_block_present_and_unwaivable(failures: list[str]) -> None:
     playbook = _sample_playbook()  # synthetic-generic playbook fixture: 15 hard_rejections rules
     hard_rejections = playbook["hard_rejections"]
     if not hard_rejections:
-        failures.append("[4z] Fixture assumption broken: the synthetic-generic-v1.0.0.json playbook fixture must carry hard_rejections for this test to be meaningful.")
+        failures.append(
+            "[4z] Fixture assumption broken: the synthetic-generic-v1.0.0.json playbook fixture must carry hard_rejections for this test to be meaningful."
+        )
         return
 
     floor_text = pp.render_floor_block(playbook)
     if floor_text is None:
-        failures.append("[4a] render_floor_block must return content for the synthetic-generic playbook fixture.")
+        failures.append(
+            "[4a] render_floor_block must return content for the synthetic-generic playbook fixture."
+        )
         return
 
     for rule in hard_rejections:
         tag = f"[floor:{rule['id']}]"
         if tag not in floor_text:
-            failures.append(f"[4b] Floor block must name every hard_rejections rule id; missing {tag}.")
+            failures.append(
+                f"[4b] Floor block must name every hard_rejections rule id; missing {tag}."
+            )
 
     # v3 contract (issue #627): a Floor violation is raised as a
     # REQUEST_CHANGE issue carrying an `issue_key`, and the fix is expressed
@@ -262,22 +290,32 @@ def test_floor_block_present_and_unwaivable(failures: list[str]) -> None:
         )
 
     upper = floor_text.upper()
-    if "NON-NEGOTIABLE" not in upper and "NEVER WAIVED" not in floor_text and "CAN NEVER BE WAIVED" not in floor_text:
+    if (
+        "NON-NEGOTIABLE" not in upper
+        and "NEVER WAIVED" not in floor_text
+        and "CAN NEVER BE WAIVED" not in floor_text
+    ):
         failures.append("[4d] Floor block must state it is non-negotiable / can never be waived.")
 
     blocks = pp.assemble_system_blocks(playbook)
     floor_matches = [b for b in blocks if b["text"] == floor_text]
     if len(floor_matches) != 1:
-        failures.append(f"[4e] Expected exactly one system block equal to render_floor_block's output; found {len(floor_matches)}.")
+        failures.append(
+            f"[4e] Expected exactly one system block equal to render_floor_block's output; found {len(floor_matches)}."
+        )
         return
     floor_index = blocks.index(floor_matches[0])
     if floor_index != len(blocks) - 2:
-        failures.append(f"[4f] Floor block must sit immediately before the (last) playbook block; got index {floor_index} of {len(blocks)}.")
+        failures.append(
+            f"[4f] Floor block must sit immediately before the (last) playbook block; got index {floor_index} of {len(blocks)}."
+        )
 
     # Independent axis: Floor presence must not depend on toaster_guidance.
     blocks_with_guidance = pp.assemble_system_blocks(playbook, "Some unrelated per-review note.")
     if floor_text not in [b["text"] for b in blocks_with_guidance]:
-        failures.append("[4g] Floor block must still be present when toaster_guidance is ALSO supplied -- the two axes are independent.")
+        failures.append(
+            "[4g] Floor block must still be present when toaster_guidance is ALSO supplied -- the two axes are independent."
+        )
 
     # Structural check (not a string-ban): hard_rejections' OWN
     # detector-only fields (protects/match_surface/exempt_terms/
@@ -291,9 +329,17 @@ def test_floor_block_present_and_unwaivable(failures: list[str]) -> None:
     # structural leak. A JSON-style key marker (quoted, colon-suffixed)
     # WOULD only appear from a raw dict/JSON dump of the rule, which
     # render_floor_block never does.
-    for json_key_marker in ('"match_surface"', '"exempt_terms"', '"required_tokens"', '"token_policy"', '"protects":'):
+    for json_key_marker in (
+        '"match_surface"',
+        '"exempt_terms"',
+        '"required_tokens"',
+        '"token_policy"',
+        '"protects":',
+    ):
         if json_key_marker in floor_text:
-            failures.append(f"[4h] Floor block must not leak a raw JSON-serialized detector-config field ({json_key_marker}) -- it is knowledge (id + description prose), not a dict dump.")
+            failures.append(
+                f"[4h] Floor block must not leak a raw JSON-serialized detector-config field ({json_key_marker}) -- it is knowledge (id + description prose), not a dict dump."
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -329,7 +375,9 @@ def test_run_primary_pass_threads_toaster_guidance_into_system_prompt(failures: 
         failures.append("[5b] The guidance must not be in the system prompt (issue #148).")
     user = call["user_prompt"]
     if guidance not in user or user.index(guidance) < user.index("</COUNTERPARTY_DOCUMENT>"):
-        failures.append("[5b] run_primary_pass must send toaster_guidance to the model, after the document.")
+        failures.append(
+            "[5b] run_primary_pass must send toaster_guidance to the model, after the document."
+        )
 
 
 def test_run_critic_pass_threads_toaster_guidance_into_system_prompt(failures: list[str]) -> None:
@@ -356,10 +404,14 @@ def test_run_critic_pass_threads_toaster_guidance_into_system_prompt(failures: l
         return
     call = client.calls[0]
     user = call["user_prompt"]
-    if guidance in call["system_prompt"] or guidance not in user or user.index(
-        guidance
-    ) < user.index("</COUNTERPARTY_DOCUMENT>"):
-        failures.append("[6b] run_critic_pass must send toaster_guidance too, after the document -- the critic self-check must see the same per-review guidance the primary pass saw.")
+    if (
+        guidance in call["system_prompt"]
+        or guidance not in user
+        or user.index(guidance) < user.index("</COUNTERPARTY_DOCUMENT>")
+    ):
+        failures.append(
+            "[6b] run_critic_pass must send toaster_guidance too, after the document -- the critic self-check must see the same per-review guidance the primary pass saw."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -433,7 +485,9 @@ def test_run_review_toaster_guidance_flips_accept_to_request_change(failures: li
         )
     for call in accept_client.calls:
         if "TOASTER_GUIDANCE" in call["system_prompt"]:
-            failures.append(f"[7b] The no-guidance baseline run's {call['model_id']} system prompt must not carry a toaster-guidance block at all.")
+            failures.append(
+                f"[7b] The no-guidance baseline run's {call['model_id']} system prompt must not carry a toaster-guidance block at all."
+            )
 
     # -- Run B: SAME document, but toaster_guidance instructs a stricter
     #    posture, and the canned response reflects a model that followed
@@ -461,7 +515,10 @@ def test_run_review_toaster_guidance_flips_accept_to_request_change(failures: li
         review_id="spine-398-guidance-b",
         toaster_guidance=guidance,
     )
-    if request_change_result["status"] != "OK" or request_change_result["decision"] != "REQUEST_CHANGE":
+    if (
+        request_change_result["status"] != "OK"
+        or request_change_result["decision"] != "REQUEST_CHANGE"
+    ):
         failures.append(
             f"[7c] Guidance-present run must be status=OK/decision=REQUEST_CHANGE; "
             f"got {request_change_result.get('status')}/{request_change_result.get('decision')}"
@@ -478,13 +535,19 @@ def test_run_review_toaster_guidance_flips_accept_to_request_change(failures: li
     # Plumbing proof: the guidance text + explicit precedence wording
     # actually reached BOTH the primary and critic model calls.
     if len(request_change_client.calls) != 2:
-        failures.append(f"[7e] Expected exactly 2 model invocations (primary + critic) on the guidance-present run; got {len(request_change_client.calls)}")
+        failures.append(
+            f"[7e] Expected exactly 2 model invocations (primary + critic) on the guidance-present run; got {len(request_change_client.calls)}"
+        )
     else:
         for call in request_change_client.calls:
             if guidance not in call["user_prompt"]:
-                failures.append(f"[7f] Expected the toaster_guidance text verbatim in the {call['model_id']} prompt; not found.")
+                failures.append(
+                    f"[7f] Expected the toaster_guidance text verbatim in the {call['model_id']} prompt; not found."
+                )
             if "GOVERNS" not in call["user_prompt"]:
-                failures.append(f"[7g] Expected explicit precedence wording ('GOVERNS') in the {call['model_id']} prompt.")
+                failures.append(
+                    f"[7g] Expected explicit precedence wording ('GOVERNS') in the {call['model_id']} prompt."
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -519,9 +582,13 @@ def test_floor_violation_yields_model_issue_with_a_document_edit(failures: list[
     issue = issues[0]
 
     if issue.get("decision") != "REQUEST_CHANGE":
-        failures.append(f"[8c] Expected the Floor-violation issue's decision to be REQUEST_CHANGE; got {issue.get('decision')!r}")
+        failures.append(
+            f"[8c] Expected the Floor-violation issue's decision to be REQUEST_CHANGE; got {issue.get('decision')!r}"
+        )
     if issue.get("provenance") != "model":
-        failures.append(f"[8d] AC2: expected provenance='model' (the model path, no detector); got {issue.get('provenance')!r}")
+        failures.append(
+            f"[8d] AC2: expected provenance='model' (the model path, no detector); got {issue.get('provenance')!r}"
+        )
     # Issue #627: AC2 asked for an issue that ADDRESSES the offending span
     # concretely, not merely narrates it -- under v1/v2 that was a verbatim
     # `source_quote`, and under the block-transcript contract it is an edit
@@ -552,10 +619,14 @@ def test_floor_violation_yields_model_issue_with_a_document_edit(failures: list[
         return
     system_prompt = client.calls[0]["system_prompt"]
     if "MUST-NOT FLOOR" not in system_prompt:
-        failures.append("[8h] Expected the Floor block intro in the system prompt sent to the model.")
+        failures.append(
+            "[8h] Expected the Floor block intro in the system prompt sent to the model."
+        )
     first_rule_id = playbook["hard_rejections"][0]["id"]
     if f"[floor:{first_rule_id}]" not in system_prompt:
-        failures.append(f"[8i] Expected the Floor block (naming e.g. {first_rule_id!r}) in the system prompt sent to the model.")
+        failures.append(
+            f"[8i] Expected the Floor block (naming e.g. {first_rule_id!r}) in the system prompt sent to the model."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -591,7 +662,9 @@ class _CapturingSfnClient:
         if name in self.started_names:
             raise self.exceptions.ExecutionAlreadyExists()
         self.started_names.add(name)
-        return {"executionArn": f"{stateMachineArn.replace(':stateMachine:', ':execution:')}:{name}"}
+        return {
+            "executionArn": f"{stateMachineArn.replace(':stateMachine:', ':execution:')}:{name}"
+        }
 
 
 def test_submit_review_threads_toaster_guidance_into_execution_input(failures: list[str]) -> None:
@@ -617,7 +690,9 @@ def test_submit_review_threads_toaster_guidance_into_execution_input(failures: l
         return
     sent_payload = json.loads(sfn.calls[0]["input"])
     if sent_payload.get("toaster_guidance") != guidance:
-        failures.append(f"[9c] Expected the execution-input JSON's toaster_guidance to equal what was submitted; got {sent_payload.get('toaster_guidance')!r}")
+        failures.append(
+            f"[9c] Expected the execution-input JSON's toaster_guidance to equal what was submitted; got {sent_payload.get('toaster_guidance')!r}"
+        )
 
 
 def test_submit_review_defaults_toaster_guidance_to_empty_string(failures: list[str]) -> None:
@@ -639,7 +714,9 @@ def test_submit_review_defaults_toaster_guidance_to_empty_string(failures: list[
         return
     sent_payload = json.loads(sfn.calls[0]["input"])
     if sent_payload.get("toaster_guidance") != "":
-        failures.append(f"[10b] Expected toaster_guidance to default to '' when not supplied (backward compatible); got {sent_payload.get('toaster_guidance')!r}")
+        failures.append(
+            f"[10b] Expected toaster_guidance to default to '' when not supplied (backward compatible); got {sent_payload.get('toaster_guidance')!r}"
+        )
 
 
 # ---------------------------------------------------------------------------

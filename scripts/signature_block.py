@@ -109,9 +109,7 @@ _BLANK_RE = re.compile(r"_{3,}")
 _SLASH_S_RE = re.compile(r"/s/", re.IGNORECASE)
 
 #: A line is signature-SHAPED only if it starts with one of these.
-_STARTS_LIKE_SIGNATURE_RE = re.compile(
-    r"^(?:" + _LABEL_RE.pattern + r"|_{3,}|/s/)", re.IGNORECASE
-)
+_STARTS_LIKE_SIGNATURE_RE = re.compile(r"^(?:" + _LABEL_RE.pattern + r"|_{3,}|/s/)", re.IGNORECASE)
 
 #: Most words left on a signature line once labels, blanks and `/s/` are gone.
 _MAX_VALUE_WORDS_AFTER_LABEL = 8
@@ -201,9 +199,7 @@ def _classify_line(line: str) -> str:
     if _starts_like_signature(line):
         words = _words(_signature_value(line))
         limit = (
-            _MAX_VALUE_WORDS_AFTER_LABEL
-            if _LABEL_RE.match(line)
-            else _MAX_VALUE_WORDS_AFTER_BLANK
+            _MAX_VALUE_WORDS_AFTER_LABEL if _LABEL_RE.match(line) else _MAX_VALUE_WORDS_AFTER_BLANK
         )
         return _SIG if len(words) <= limit else _OTHER
     if _LEAD_IN_RE.match(line) and len(line) <= _MAX_LEAD_IN_CHARS:

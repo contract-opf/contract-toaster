@@ -44,7 +44,11 @@ async function configureAndStoreTokens(): Promise<{ idJwt: string }> {
   await configureAmplifyAuth(awsExports);
 
   const { cognitoUserPoolsTokenProvider } = await import('aws-amplify/auth/cognito');
-  const id = mintJwt({ sub: USERNAME, 'cognito:username': USERNAME, email: 'reviewer@example.com' });
+  const id = mintJwt({
+    sub: USERNAME,
+    'cognito:username': USERNAME,
+    email: 'reviewer@example.com',
+  });
   const access = mintJwt({ sub: USERNAME, username: USERNAME, token_use: 'access' });
   await cognitoUserPoolsTokenProvider.tokenOrchestrator.setTokens({
     tokens: {

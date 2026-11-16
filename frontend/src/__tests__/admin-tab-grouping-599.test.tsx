@@ -133,11 +133,23 @@ describe('flat tab bar (#599, reverses #477)', () => {
     expect(screen.getByRole('tablist', { name: 'Sections' })).toBeInTheDocument();
     expect(screen.queryByRole('tablist', { name: 'Admin' })).toBeNull();
 
-    const tabNames = within(tablists[0]).getAllByRole('tab').map((tab) => tab.textContent);
+    const tabNames = within(tablists[0])
+      .getAllByRole('tab')
+      .map((tab) => tab.textContent);
     expect(tabNames).toEqual(['Review', 'History']);
 
     // Every admin-only tab absent under BOTH its old and new label.
-    for (const name of ['Users & access', 'Users', 'Retention & legal hold', 'Retention', 'Model & API key', 'Models', 'Playbooks', 'Settings', 'Diagnostics']) {
+    for (const name of [
+      'Users & access',
+      'Users',
+      'Retention & legal hold',
+      'Retention',
+      'Model & API key',
+      'Models',
+      'Playbooks',
+      'Settings',
+      'Diagnostics',
+    ]) {
       expect(screen.queryByRole('tab', { name })).toBeNull();
     }
   });
@@ -158,7 +170,9 @@ describe('flat tab bar (#599, reverses #477)', () => {
     // passes on a fast machine and fails under any latency (issue #634).
     await within(sections).findByRole('tab', { name: 'Diagnostics' });
 
-    const tabNames = within(sections).getAllByRole('tab').map((tab) => tab.textContent);
+    const tabNames = within(sections)
+      .getAllByRole('tab')
+      .map((tab) => tab.textContent);
     expect(tabNames).toEqual([
       'Review',
       'History',
@@ -200,7 +214,10 @@ describe('flat tab bar (#599, reverses #477)', () => {
         'true',
       );
     });
-    expect(within(sections).getByRole('tab', { name: 'Diagnostics' })).toHaveAttribute('tabindex', '0');
+    expect(within(sections).getByRole('tab', { name: 'Diagnostics' })).toHaveAttribute(
+      'tabindex',
+      '0',
+    );
 
     const diagnosticsTab = within(sections).getByRole('tab', { name: 'Diagnostics' });
     fireEvent.keyDown(diagnosticsTab, { key: 'Home' });

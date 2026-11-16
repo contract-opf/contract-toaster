@@ -36,7 +36,9 @@ afterEach(() => {
 
 describe('toUserMessage', () => {
   it('passes a UserFacingError through', () => {
-    expect(toUserMessage(new UserFacingError('Written for you.'), 'fallback')).toBe('Written for you.');
+    expect(toUserMessage(new UserFacingError('Written for you.'), 'fallback')).toBe(
+      'Written for you.',
+    );
   });
 
   it.each([
@@ -64,12 +66,24 @@ describe('responseError', () => {
   it('passes a 4xx detail through only for an allowlisted status', async () => {
     allowConsoleErrorsInThisTest(/returned HTTP/);
     expect(DETAIL_ALLOWED_STATUSES.has(404)).toBe(false);
-    expect((await responseError(response(400, { detail: 'Too long.' }), 'POST /x returned HTTP 400', 'F')).message).toBe(
-      'Too long.',
-    );
-    expect((await responseError(response(404, { detail: 'No route /x' }), 'GET /x returned HTTP 404', 'F')).message).toBe(
-      'F',
-    );
+    expect(
+      (
+        await responseError(
+          response(400, { detail: 'Too long.' }),
+          'POST /x returned HTTP 400',
+          'F',
+        )
+      ).message,
+    ).toBe('Too long.');
+    expect(
+      (
+        await responseError(
+          response(404, { detail: 'No route /x' }),
+          'GET /x returned HTTP 404',
+          'F',
+        )
+      ).message,
+    ).toBe('F');
   });
 
   it('never passes a 5xx detail through, even when the caller lists the status', async () => {
@@ -84,7 +98,7 @@ describe('responseError', () => {
     expect(err.message).toBe('Fixed copy.');
   });
 
-  it('maps a documented sentinel to the app\'s own copy at any status', async () => {
+  it("maps a documented sentinel to the app's own copy at any status", async () => {
     const err = await responseError(
       response(503, { detail: 'no active playbook' }),
       'POST /api/reviews returned HTTP 503',
@@ -99,7 +113,10 @@ describe('responseError', () => {
 describe('the shared clients throw only UserFacingError', () => {
   it('butterIt: a rejected fetch becomes the fixed cover-note sentence', async () => {
     allowConsoleErrorsInThisTest(/Failed to fetch/);
-    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new TypeError('Failed to fetch'))));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new TypeError('Failed to fetch'))),
+    );
     await expect(butterIt('rev-1')).rejects.toEqual(new UserFacingError(COVER_NOTE_ERROR_COPY));
   });
 

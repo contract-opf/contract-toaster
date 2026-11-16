@@ -419,8 +419,7 @@ export default function AdminRetention({
       ? 'No review found with that ID. Pick one from the list, or check the pasted ID and try again.'
       : '';
 
-  const isRetroactiveReduction =
-    settings !== null && sliderValue < settings.retention_window_days;
+  const isRetroactiveReduction = settings !== null && sliderValue < settings.retention_window_days;
 
   const loadPreview = useCallback(async () => {
     setActionError(null);
@@ -439,9 +438,7 @@ export default function AdminRetention({
       }
       setPreview((await response.json()) as PurgePreview);
     } catch (err) {
-      setActionError(
-        toUserMessage(err, "We couldn't load the purge preview. Please try again."),
-      );
+      setActionError(toUserMessage(err, "We couldn't load the purge preview. Please try again."));
     }
   }, [sliderValue]);
 
@@ -534,9 +531,7 @@ export default function AdminRetention({
       setPickedReviewId('');
       setHoldReason('');
     } catch (err) {
-      setActionError(
-        toUserMessage(err, "We couldn't place that legal hold. Please try again."),
-      );
+      setActionError(toUserMessage(err, "We couldn't place that legal hold. Please try again."));
     } finally {
       setHoldActionPending(false);
     }
@@ -622,8 +617,8 @@ export default function AdminRetention({
         {usersFailed && (
           <p className="ct-muted" data-testid="legal-holds-identities-degraded">
             <small>
-              The user directory could not be loaded, so submitters below are shown by
-              their account ID rather than by name.
+              The user directory could not be loaded, so submitters below are shown by their account
+              ID rather than by name.
             </small>
           </p>
         )}
@@ -714,8 +709,7 @@ export default function AdminRetention({
                             size="sm"
                             confirm="Click again to release"
                             disabled={
-                              holdActionPending ||
-                              (releaseReasons[h.review_id] ?? '').trim() === ''
+                              holdActionPending || (releaseReasons[h.review_id] ?? '').trim() === ''
                             }
                             onClick={() => {
                               if ((releaseReasons[h.review_id] ?? '').trim() !== '') {
@@ -889,7 +883,8 @@ export default function AdminRetention({
           <div className="ct-stack">
             <CtToolbar title="Retention window" />
             <p>
-              Current retention window: <strong data-testid="retention-current-window">
+              Current retention window:{' '}
+              <strong data-testid="retention-current-window">
                 {settings.retention_window_days}
               </strong>{' '}
               days
@@ -899,8 +894,8 @@ export default function AdminRetention({
               <CtBanner variant="warn" data-testid="retention-pending-reduction">
                 <p>
                   A retention reduction is pending. It applies automatically at the time shown
-                  unless a different admin confirms it sooner or any admin cancels it. The
-                  requester cannot confirm their own reduction.
+                  unless a different admin confirms it sooner or any admin cancels it. The requester
+                  cannot confirm their own reduction.
                 </p>
                 <CtTable>
                   <table data-testid="pending-reductions-table">

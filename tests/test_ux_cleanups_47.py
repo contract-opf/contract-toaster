@@ -35,6 +35,7 @@ OUTPUT_SCHEMA_PATH = REPO_ROOT / "playbooks" / "output-schema-v1.json"
 # Minimal inline schema validator (stdlib only — same approach as test_output_schema.py)
 # ---------------------------------------------------------------------------
 
+
 class ValidationError(Exception):
     pass
 
@@ -60,8 +61,12 @@ def _validate(obj, schema: dict, root_schema: dict, path: str = "") -> list:
     schema_type = schema.get("type")
     if schema_type:
         type_map = {
-            "object": dict, "array": list, "string": str,
-            "integer": int, "number": (int, float), "boolean": bool,
+            "object": dict,
+            "array": list,
+            "string": str,
+            "integer": int,
+            "number": (int, float),
+            "boolean": bool,
             "null": type(None),
         }
         expected_types = schema_type if isinstance(schema_type, list) else [schema_type]
@@ -80,11 +85,15 @@ def _validate(obj, schema: dict, root_schema: dict, path: str = "") -> list:
 
     if "maxLength" in schema and isinstance(obj, str):  # noqa: SIM102
         if len(obj) > schema["maxLength"]:
-            errors.append(f"{path}: string length {len(obj)} exceeds maxLength {schema['maxLength']}")
+            errors.append(
+                f"{path}: string length {len(obj)} exceeds maxLength {schema['maxLength']}"
+            )
 
     if "minLength" in schema and isinstance(obj, str):  # noqa: SIM102
         if len(obj) < schema["minLength"]:
-            errors.append(f"{path}: string length {len(obj)} less than minLength {schema['minLength']}")
+            errors.append(
+                f"{path}: string length {len(obj)} less than minLength {schema['minLength']}"
+            )
 
     if "oneOf" in schema:
         # Validate that exactly one sub-schema matches
@@ -93,7 +102,9 @@ def _validate(obj, schema: dict, root_schema: dict, path: str = "") -> list:
             if not _validate(obj, sub, root_schema, path):
                 matching += 1
         if matching != 1:
-            errors.append(f"{path}: value does not match exactly one of oneOf sub-schemas (matched {matching})")
+            errors.append(
+                f"{path}: value does not match exactly one of oneOf sub-schemas (matched {matching})"
+            )
 
     if isinstance(obj, dict):
         for req in schema.get("required", []):
@@ -119,6 +130,7 @@ def validate(obj, schema: dict) -> list:
 # ---------------------------------------------------------------------------
 # Check 1: Group-naming decision documented
 # ---------------------------------------------------------------------------
+
 
 def check_group_naming_decision(failures: list) -> None:
     """
@@ -155,7 +167,7 @@ def check_group_naming_decision(failures: list) -> None:
         # Pattern (a): explicit "misnomer" near the group name (within 600 chars)
         misnomer_near_group = False
         for m in re.finditer(r"legal-admin@company\.com", text, re.IGNORECASE):
-            window = text[max(0, m.start() - 300):m.end() + 300]
+            window = text[max(0, m.start() - 300) : m.end() + 300]
             if re.search(r"\bmisnomer\b", window, re.IGNORECASE):
                 misnomer_near_group = True
                 break
@@ -168,13 +180,19 @@ def check_group_naming_decision(failures: list) -> None:
         # are intentionally excluded because they false-match the existing onboarding prose
         # ("A reviewer is anyone ... they are not admins. The pre-token Lambda checks
         # `legal-admin@company.com`") which says nothing about the group covering all users.
-        group_covers_all_inline = bool(re.search(
-            r"legal-admin@company\.com[^\n]{0,200}(?:all\s+ContractToaster\s+users?|covers\s+all\s+ContractToaster)",
-            text, re.IGNORECASE,
-        )) or bool(re.search(
-            r"(?:all\s+ContractToaster\s+users?|covers\s+all\s+ContractToaster)[^\n]{0,200}legal-admin@company\.com",
-            text, re.IGNORECASE,
-        ))
+        group_covers_all_inline = bool(
+            re.search(
+                r"legal-admin@company\.com[^\n]{0,200}(?:all\s+ContractToaster\s+users?|covers\s+all\s+ContractToaster)",
+                text,
+                re.IGNORECASE,
+            )
+        ) or bool(
+            re.search(
+                r"(?:all\s+ContractToaster\s+users?|covers\s+all\s+ContractToaster)[^\n]{0,200}legal-admin@company\.com",
+                text,
+                re.IGNORECASE,
+            )
+        )
 
         if misnomer_near_group or group_covers_all_inline:
             has_misnomer_note = True
@@ -225,6 +243,7 @@ def check_group_naming_decision(failures: list) -> None:
 # Check 2: ACCEPT summary shape in schema and output-contract.md
 # ---------------------------------------------------------------------------
 
+
 def check_accept_summary_shape(failures: list) -> None:
     """
     Three sub-checks:
@@ -237,9 +256,7 @@ def check_accept_summary_shape(failures: list) -> None:
 
     # 3a: schema has verdict_summary
     if not OUTPUT_SCHEMA_PATH.exists():
-        failures.append(
-            f"{label}(3a): playbooks/output-schema-v1.json does not exist."
-        )
+        failures.append(f"{label}(3a): playbooks/output-schema-v1.json does not exist.")
         return
 
     with open(OUTPUT_SCHEMA_PATH) as f:
@@ -255,24 +272,23 @@ def check_accept_summary_shape(failures: list) -> None:
             f"Add `verdict_summary` to the top-level properties of output-schema-v1.json."
         )
     else:
-        print(
-            f"  PASS {label}(3a): output-schema-v1.json has `verdict_summary` property."
-        )
+        print(f"  PASS {label}(3a): output-schema-v1.json has `verdict_summary` property.")
 
     # 3b: output-contract.md documents verdict_summary shape for ACCEPT path
     if not OUTPUT_CONTRACT_PATH.exists():
-        failures.append(
-            f"{label}(3b): docs/output-contract.md does not exist."
-        )
+        failures.append(f"{label}(3b): docs/output-contract.md does not exist.")
     else:
         text = OUTPUT_CONTRACT_PATH.read_text(encoding="utf-8")
         # Must mention verdict_summary in an ACCEPT-specific context
-        has_accept_summary_spec = bool(re.search(
-            r"verdict_summary.*ACCEPT|ACCEPT.*verdict_summary|"
-            r"verdict_summary.*accept\s+path|accept\s+path.*verdict_summary|"
-            r"ACCEPT.*summary.*shape|accept.*summary.*source",
-            text, re.IGNORECASE
-        ))
+        has_accept_summary_spec = bool(
+            re.search(
+                r"verdict_summary.*ACCEPT|ACCEPT.*verdict_summary|"
+                r"verdict_summary.*accept\s+path|accept\s+path.*verdict_summary|"
+                r"ACCEPT.*summary.*shape|accept.*summary.*source",
+                text,
+                re.IGNORECASE,
+            )
+        )
         if not has_accept_summary_spec:
             failures.append(
                 f"{label}(3b): docs/output-contract.md does not document the "
@@ -345,6 +361,7 @@ def check_accept_summary_shape(failures: list) -> None:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> int:
     print("UX cleanups gate — issue #47 (group naming, ACCEPT summary)\n")

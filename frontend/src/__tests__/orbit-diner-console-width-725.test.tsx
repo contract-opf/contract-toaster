@@ -369,9 +369,9 @@ describe('issue #725 — one layout observer, published to the stylesheet', () =
   });
 
   it('the phone corner radius rides that attribute, since a container cannot query itself', () => {
-    expect(
-      declaredValue(orbitCss, '.od-console[data-console-size="phone"]', 'border-radius'),
-    ).toBe('12px');
+    expect(declaredValue(orbitCss, '.od-console[data-console-size="phone"]', 'border-radius')).toBe(
+      '12px',
+    );
   });
 });
 

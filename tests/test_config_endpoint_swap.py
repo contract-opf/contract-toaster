@@ -101,9 +101,7 @@ class TestBoto3ClientKwargs(unittest.TestCase):
                 config.boto3_client_kwargs("dynamodb")["endpoint_url"],
                 "http://dynamodb-local:8000",
             )
-            self.assertEqual(
-                config.boto3_client_kwargs("s3")["endpoint_url"], "http://shared:4566"
-            )
+            self.assertEqual(config.boto3_client_kwargs("s3")["endpoint_url"], "http://shared:4566")
 
     def test_real_credentials_are_not_overridden(self) -> None:
         with patch.dict(

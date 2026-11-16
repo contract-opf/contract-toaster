@@ -144,8 +144,12 @@ function stubRoutes(overrides: Handler[] = []): void {
     // its own — every test that selects a playbook needs a safe default for
     // it, not just the ones that exercise the pane directly.
     if (method === 'GET' && pathname.endsWith('/instructions')) {
-      // eslint-disable-next-line @typescript-eslint/require-await
-      return { ok: true, status: 200, json: async () => ({ current: null, history: [] }) } as Response;
+      return {
+        ok: true,
+        status: 200,
+        // eslint-disable-next-line @typescript-eslint/require-await
+        json: async () => ({ current: null, history: [] }),
+      } as Response;
     }
     if (method !== 'GET') {
       // eslint-disable-next-line @typescript-eslint/require-await
@@ -301,7 +305,9 @@ describe('AdminPlaybooks — version history', () => {
     expect(hashCell).toHaveAttribute('title', FULL_HASH);
     expect(hashCell.className).toContain('ct-table__mono');
 
-    expect(within(screen.getByTestId('playbook-version-row-v1.0.0')).getByText('admin-sub')).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('playbook-version-row-v1.0.0')).getByText('admin-sub'),
+    ).toBeInTheDocument();
   });
 
   it('shows the in-table empty row for a playbook with no uploads', async () => {
@@ -331,7 +337,9 @@ describe('AdminPlaybooks — version history', () => {
 
 describe('AdminPlaybooks — download version artifact', () => {
   it('renders a download button on each version row and invokes browser download on click', async () => {
-    const anchorClickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    const anchorClickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => {});
     stubRoutes([
       {
         method: 'GET',
@@ -354,7 +362,9 @@ describe('AdminPlaybooks — download version artifact', () => {
     fireEvent.click(screen.getByTestId('playbook-version-download-v1.0.0'));
 
     await waitFor(() => {
-      expect(requestsMatching('GET', '/synthetic-nda-sample/versions/v1.0.0/download')).toHaveLength(1);
+      expect(
+        requestsMatching('GET', '/synthetic-nda-sample/versions/v1.0.0/download'),
+      ).toHaveLength(1);
       expect(anchorClickSpy).toHaveBeenCalledTimes(1);
     });
     anchorClickSpy.mockRestore();
@@ -619,9 +629,9 @@ describe('AdminPlaybooks — activate and roll back', () => {
 
     const activeRow = screen.getByTestId('playbook-version-row-v2.0.0');
     expect(within(activeRow).queryByTestId('playbook-version-activate-v2.0.0')).toBeNull();
-    expect(within(activeRow).getByTestId('playbook-version-active-note-v2.0.0').textContent).toContain(
-      'active',
-    );
+    expect(
+      within(activeRow).getByTestId('playbook-version-active-note-v2.0.0').textContent,
+    ).toContain('active');
     // Re-running activation on the active version is likewise not offered
     // as a hidden rollback target.
     expect(within(activeRow).queryByTestId('playbook-version-rollback-v2.0.0')).toBeNull();
@@ -689,7 +699,7 @@ describe('AdminPlaybooks — activate and roll back', () => {
 // ---------------------------------------------------------------------------
 
 describe('AdminPlaybooks — approve for activation', () => {
-  it('sends back exactly the row\'s own content_hash, never operator free-text', async () => {
+  it("sends back exactly the row's own content_hash, never operator free-text", async () => {
     stubRoutes();
     await renderWithVersions();
 
@@ -774,9 +784,7 @@ describe('AdminPlaybooks — approve for activation', () => {
     const activeRow = screen.getByTestId('playbook-version-row-v2.0.0');
     expect(within(activeRow).queryByTestId('playbook-version-approve-v2.0.0')).toBeNull();
 
-    const note = within(activeRow).getByTestId(
-      'playbook-version-unapproved-active-note-v2.0.0',
-    );
+    const note = within(activeRow).getByTestId('playbook-version-unapproved-active-note-v2.0.0');
     expect(note.textContent).toContain('Never approved');
   });
 
@@ -790,9 +798,7 @@ describe('AdminPlaybooks — approve for activation', () => {
     // this one. (Issue #595 moved that control into "Approve & activate";
     // what must not regress is that SOME live approval path exists here.)
     expect(screen.getByTestId('playbook-version-approve-activate-v1.0.0')).toBeEnabled();
-    expect(
-      screen.queryByTestId('playbook-version-unapproved-active-note-v1.0.0'),
-    ).toBeNull();
+    expect(screen.queryByTestId('playbook-version-unapproved-active-note-v1.0.0')).toBeNull();
   });
 
   it('still shows the plain "Approved" note on a version that IS approved and active', async () => {
@@ -1019,7 +1025,9 @@ describe('AdminPlaybooks — derived version identifier', () => {
     await openCreate();
 
     fireEvent.change(screen.getByTestId('admin-playbooks-create-file'), {
-      target: { files: [opfFile({ id: 'synthetic-sample', version: '4.2.0', content_hash: FULL_HASH })] },
+      target: {
+        files: [opfFile({ id: 'synthetic-sample', version: '4.2.0', content_hash: FULL_HASH })],
+      },
     });
 
     // Shown BEFORE submit, so the operator sees what they are about to create.
@@ -1191,7 +1199,7 @@ describe('AdminPlaybooks — derived version identifier', () => {
  * that would give the gate a second place to drift.
  */
 describe('AdminPlaybooks — approve & activate as one action', () => {
-  it('drives BOTH endpoints, in order, with the row\'s own content_hash', async () => {
+  it("drives BOTH endpoints, in order, with the row's own content_hash", async () => {
     stubRoutes();
     await renderWithVersions();
 
@@ -1337,9 +1345,9 @@ describe('AdminPlaybooks — create playbook', () => {
     // The newly-created (server-derived) playbook_id's trail is fetched,
     // not something already on the page.
     await waitFor(() => {
-      expect(
-        requestsMatching('GET', '/educational-affiliation/versions').length,
-      ).toBeGreaterThan(0);
+      expect(requestsMatching('GET', '/educational-affiliation/versions').length).toBeGreaterThan(
+        0,
+      );
     });
   });
 
@@ -1782,7 +1790,9 @@ describe('AdminPlaybooks — merged standing instructions (#605)', () => {
     const panel = screen.getByTestId('admin-instructions-panel');
     expect(panel).toHaveTextContent('Standing instructions — Synthetic NDA Sample');
     expect(
-      requests.some((r) => r.method === 'GET' && r.pathname.endsWith('/synthetic-nda-sample/instructions')),
+      requests.some(
+        (r) => r.method === 'GET' && r.pathname.endsWith('/synthetic-nda-sample/instructions'),
+      ),
     ).toBe(true);
   });
 
@@ -1798,7 +1808,9 @@ describe('AdminPlaybooks — merged standing instructions (#605)', () => {
       );
     });
     expect(
-      requests.some((r) => r.method === 'GET' && r.pathname.endsWith('/other-agreement/instructions')),
+      requests.some(
+        (r) => r.method === 'GET' && r.pathname.endsWith('/other-agreement/instructions'),
+      ),
     ).toBe(true);
   });
 
@@ -1849,8 +1861,10 @@ describe('AdminPlaybooks — merged standing instructions (#605)', () => {
     for (let i = 1; i < order.length; i += 1) {
       // Each element's DOM position is after the previous one's.
       // eslint-disable-next-line no-bitwise
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
-      expect(order[i - 1]!.compareDocumentPosition(order[i]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+        order[i - 1]!.compareDocumentPosition(order[i]!) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
     }
   });
 

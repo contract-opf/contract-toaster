@@ -88,11 +88,17 @@ function entryScriptsFromHtml(html) {
 }
 
 if (!statSafe(DIST_DIR)?.isDirectory()) {
-  fail(`no build to measure: ${path.relative(FRONTEND_DIR, DIST_DIR)}/ does not exist — run \`npm run build:ci\` first`);
+  fail(
+    `no build to measure: ${path.relative(FRONTEND_DIR, DIST_DIR)}/ does not exist — run \`npm run build:ci\` first`,
+  );
 } else if (!statSafe(INDEX_HTML)?.isFile()) {
-  fail(`no build to measure: ${path.relative(FRONTEND_DIR, INDEX_HTML)} does not exist — run \`npm run build:ci\` first`);
+  fail(
+    `no build to measure: ${path.relative(FRONTEND_DIR, INDEX_HTML)} does not exist — run \`npm run build:ci\` first`,
+  );
 } else if (!statSafe(ASSETS_DIR)?.isDirectory()) {
-  fail(`no build to measure: ${path.relative(FRONTEND_DIR, ASSETS_DIR)}/ does not exist — run \`npm run build:ci\` first`);
+  fail(
+    `no build to measure: ${path.relative(FRONTEND_DIR, ASSETS_DIR)}/ does not exist — run \`npm run build:ci\` first`,
+  );
 } else {
   const jsFiles = readdirSync(ASSETS_DIR)
     .filter((name) => name.endsWith('.js'))
@@ -102,9 +108,7 @@ if (!statSafe(DIST_DIR)?.isDirectory()) {
     fail('no .js chunk under dist/assets/ — nothing to measure');
   }
 
-  const sizes = new Map(
-    jsFiles.map((name) => [name, statSync(path.join(ASSETS_DIR, name)).size]),
-  );
+  const sizes = new Map(jsFiles.map((name) => [name, statSync(path.join(ASSETS_DIR, name)).size]));
 
   // ---- 1. the entry chunk -------------------------------------------------
   const entrySrcs = entryScriptsFromHtml(readFileSync(INDEX_HTML, 'utf8'));

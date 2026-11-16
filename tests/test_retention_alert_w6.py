@@ -97,10 +97,13 @@ class TestTheLogLineTheAwsAlarmCounts(AlertBase):
             self.assertLogs(retention_alerts.logger, level="WARNING") as logs,
         ):
             result = self.reduce()
-        lines = [r.getMessage() for r in logs.records
-                 if r.getMessage().startswith(retention_alerts.LOG_MARKER)]
+        lines = [
+            r.getMessage()
+            for r in logs.records
+            if r.getMessage().startswith(retention_alerts.LOG_MARKER)
+        ]
         self.assertEqual(len(lines), 1)
-        payload = json.loads(lines[0][len(retention_alerts.LOG_MARKER):])
+        payload = json.loads(lines[0][len(retention_alerts.LOG_MARKER) :])
         self.assertEqual(payload["pending_id"], result["pending_id"])
         self.assertEqual(payload["before_retention_window_days"], 365)
         self.assertEqual(payload["after_retention_window_days"], 30)
@@ -123,12 +126,15 @@ class TestTheDtsPush(AlertBase):
         self.assertEqual(self.sent, [])
 
     def test_set_sends_one_down_push_without_the_reason(self) -> None:
-        with mock.patch.dict(os.environ, {"RETENTION_ALERT_URL": "https://kuma.example/api/push/tok"}):
+        with mock.patch.dict(
+            os.environ, {"RETENTION_ALERT_URL": "https://kuma.example/api/push/tok"}
+        ):
             result = self.reduce()
         self.assertEqual(len(self.sent), 1)
         parts = urlsplit(self.sent[0])
-        self.assertEqual(f"{parts.scheme}://{parts.netloc}{parts.path}",
-                         "https://kuma.example/api/push/tok")
+        self.assertEqual(
+            f"{parts.scheme}://{parts.netloc}{parts.path}", "https://kuma.example/api/push/tok"
+        )
         query = parse_qs(parts.query)
         self.assertEqual(query["status"], ["down"])
         self.assertIn("30", query["msg"][0])

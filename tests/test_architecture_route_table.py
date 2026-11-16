@@ -47,7 +47,9 @@ ARCHITECTURE = REPO_ROOT / "ARCHITECTURE.md"
 REGISTRY = REPO_ROOT / "playbooks" / "registry.json"
 
 AUTH_LEVELS = {"none", "authenticated", "allowlisted", "admin", "owner or admin"}
-_ROW_RE = re.compile(r"^\|\s*(GET|POST|PUT|PATCH|DELETE)\s*\|\s*`([^`]+)`\s*\|\s*([^|]+?)\s*\|(.*)\|\s*$")
+_ROW_RE = re.compile(
+    r"^\|\s*(GET|POST|PUT|PATCH|DELETE)\s*\|\s*`([^`]+)`\s*\|\s*([^|]+?)\s*\|(.*)\|\s*$"
+)
 _ADMIN_GATE_RE = re.compile(r"require_admin\(|is_admin\(|non-admin")
 
 
@@ -127,14 +129,20 @@ class TestRouteTableMatchesApp(unittest.TestCase):
                     problems.append(f"{key}: documented 'none' but depends on {sorted(deps)}")
             elif auth == "authenticated":
                 if "get_current_user" not in deps or "get_active_user_row" in deps:
-                    problems.append(f"{key}: documented 'authenticated' but depends on {sorted(deps)}")
+                    problems.append(
+                        f"{key}: documented 'authenticated' but depends on {sorted(deps)}"
+                    )
             else:
                 if "get_active_user_row" not in deps:
                     problems.append(f"{key}: documented '{auth}' but has no get_active_user_row")
                 if auth == "admin" and not _ADMIN_GATE_RE.search(source):
-                    problems.append(f"{key}: documented 'admin' but the handler shows no admin gate")
+                    problems.append(
+                        f"{key}: documented 'admin' but the handler shows no admin gate"
+                    )
                 if auth != "admin" and "require_admin(" in source:
-                    problems.append(f"{key}: documented '{auth}' but the handler calls require_admin")
+                    problems.append(
+                        f"{key}: documented '{auth}' but the handler calls require_admin"
+                    )
         self.assertEqual(problems, [])
 
 
@@ -143,7 +151,9 @@ class TestDefaultPlaybook(unittest.TestCase):
         default = json.loads(REGISTRY.read_text(encoding="utf-8"))["default_playbook_id"]
         text = ARCHITECTURE.read_text(encoding="utf-8")
         row = next(
-            line for line in text.splitlines() if re.match(r"^\|\s*POST\s*\|\s*`/api/reviews`\s*\|", line)
+            line
+            for line in text.splitlines()
+            if re.match(r"^\|\s*POST\s*\|\s*`/api/reviews`\s*\|", line)
         )
         self.assertIn(default, row)
         self.assertIn("default_playbook_id", row)

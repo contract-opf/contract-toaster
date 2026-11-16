@@ -290,18 +290,18 @@ class PlaybookInstructionsRoutesTestBase(unittest.TestCase):
         _put_user(self.users_table, NON_ADMIN_SUB, is_admin=False)
 
         self.client = TestClient(backend_main.app)
-        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = (
-            lambda: self.ddb
-        )
+        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = lambda: self.ddb
 
     def tearDown(self):
         backend_main.app.dependency_overrides.clear()
         self._mock_aws.stop()
 
     def _authenticate_as(self, sub: str) -> None:
-        backend_main.app.dependency_overrides[backend_main.get_current_user] = (
-            lambda: {"sub": sub, "email": f"{sub}@example.com", "token_use": "access"}
-        )
+        backend_main.app.dependency_overrides[backend_main.get_current_user] = lambda: {
+            "sub": sub,
+            "email": f"{sub}@example.com",
+            "token_use": "access",
+        }
 
 
 class TestRoutesMounted(unittest.TestCase):
@@ -390,9 +390,7 @@ class TestSaveAndRead(PlaybookInstructionsRoutesTestBase):
 
     def test_oversize_text_is_400(self):
         self._authenticate_as(ADMIN_SUB)
-        resp = self.client.post(
-            INSTRUCTIONS_PATH, json={"text": "x" * (10_000 + 1)}
-        )
+        resp = self.client.post(INSTRUCTIONS_PATH, json={"text": "x" * (10_000 + 1)})
         self.assertEqual(resp.status_code, 400)
 
     def test_missing_text_field_is_400(self):

@@ -264,10 +264,7 @@ def _mismatch(
     context an informed retry needs from BOTH sides."""
     return _failure(
         REASON_SOURCE_MISMATCH,
-        (
-            f"segment {index} diverges from the block's own text at folded "
-            f"offset {block_offset}"
-        ),
+        (f"segment {index} diverges from the block's own text at folded offset {block_offset}"),
         segment_index=index,
         divergence_offset=block_offset,
         block_context=folded_block[block_offset : block_offset + _CONTEXT_CHARS],
@@ -637,9 +634,7 @@ def delivered_final_text(ops: list[dict[str, Any]]) -> str:
     reader proving itself against the DELIVERED document wants this one.
     """
     return "".join(
-        op["text"]
-        for op in collapse_boundary_spaces(ops)
-        if op["op"] in ("keep", "insert")
+        op["text"] for op in collapse_boundary_spaces(ops) if op["op"] in ("keep", "insert")
     )
 
 
@@ -729,9 +724,7 @@ def _validate_block_op(
 # ---------------------------------------------------------------------------
 
 
-def validate_block_patches(
-    block_patches: Any, block_ops: Any, block_map: Any
-) -> dict[str, Any]:
+def validate_block_patches(block_patches: Any, block_ops: Any, block_map: Any) -> dict[str, Any]:
     """Proves a model-authored block transcript against `block_map`'s text.
 
     See the module docstring for the input shapes. Returns a ProvenTranscript

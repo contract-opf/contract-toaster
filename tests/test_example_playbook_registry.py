@@ -135,9 +135,7 @@ class TestRegistryDefaultRepointed(unittest.TestCase):
         import eval_harness
         import seed_active_bundle  # noqa: F401
 
-        self.assertEqual(
-            canonicalize.PLAYBOOK_PATH.name, "synthetic-nda-sample-v1.0.0.json"
-        )
+        self.assertEqual(canonicalize.PLAYBOOK_PATH.name, "synthetic-nda-sample-v1.0.0.json")
         # A knowledge-profile default legitimately has no detector-scorable
         # gold fixtures -- score_all() returning an empty list (not raising)
         # is the correct, non-degraded behavior here, not a regression of
@@ -196,8 +194,14 @@ class FakeReviewsTable:
     def __init__(self, status: str = "PENDING"):
         self.item = {"review_id": "review-1", "status": status}
 
-    def update_item(self, Key, UpdateExpression, ConditionExpression=None,
-                     ExpressionAttributeNames=None, ExpressionAttributeValues=None):
+    def update_item(
+        self,
+        Key,
+        UpdateExpression,
+        ConditionExpression=None,
+        ExpressionAttributeNames=None,
+        ExpressionAttributeValues=None,
+    ):
         vals = ExpressionAttributeValues or {}
         if ":running" in vals:
             self.item["status"] = "RUNNING"

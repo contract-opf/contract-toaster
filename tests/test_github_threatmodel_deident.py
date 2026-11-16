@@ -34,6 +34,7 @@ FIXTURES_DIR = Path(__file__).parent / "gold-fixtures"
 
 # ── Check 1 — Source-control processor section in threat-model.md ─────────────
 
+
 def check_1_source_control_section() -> list[str]:
     """threat-model.md must have a 'Source-control processor' section."""
     failures: list[str] = []
@@ -44,9 +45,7 @@ def check_1_source_control_section() -> list[str]:
 
     # The section heading (level 2 or 3) must exist
     if not re.search(r"##+ +Source-control processor", text, re.IGNORECASE):
-        failures.append(
-            "  docs/threat-model.md: missing '## Source-control processor' section"
-        )
+        failures.append("  docs/threat-model.md: missing '## Source-control processor' section")
         return failures  # No point checking sub-requirements
 
     # The section must mention GitHub controls
@@ -76,6 +75,7 @@ def check_1_source_control_section() -> list[str]:
 
 # ── Check 2 — De-identification standard section in evaluation.md ─────────────
 
+
 def check_2_deident_section() -> list[str]:
     """evaluation.md must have a 'De-identification standard' section."""
     failures: list[str] = []
@@ -86,9 +86,7 @@ def check_2_deident_section() -> list[str]:
 
     # The section heading must exist
     if not re.search(r"##+ +De-identification standard", text, re.IGNORECASE):
-        failures.append(
-            "  docs/evaluation.md: missing '## De-identification standard' section"
-        )
+        failures.append("  docs/evaluation.md: missing '## De-identification standard' section")
         return failures
 
     # Extract section text — stop at the next level-2 heading (## ), not level-3+ (###)
@@ -116,6 +114,7 @@ def check_2_deident_section() -> list[str]:
 
 
 # ── Check 3 — Production-sourced fixtures carry deident sign-off ──────────────
+
 
 def check_3_fixture_signoff() -> list[str]:
     """
@@ -151,9 +150,14 @@ def check_3_fixture_signoff() -> list[str]:
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
+
 def main() -> int:
     checks = [
-        ("1", "Source-control processor section in threat-model.md", check_1_source_control_section),
+        (
+            "1",
+            "Source-control processor section in threat-model.md",
+            check_1_source_control_section,
+        ),
         ("2", "De-identification standard section in evaluation.md", check_2_deident_section),
         ("3", "Production fixtures carry deident sign-off fields", check_3_fixture_signoff),
     ]

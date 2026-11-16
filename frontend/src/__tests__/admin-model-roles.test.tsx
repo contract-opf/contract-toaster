@@ -53,8 +53,16 @@ function selection(overrides: Partial<ModelSelectionSettings> = {}): ModelSelect
     selection_store_available: true,
     model_provider: 'openrouter',
     selectable: CATALOGUE,
-    default_primary: { model_id: SONNET, cost_per_million_input_usd: 3, cost_per_million_output_usd: 15 },
-    default_critic: { model_id: OPUS, cost_per_million_input_usd: 5, cost_per_million_output_usd: 25 },
+    default_primary: {
+      model_id: SONNET,
+      cost_per_million_input_usd: 3,
+      cost_per_million_output_usd: 15,
+    },
+    default_critic: {
+      model_id: OPUS,
+      cost_per_million_input_usd: 5,
+      cost_per_million_output_usd: 25,
+    },
     pricing_basis_primary: { input_tokens: 60000, output_tokens: 8000 },
     pricing_basis_critic: { input_tokens: 70000, output_tokens: 5000 },
     selected_primary_model_id: '',
@@ -89,9 +97,10 @@ function stubFetch(handlers: { get: ModelSelectionSettings; post?: ModelSelectio
       const url = String(input);
       let body: unknown = KEY_SETTINGS;
       if (url.includes('/api/admin/model-selection')) {
-        body = (init?.method ?? 'GET').toUpperCase() === 'POST' && handlers.post
-          ? handlers.post
-          : handlers.get;
+        body =
+          (init?.method ?? 'GET').toUpperCase() === 'POST' && handlers.post
+            ? handlers.post
+            : handlers.get;
       }
       // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => body } as Response;
@@ -109,7 +118,9 @@ describe('AdminModel / #136 — Reviewer and Critic roles', () => {
     render(<AdminModel />);
     await screen.findByTestId('admin-model-primary-select');
 
-    expect(screen.getByLabelText('Reviewer')).toBe(screen.getByTestId('admin-model-primary-select'));
+    expect(screen.getByLabelText('Reviewer')).toBe(
+      screen.getByTestId('admin-model-primary-select'),
+    );
     expect(screen.getByLabelText('Critic')).toBe(screen.getByTestId('admin-model-critic-select'));
 
     expect(screen.getByTestId('admin-model-role-primary-description')).toHaveTextContent(

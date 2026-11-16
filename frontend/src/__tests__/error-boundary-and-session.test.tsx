@@ -127,7 +127,9 @@ describe('issue #487 — a panel crash does not take the app with it', () => {
     );
     expect(
       // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
-      consoleError.mock.calls.some((call: unknown[]) => String(call[0]).includes('[review] panel error')),
+      consoleError.mock.calls.some((call: unknown[]) =>
+        String(call[0]).includes('[review] panel error'),
+      ),
     ).toBe(true);
   });
 

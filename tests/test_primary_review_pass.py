@@ -188,7 +188,7 @@ def test_prompt_names_mode_none_topics_as_flag_only(failures: list[str]) -> None
         tag = f'[topic:{topic_id}] mode="none"'
         if tag not in block:
             failures.append(
-                f"[1b] Replacement-text-modes block must name {topic_id!r} as mode=\"none\"; "
+                f'[1b] Replacement-text-modes block must name {topic_id!r} as mode="none"; '
                 f"missing {tag!r}."
             )
 
@@ -225,7 +225,7 @@ def test_prompt_names_mode_none_topics_as_flag_only(failures: list[str]) -> None
     if "proposed_replacement_text" in block:
         failures.append(
             "[1d] Under a block-transcript contract the replacement-text-modes "
-            "block must NOT name \"proposed_replacement_text\" -- the same "
+            'block must NOT name "proposed_replacement_text" -- the same '
             "assembled prompt forbids that key, so instructing it here would "
             "produce a response the active validator rejects."
         )
@@ -286,7 +286,9 @@ def test_prompt_names_mode_none_topics_as_flag_only(failures: list[str]) -> None
 
     system_blocks = pp.assemble_system_blocks(playbook)
     if block not in [b["text"] for b in system_blocks]:
-        failures.append("[1f] assemble_system_blocks must include the replacement-text-modes block verbatim.")
+        failures.append(
+            "[1f] assemble_system_blocks must include the replacement-text-modes block verbatim."
+        )
 
     # The new block must sit BEFORE any Floor block (test_llm_native_overlay.py
     # pins the Floor block's own adjacency to the (last) playbook block), and
@@ -303,7 +305,9 @@ def test_prompt_names_mode_none_topics_as_flag_only(failures: list[str]) -> None
 # ---------------------------------------------------------------------------
 
 
-def test_flag_only_response_on_mode_none_topics_succeeds_in_one_attempt(failures: list[str]) -> None:
+def test_flag_only_response_on_mode_none_topics_succeeds_in_one_attempt(
+    failures: list[str],
+) -> None:
     playbook = _nda_playbook()
     mode_none_topics = _mode_none_topic_ids(playbook)
     if len(mode_none_topics) < 2:
@@ -339,7 +343,9 @@ def test_flag_only_response_on_mode_none_topics_succeeds_in_one_attempt(failures
 
     issues = (result.get("response") or {}).get("issues", [])
     if len(issues) != len(mode_none_topics):
-        failures.append(f"[2d] Expected {len(mode_none_topics)} issues in the response; got {len(issues)}")
+        failures.append(
+            f"[2d] Expected {len(mode_none_topics)} issues in the response; got {len(issues)}"
+        )
     for issue in issues:
         # Issue #627: under the block-transcript contract the model does not
         # author `proposed_replacement_text` at all -- the pipeline derives
@@ -353,10 +359,14 @@ def test_flag_only_response_on_mode_none_topics_succeeds_in_one_attempt(failures
             )
 
     if len(ledger) != 1:
-        failures.append(f"[2f] Expected exactly 1 ledger row (success, first attempt); got {len(ledger)}")
+        failures.append(
+            f"[2f] Expected exactly 1 ledger row (success, first attempt); got {len(ledger)}"
+        )
     else:
         if ledger[0].outcome != "success" or ledger[0].attempt_number != 1:
-            failures.append(f"[2g] Ledger row must be outcome=success, attempt_number=1; got {ledger[0]!r}")
+            failures.append(
+                f"[2g] Ledger row must be outcome=success, attempt_number=1; got {ledger[0]!r}"
+            )
         if ledger[0].replacement_text_failures != []:
             failures.append(
                 f"[2h] No replacement-text failure should ever have been recorded -- nothing "

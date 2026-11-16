@@ -109,7 +109,10 @@ def test_the_writer_can_edit_inside_each_wrapper() -> None:
         out = replace_in_block(stage, bt, rba, _liability_doc(tag), "not", "never")
         assert out["proven"]["status"] == "proven", (tag, out["proven"]["failures"])
         result = out["result"]
-        assert result["docx_bytes"] is not None and not result["failures"], (tag, result["failures"])
+        assert result["docx_bytes"] is not None and not result["failures"], (
+            tag,
+            result["failures"],
+        )
         assert out["accepted_text"] == out["expected_text"], (tag, out["accepted_text"])
     block_doc = docx(heading("2. Termination") + _wrapped("customXml", p(r(TERMINATION))))
     out = replace_in_block(stage, bt, rba, block_doc, "5 days", "30 days")
@@ -129,7 +132,9 @@ def test_an_unrecognised_text_carrier_is_disclosed_not_skipped() -> None:
     counts-only note. Its text still does not reach the model -- an unknown
     container could be a payload one -- and nothing about it is echoed."""
     secret = "Unlisted wrapper words"
-    inline = p(r("Supplier shall ") + f'<w:futureWrap w:val="x">{r(secret)}</w:futureWrap>' + r(" pay."))
+    inline = p(
+        r("Supplier shall ") + f'<w:futureWrap w:val="x">{r(secret)}</w:futureWrap>' + r(" pay.")
+    )
     block = f"<w:futureBlock>{p(r(secret + ' block'))}</w:futureBlock>"
     norm = stage.extract_and_normalize(docx(heading("1. Fees") + inline + block))
     assert norm["status"] == "normalized", norm
@@ -175,7 +180,11 @@ def _sub_clause(split: str) -> str:
         return '<w:r><w:t>(a)</w:t><w:tab/><w:t xml:space="preserve">' + SUB_CLAUSE + "</w:t></w:r>"
     if split == "marker-and-tab|text":
         return "<w:r><w:t>(a)</w:t><w:tab/></w:r>" + r(SUB_CLAUSE)
-    return '<w:r><w:t>(a)</w:t></w:r><w:r><w:tab/><w:t xml:space="preserve">' + SUB_CLAUSE + "</w:t></w:r>"
+    return (
+        '<w:r><w:t>(a)</w:t></w:r><w:r><w:tab/><w:t xml:space="preserve">'
+        + SUB_CLAUSE
+        + "</w:t></w:r>"
+    )
 
 
 SPLITS = ("one-run", "marker-and-tab|text", "marker|tab-and-text")
@@ -209,12 +218,16 @@ def test_numbered_tab_headings_are_boundaries_whatever_the_split() -> None:
     body = p(r("Recipient shall hold all Confidential Information in strict confidence."))
     after = p(r("This Agreement lasts two years from the Effective Date unless terminated."))
     for marker_xml in (
-        '<w:r><w:t>2.</w:t><w:tab/><w:t>Term</w:t></w:r>',
+        "<w:r><w:t>2.</w:t><w:tab/><w:t>Term</w:t></w:r>",
         "<w:r><w:t>2.</w:t></w:r><w:r><w:tab/><w:t>Term</w:t></w:r>",
         "<w:r><w:t>2.</w:t><w:tab/></w:r><w:r><w:t>Term</w:t></w:r>",
     ):
-        norm = stage.extract_and_normalize(docx(heading("1. Confidentiality") + body + p(marker_xml) + after))
-        assert [x["heading"] for x in norm["paragraphs"]] == ["Confidentiality", "Term"], norm["paragraphs"]
+        norm = stage.extract_and_normalize(
+            docx(heading("1. Confidentiality") + body + p(marker_xml) + after)
+        )
+        assert [x["heading"] for x in norm["paragraphs"]] == ["Confidentiality", "Term"], norm[
+            "paragraphs"
+        ]
 
 
 def test_the_two_edit_repro_applies_both_edits() -> None:
@@ -246,9 +259,13 @@ def test_the_two_edit_repro_applies_both_edits() -> None:
             segments.append({"op": "keep", "text": text[i + len(old) :]})
         return {"block_id": block_id, "segments": segments}
 
-    proven = bt.validate_block_patches([patch("p0001", "5", "2"), patch("p0002", "30", "45")], [], block_map)
+    proven = bt.validate_block_patches(
+        [patch("p0001", "5", "2"), patch("p0002", "30", "45")], [], block_map
+    )
     assert proven["status"] == "proven", proven["failures"]
-    result = rba.apply_block_transcript(doc, proven, author="Synthetic Reviewer", timestamp_iso="2026-01-01T00:00:00Z")
+    result = rba.apply_block_transcript(
+        doc, proven, author="Synthetic Reviewer", timestamp_iso="2026-01-01T00:00:00Z"
+    )
     assert result["docx_bytes"] is not None, result["failures"]
     assert len(result["applied"]) == 2 and not result["failures"], result["failures"]
 

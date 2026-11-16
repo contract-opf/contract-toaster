@@ -120,21 +120,23 @@ class LegalApprovalTestBase(unittest.TestCase):
         _put_user(self.users_table, NON_ADMIN_SUB, is_admin=False)
 
         self.client = TestClient(backend_main.app)
-        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = (
-            lambda: self.ddb
-        )
-        backend_main.app.dependency_overrides[backend_main.get_current_user] = (
-            lambda: {"sub": ADMIN_SUB, "email": f"{ADMIN_SUB}@example.com", "token_use": "access"}
-        )
+        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = lambda: self.ddb
+        backend_main.app.dependency_overrides[backend_main.get_current_user] = lambda: {
+            "sub": ADMIN_SUB,
+            "email": f"{ADMIN_SUB}@example.com",
+            "token_use": "access",
+        }
 
     def tearDown(self):
         backend_main.app.dependency_overrides.clear()
         self._mock_aws.stop()
 
     def _authenticate_as(self, sub: str) -> None:
-        backend_main.app.dependency_overrides[backend_main.get_current_user] = (
-            lambda: {"sub": sub, "email": f"{sub}@example.com", "token_use": "access"}
-        )
+        backend_main.app.dependency_overrides[backend_main.get_current_user] = lambda: {
+            "sub": sub,
+            "email": f"{sub}@example.com",
+            "token_use": "access",
+        }
 
     def _upload(self, content_hash: str = CONTENT_HASH) -> None:
         pv.record_playbook_version_upload(
@@ -166,9 +168,9 @@ class TestLegalApprovalAuth(LegalApprovalTestBase):
         resp = self._approve(CONTENT_HASH)
         self.assertEqual(resp.status_code, 403)
         # Nothing should have been recorded.
-        row = self.versions_table.get_item(
-            Key={"playbook_id": PLAYBOOK_ID, "version": VERSION}
-        )["Item"]
+        row = self.versions_table.get_item(Key={"playbook_id": PLAYBOOK_ID, "version": VERSION})[
+            "Item"
+        ]
         self.assertNotIn("legal_approval", row)
 
 
@@ -192,9 +194,9 @@ class TestLegalApprovalValidation(LegalApprovalTestBase):
         self._upload(content_hash=CONTENT_HASH)
         resp = self._approve("sha256:" + "ff" * 32)
         self.assertEqual(resp.status_code, 409, resp.text)
-        row = self.versions_table.get_item(
-            Key={"playbook_id": PLAYBOOK_ID, "version": VERSION}
-        )["Item"]
+        row = self.versions_table.get_item(Key={"playbook_id": PLAYBOOK_ID, "version": VERSION})[
+            "Item"
+        ]
         self.assertNotIn("legal_approval", row)
 
 
@@ -210,9 +212,9 @@ class TestLegalApprovalHappyPath(LegalApprovalTestBase):
         self.assertEqual(body["approved_by"], ADMIN_SUB)
         self.assertIsNotNone(body["approved_at"])
 
-        row = self.versions_table.get_item(
-            Key={"playbook_id": PLAYBOOK_ID, "version": VERSION}
-        )["Item"]
+        row = self.versions_table.get_item(Key={"playbook_id": PLAYBOOK_ID, "version": VERSION})[
+            "Item"
+        ]
         self.assertEqual(row["legal_approval"]["content_hash"], CONTENT_HASH)
         self.assertEqual(row["legal_approval"]["approved_by"], ADMIN_SUB)
 

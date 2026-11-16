@@ -89,6 +89,7 @@ def _web_acl() -> dict:
 
 # --- a minimal evaluator for the statement kinds these rules use -------------
 
+
 def _transform(value: str, transformations: list[dict]) -> str:
     for t in sorted(transformations, key=lambda t: t["Priority"]):
         if t["Type"] == "LOWERCASE":
@@ -171,10 +172,11 @@ class TestWafUploadBody(unittest.TestCase):
     def test_a_label_rule_runs_after_the_managed_group(self) -> None:
         common_priority = self._common_rule_set()["Priority"]
         label_rules = [
-            r for r in _blocking_rules(self.acl)
-            if SIZE_LABEL in json.dumps(r["Statement"])
+            r for r in _blocking_rules(self.acl) if SIZE_LABEL in json.dumps(r["Statement"])
         ]
-        self.assertEqual(len(label_rules), 1, "exactly one rule acts on the SizeRestrictions_Body label")
+        self.assertEqual(
+            len(label_rules), 1, "exactly one rule acts on the SizeRestrictions_Body label"
+        )
         self.assertGreater(label_rules[0]["Priority"], common_priority)
 
     def test_a_upload_posts_with_a_large_body_pass(self) -> None:
@@ -207,9 +209,23 @@ class TestWafUploadBody(unittest.TestCase):
 
     def test_b_content_length_over_the_cap_is_blocked_exactly(self) -> None:
         rng = random.Random(1405)  # noqa: S311 -- reproducible test samples, not crypto
-        samples = [0, 1, 999, CAP_BYTES - 1, CAP_BYTES, CAP_BYTES + 1, CAP_BYTES + 9,
-                   CAP_BYTES + 10, CAP_BYTES + 99, CAP_BYTES + 100, CAP_BYTES + 999,
-                   CAP_BYTES * 2, 99_999_999, 100_000_000, 10**12]
+        samples = [
+            0,
+            1,
+            999,
+            CAP_BYTES - 1,
+            CAP_BYTES,
+            CAP_BYTES + 1,
+            CAP_BYTES + 9,
+            CAP_BYTES + 10,
+            CAP_BYTES + 99,
+            CAP_BYTES + 100,
+            CAP_BYTES + 999,
+            CAP_BYTES * 2,
+            99_999_999,
+            100_000_000,
+            10**12,
+        ]
         samples += [rng.randrange(0, 4 * CAP_BYTES) for _ in range(5000)]
         samples += [CAP_BYTES + rng.randrange(-5000, 5000) for _ in range(5000)]
         for n in samples:
@@ -217,7 +233,11 @@ class TestWafUploadBody(unittest.TestCase):
             if _blocked(self.acl, req) != (n > CAP_BYTES):
                 self.fail(f"Content-Length {n}: blocked={_blocked(self.acl, req)}, cap={CAP_BYTES}")
         # A zero-padded length is still the same number to the server.
-        self.assertTrue(_blocked(self.acl, _request("POST", "/api/reviews", content_length="0" + str(CAP_BYTES + 1))))
+        self.assertTrue(
+            _blocked(
+                self.acl, _request("POST", "/api/reviews", content_length="0" + str(CAP_BYTES + 1))
+            )
+        )
 
 
 def _run_tests() -> int:

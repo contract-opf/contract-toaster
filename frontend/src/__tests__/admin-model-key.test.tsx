@@ -155,7 +155,12 @@ describe('AdminModel — the instance-wide OpenRouter key', () => {
     stubModelKeyFetch({
       get: () => ({
         status: 200,
-        body: settings({ key_set: true, key_source: 'admin', key_fingerprint: 'a1b2c3d4', updated_by: 'admin-1' }),
+        body: settings({
+          key_set: true,
+          key_source: 'admin',
+          key_fingerprint: 'a1b2c3d4',
+          updated_by: 'admin-1',
+        }),
       }),
     });
     render(<AdminModel />);
@@ -165,7 +170,10 @@ describe('AdminModel — the instance-wide OpenRouter key', () => {
 
   it('reports when the key is coming from the deployment environment instead', async () => {
     stubModelKeyFetch({
-      get: () => ({ status: 200, body: settings({ key_set: true, key_source: 'env', key_fingerprint: 'a1b2c3d4' }) }),
+      get: () => ({
+        status: 200,
+        body: settings({ key_set: true, key_source: 'env', key_fingerprint: 'a1b2c3d4' }),
+      }),
     });
     render(<AdminModel />);
     expect(await screen.findByTestId('admin-model-status')).toHaveTextContent(
@@ -258,7 +266,8 @@ describe('AdminModel — the instance-wide OpenRouter key', () => {
     const clearBtn = await screen.findByTestId('admin-model-clear');
     const deletes = (): number =>
       fetchMock.mock.calls.filter(
-        ([, init]) => ((init as RequestInit | undefined)?.method ?? 'GET').toUpperCase() === 'DELETE',
+        ([, init]) =>
+          ((init as RequestInit | undefined)?.method ?? 'GET').toUpperCase() === 'DELETE',
       ).length;
 
     fireEvent.click(clearBtn); // arm — must NOT clear

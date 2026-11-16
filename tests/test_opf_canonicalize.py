@@ -92,7 +92,9 @@ def check_exclusions() -> list[str]:
     d["compiler"]["generated_at"] = "2099-12-31T23:59:59Z"
     d["compiler"]["run_id"] = "some-other-run"
     if opf_canonicalize.content_hash(d) != base:
-        failures.append("  hash changed when mutating compiler.generated_at/run_id (must be excluded)")
+        failures.append(
+            "  hash changed when mutating compiler.generated_at/run_id (must be excluded)"
+        )
 
     # Key order / whitespace must NOT change the hash.
     reserialized = json.loads(json.dumps(doc, sort_keys=True))
@@ -148,7 +150,9 @@ def check_section_digests() -> list[str]:
     digests = opf_canonicalize.compute_section_digests(doc)
     failures: list[str] = []
     if sorted(digests) != ["evidence", "floor", "posture"]:
-        failures.append(f"  section digests are {sorted(digests)}, expected exactly evidence/floor/posture")
+        failures.append(
+            f"  section digests are {sorted(digests)}, expected exactly evidence/floor/posture"
+        )
     for name, value in digests.items():
         if not value.startswith("sha256:"):
             failures.append(f"  section digest malformed: {name}={value!r}")
@@ -162,10 +166,14 @@ def check_conformance_vectors() -> list[str]:
     failures: list[str] = []
     manifest = json.loads((CONFORMANCE_DIR / "manifest.json").read_text(encoding="utf-8"))
     if manifest.get("format_version", {}).get("opf_version") != opf_load.OPF_VERSION:
-        failures.append(f"  vendored conformance manifest is not stamped opf_version {opf_load.OPF_VERSION}")
+        failures.append(
+            f"  vendored conformance manifest is not stamped opf_version {opf_load.OPF_VERSION}"
+        )
     entries = manifest.get("vectors") or []
     if len(entries) != 15:
-        return [f"  vendored conformance manifest lists {len(entries)} vectors, not the 15 of OPF 0.6"]
+        return [
+            f"  vendored conformance manifest lists {len(entries)} vectors, not the 15 of OPF 0.6"
+        ]
     for entry in entries:
         vector = json.loads((CONFORMANCE_DIR / entry["file"]).read_text(encoding="utf-8"))
         doc, expected = vector["input"], vector["expected"]

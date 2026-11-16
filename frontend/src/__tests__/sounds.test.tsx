@@ -420,7 +420,6 @@ describe('useSoundMuted', () => {
   });
 });
 
-
 // ---------------------------------------------------------------------------
 // Issue #722 — the nineteen recorded effects, folded into THIS module.
 // ---------------------------------------------------------------------------
@@ -488,7 +487,7 @@ describe('sounds — the console adapter (issue #722)', () => {
     expect(startedGains(stats)).toEqual([0.34, 0.18]);
   });
 
-  it('stays silent for the four events the panel\'s own handlers already sound', async () => {
+  it("stays silent for the four events the panel's own handlers already sound", async () => {
     const { sounds, stats } = await readyModule();
 
     // `submitReview` plays the lever, and the `phase` effect plays the
@@ -711,7 +710,7 @@ describe('sounds — a muted session and a hidden tab are silent (issue #722)', 
 });
 
 describe('sounds — one bus, not two (issue #722)', () => {
-  it('is the only caller of the kit\'s createSoundBus — nothing runs it', () => {
+  it("is the only caller of the kit's createSoundBus — nothing runs it", () => {
     // The kit ships its own bus (`src/orbit-diner/sounds.ts`). Running it
     // alongside this module would mean two AudioContexts, two voice budgets and
     // two readings of the mute flag. It stays defined and exported as part of
@@ -733,6 +732,9 @@ describe('sounds — one bus, not two (issue #722)', () => {
       }
     };
     walk(srcDir);
-    expect(callers, 'createSoundBus must not be called anywhere; toaster/sounds.ts is the one owner').toEqual([]);
+    expect(
+      callers,
+      'createSoundBus must not be called anywhere; toaster/sounds.ts is the one owner',
+    ).toEqual([]);
   });
 });

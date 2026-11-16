@@ -144,9 +144,7 @@ class FakeTable:
     def put_item(self, Item, ConditionExpression=None):
         key = Item[self.key_name]
         if ConditionExpression == "attribute_not_exists(idempotency_key)" and key in self.items:
-            raise ClientError(
-                {"Error": {"Code": "ConditionalCheckFailedException"}}, "PutItem"
-            )
+            raise ClientError({"Error": {"Code": "ConditionalCheckFailedException"}}, "PutItem")
         self.items[key] = dict(Item)
 
     def scan(self):
@@ -225,7 +223,9 @@ class FakeSfnClient:
         if name in self.started_names:
             raise self.exceptions.ExecutionAlreadyExists()
         self.started_names.add(name)
-        return {"executionArn": f"{stateMachineArn.replace(':stateMachine:', ':execution:')}:{name}"}
+        return {
+            "executionArn": f"{stateMachineArn.replace(':stateMachine:', ':execution:')}:{name}"
+        }
 
 
 class FakeUsersDynamoDBClient:
@@ -324,12 +324,12 @@ class ReviewApiOnMainAppTestBase(unittest.TestCase):
         self.app.dependency_overrides[review_routes.get_dynamodb_resource] = lambda: self.ddb
         self.app.dependency_overrides[review_routes.get_s3_client] = lambda: self.s3
         self.app.dependency_overrides[review_routes.get_sfn_client] = lambda: self.sfn
-        self.app.dependency_overrides[review_routes.get_dynamodb_client] = (
-            lambda: self.users_ddb_client
+        self.app.dependency_overrides[review_routes.get_dynamodb_client] = lambda: (
+            self.users_ddb_client
         )
         self.app.dependency_overrides[review_routes.get_env_name] = lambda: "dev"
-        self.app.dependency_overrides[review_routes.get_av_client] = (
-            lambda: review_routes.NullAvClient()
+        self.app.dependency_overrides[review_routes.get_av_client] = lambda: (
+            review_routes.NullAvClient()
         )
         self.client = TestClient(self.app)
 
@@ -342,8 +342,14 @@ class ReviewApiOnMainAppTestBase(unittest.TestCase):
         self.app.dependency_overrides[review_routes.get_active_user_row] = lambda: row
         return row
 
-    def _submit(self, owner_sub: str, *, body_text: str = "Hello", playbook_id: str = PLAYBOOK_ID,
-                idempotency_key: str | None = None):
+    def _submit(
+        self,
+        owner_sub: str,
+        *,
+        body_text: str = "Hello",
+        playbook_id: str = PLAYBOOK_ID,
+        idempotency_key: str | None = None,
+    ):
         self._authenticate_as(owner_sub)
         data = {"playbook_id": playbook_id}
         if idempotency_key is not None:

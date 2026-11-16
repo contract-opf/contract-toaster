@@ -61,9 +61,7 @@ class TestGithubSlug(unittest.TestCase):
             docs_lint.github_slug("Why we pin a *single-region native* `inference` ID"),
             "why-we-pin-a-single-region-native-inference-id",
         )
-        self.assertEqual(
-            docs_lint.github_slug("See [the guide](x.md) / now"), "see-the-guide--now"
-        )
+        self.assertEqual(docs_lint.github_slug("See [the guide](x.md) / now"), "see-the-guide--now")
 
     def test_underscores_survive(self):
         self.assertEqual(docs_lint.github_slug("ALLOWED_EMAIL_DOMAINS"), "allowed_email_domains")
@@ -134,8 +132,16 @@ class TestCheckLinksOnAThrowAwayTree(unittest.TestCase):
 
     def test_reports_nothing_else(self):
         self.assertEqual(len(self.failures), 6, self.joined)
-        for quiet in ("example.com", "mailto", "missing-in-code", "missing-in-fence",
-                      "docs/planning", "frontend/vendor", "src/app.py", "docs/)"):
+        for quiet in (
+            "example.com",
+            "mailto",
+            "missing-in-code",
+            "missing-in-fence",
+            "docs/planning",
+            "frontend/vendor",
+            "src/app.py",
+            "docs/)",
+        ):
             self.assertNotIn(quiet, self.joined)
 
     def test_scope_excludes_planning_and_vendor(self):
@@ -181,14 +187,14 @@ class TestRealTree(unittest.TestCase):
 class TestCheckShRunsTheDocsGates(unittest.TestCase):
     def test_check_sh_runs_docs_lint_and_docs_sync_audit(self):
         text = CHECK_SH.read_text(encoding="utf-8")
-        live = "\n".join(
-            line for line in text.splitlines() if not line.lstrip().startswith("#")
-        )
+        live = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
         self.assertIn("scripts/docs-lint.py", live)
         self.assertIn("tools/docs_sync.py audit", live)
         # Both run before the suite, so a doc failure costs seconds, not minutes.
         self.assertLess(live.index("scripts/docs-lint.py"), live.index("collect_test_failures.sh"))
-        self.assertLess(live.index("tools/docs_sync.py audit"), live.index("collect_test_failures.sh"))
+        self.assertLess(
+            live.index("tools/docs_sync.py audit"), live.index("collect_test_failures.sh")
+        )
 
 
 def main() -> int:

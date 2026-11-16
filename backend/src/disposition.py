@@ -212,7 +212,9 @@ def count_reviews_awaiting_disposition(
 
     count = 0
     for item in items:
-        if item.get("status") in DISPOSITIONABLE_REVIEW_STATUSES and not item.get("attorney_disposition"):
+        if item.get("status") in DISPOSITIONABLE_REVIEW_STATUSES and not item.get(
+            "attorney_disposition"
+        ):
             count += 1
     return count
 

@@ -87,7 +87,9 @@ export async function authorizedFetch(
   options?: AuthorizedFetchOptions,
 ): Promise<Response> {
   const token = await getToken();
-  const headers: Record<string, string> = { ...(init?.headers as Record<string, string> | undefined) };
+  const headers: Record<string, string> = {
+    ...(init?.headers as Record<string, string> | undefined),
+  };
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
@@ -100,7 +102,11 @@ export async function authorizedFetch(
   // it must not bounce the user to a screen they are already on. The
   // distinction is the route, not the status: everything else behind
   // `authorizedFetch` is a route that only an authenticated caller reaches.
-  if (response.status === 401 && !isUnauthenticatedRoute(path) && !options?.suppressSessionExpiredNotification) {
+  if (
+    response.status === 401 &&
+    !isUnauthenticatedRoute(path) &&
+    !options?.suppressSessionExpiredNotification
+  ) {
     for (const listener of sessionExpiredListeners) {
       try {
         listener();

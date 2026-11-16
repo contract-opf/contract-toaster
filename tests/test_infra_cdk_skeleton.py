@@ -51,6 +51,7 @@ def _assert(condition: bool, label: str, detail: str = "") -> list[str]:
 # Check A — infra/ directory with CDK bootstrap files
 # ---------------------------------------------------------------------------
 
+
 def check_a_infra_files() -> list[str]:
     print("\nCheck A: infra/ directory and CDK bootstrap files …")
     failures = []
@@ -138,6 +139,7 @@ def check_b_stack_structure() -> list[str]:
 # Check C — Environment-scoped account/region (dev != prod)
 # ---------------------------------------------------------------------------
 
+
 def check_c_env_scoped_context() -> list[str]:
     print("\nCheck C: Environment-scoped account/region; dev account != prod account …")
     failures = []
@@ -200,7 +202,8 @@ def check_c_env_scoped_context() -> list[str]:
 
     # Stack names must include the environment name (contract-toaster-dev, contract-toaster-prod)
     failures += _assert(
-        "contract-toaster-dev" in all_ts or "contract-toaster-${env}" in all_ts
+        "contract-toaster-dev" in all_ts
+        or "contract-toaster-${env}" in all_ts
         or bool(re.search(r"contract-toaster-\$\{", all_ts)),
         "Stack names include the environment name (e.g. 'contract-toaster-dev')",
         "Per AC: stack names should include the environment name.",
@@ -212,6 +215,7 @@ def check_c_env_scoped_context() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check D — cdk.json app entry point
 # ---------------------------------------------------------------------------
+
 
 def check_d_cdk_json() -> list[str]:
     print("\nCheck D: cdk.json references TypeScript app entry point …")
@@ -242,6 +246,7 @@ def check_d_cdk_json() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check E — Customer-managed KMS key
 # ---------------------------------------------------------------------------
+
 
 def check_e_kms_key() -> list[str]:
     print("\nCheck E: Customer-managed KMS key construct present …")
@@ -274,6 +279,7 @@ def check_e_kms_key() -> list[str]:
 # Check F — Base IAM roles (deploy role, app runner task role)
 # ---------------------------------------------------------------------------
 
+
 def check_f_iam_roles() -> list[str]:
     print("\nCheck F: Base IAM roles (deploy role + app runner task role) …")
     failures = []
@@ -295,7 +301,13 @@ def check_f_iam_roles() -> list[str]:
 
     # App Runner task role
     failures += _assert(
-        bool(re.search(r"apprunner.*[Rr]ole|[Rr]ole.*apprunner|task.*[Rr]ole|[Rr]ole.*task", all_ts, re.IGNORECASE)),
+        bool(
+            re.search(
+                r"apprunner.*[Rr]ole|[Rr]ole.*apprunner|task.*[Rr]ole|[Rr]ole.*task",
+                all_ts,
+                re.IGNORECASE,
+            )
+        ),
         "App Runner task role defined",
         "Per AC: 'Base IAM roles defined (… app runner task role)'",
     )
@@ -306,6 +318,7 @@ def check_f_iam_roles() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check G — README.md in infra/
 # ---------------------------------------------------------------------------
+
 
 def check_g_infra_readme() -> list[str]:
     print("\nCheck G: infra/README.md exists and describes the stack layout …")
@@ -335,12 +348,15 @@ def check_g_infra_readme() -> list[str]:
 # Check H — cdk synth runs cleanly
 # ---------------------------------------------------------------------------
 
+
 def check_h_cdk_synth() -> list[str]:
     print("\nCheck H: cdk synth runs cleanly …")
     failures = []
 
     if not INFRA.is_dir():
-        return _assert(False, "infra/ directory exists (prerequisite for cdk synth)", "Create infra/ first.")
+        return _assert(
+            False, "infra/ directory exists (prerequisite for cdk synth)", "Create infra/ first."
+        )
 
     # Install node dependencies if node_modules absent
     node_modules = INFRA / "node_modules"
@@ -380,6 +396,7 @@ def check_h_cdk_synth() -> list[str]:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> int:
     print("CDK skeleton structural gate (issue #50)")
     print("=" * 60)
@@ -396,10 +413,7 @@ def main() -> int:
 
     print("\n" + "=" * 60)
     if all_failures:
-        print(
-            f"\nFAIL: {len(all_failures)} check(s) failed.\n"
-            "See output above for details."
-        )
+        print(f"\nFAIL: {len(all_failures)} check(s) failed.\nSee output above for details.")
         return 1
 
     print("\nPASS: all CDK skeleton structural checks passed.")

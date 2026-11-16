@@ -93,8 +93,12 @@ function stubFetch(byPath: Record<string, Body>): void {
       const url = typeof input === 'string' ? input : input.toString();
       const pathname = new URL(url, 'http://localhost').pathname;
       const body = byPath[pathname];
-      // eslint-disable-next-line @typescript-eslint/require-await
-      return { ok: body !== undefined, status: body === undefined ? 404 : 200, json: async () => body ?? {} } as Response;
+      return {
+        ok: body !== undefined,
+        status: body === undefined ? 404 : 200,
+        // eslint-disable-next-line @typescript-eslint/require-await
+        json: async () => body ?? {},
+      } as Response;
     }),
   );
 }

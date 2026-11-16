@@ -155,8 +155,12 @@ class TestRunnerRecordsModelProvenance(unittest.TestCase):
         item, _client = self._run()
 
         self.assertEqual(item["status"], "DONE")
-        self.assertEqual(item.get("primary_model_id"), model_client_module.openrouter_primary_model_id())
-        self.assertEqual(item.get("critic_model_id"), model_client_module.openrouter_critic_model_id())
+        self.assertEqual(
+            item.get("primary_model_id"), model_client_module.openrouter_primary_model_id()
+        )
+        self.assertEqual(
+            item.get("critic_model_id"), model_client_module.openrouter_critic_model_id()
+        )
 
     def test_recorded_ids_are_the_ones_actually_invoked(self) -> None:
         """The row must name the models the spine CALLED, not the models the
@@ -279,7 +283,7 @@ class TestDetailProjectsModelProvenance(_MotoRowsTestCase):
 
 class TestListCarriesHistoryProvenance(_MotoRowsTestCase):
     def test_list_item_carries_provenance_and_availability(self) -> None:
-        items = reviews_module.list_reviews(_row(OWNER), self._resource(MODERN_ROW))['items']
+        items = reviews_module.list_reviews(_row(OWNER), self._resource(MODERN_ROW))["items"]
         self.assertEqual(len(items), 1)
         item = items[0]
 
@@ -307,7 +311,7 @@ class TestListCarriesHistoryProvenance(_MotoRowsTestCase):
         """Availability is a boolean on the list; the object keys stay
         server-side (the same discipline `get_review_detail` already applies
         with `has_output`)."""
-        items = reviews_module.list_reviews(_row(OWNER), self._resource(MODERN_ROW))['items']
+        items = reviews_module.list_reviews(_row(OWNER), self._resource(MODERN_ROW))["items"]
         blob = repr(items[0])
 
         self.assertNotIn("output_s3_key", items[0])
@@ -316,7 +320,7 @@ class TestListCarriesHistoryProvenance(_MotoRowsTestCase):
         self.assertNotIn(f"uploads/{OWNER}/rev-modern/in.docx", blob)
 
     def test_historic_row_lists_as_not_recorded(self) -> None:
-        items = reviews_module.list_reviews(_row(OWNER), self._resource(HISTORIC_ROW))['items']
+        items = reviews_module.list_reviews(_row(OWNER), self._resource(HISTORIC_ROW))["items"]
         item = items[0]
 
         self.assertIsNone(item["primary_model_id"])
@@ -332,7 +336,7 @@ class TestOwnerScoping(_MotoRowsTestCase):
     def test_reviewer_never_sees_another_users_review(self) -> None:
         items = reviews_module.list_reviews(
             _row(OWNER), self._resource(MODERN_ROW, OTHER_USERS_ROW)
-        )['items']
+        )["items"]
         ids = {i["review_id"] for i in items}
 
         self.assertEqual(ids, {"rev-modern"})
@@ -345,7 +349,7 @@ class TestOwnerScoping(_MotoRowsTestCase):
             _row(ADMIN, is_admin=True),
             self._resource(MODERN_ROW, OTHER_USERS_ROW),
             owner_scoped=True,
-        )['items']
+        )["items"]
         ids = {i["review_id"] for i in items}
 
         self.assertNotIn("rev-modern", ids)
@@ -357,7 +361,7 @@ class TestOwnerScoping(_MotoRowsTestCase):
         is NOT changed by this ticket -- only opted out of."""
         items = reviews_module.list_reviews(
             _row(ADMIN, is_admin=True), self._resource(MODERN_ROW, OTHER_USERS_ROW)
-        )['items']
+        )["items"]
         ids = {i["review_id"] for i in items}
 
         self.assertEqual(ids, {"rev-modern", "rev-someone-else"})
@@ -434,9 +438,7 @@ class TestSubmissionRecordsUploadPointer(HistoryRouteTestBase):
         review_id = resp.json()["review_id"]
 
         row = self._reviews_table().get_item(Key={"review_id": review_id}).get("Item") or {}
-        self.assertEqual(
-            row.get("upload_s3_key"), f"uploads/owner-449-upload/{review_id}/in.docx"
-        )
+        self.assertEqual(row.get("upload_s3_key"), f"uploads/owner-449-upload/{review_id}/in.docx")
 
 
 class TestInputDownloadRoute(HistoryRouteTestBase):
@@ -559,9 +561,7 @@ class TestGoneIsNotChargedAgainstTheDailyLimit(HistoryRouteTestBase):
         """The concrete harm: clicking through a page of purged rows must not
         lock the user out of the one document that IS still there."""
         live_key = "outputs/quota-live/out.docx"
-        self.s3.put_object(
-            Bucket=os.environ["OUTPUTS_BUCKET"], Key=live_key, Body=b"the redline"
-        )
+        self.s3.put_object(Bucket=os.environ["OUTPUTS_BUCKET"], Key=live_key, Body=b"the redline")
         self._seed_review("quota-live", owner_sub=OWNER, output_s3_key=live_key)
         self._authenticate_as(OWNER)
 
@@ -570,9 +570,7 @@ class TestGoneIsNotChargedAgainstTheDailyLimit(HistoryRouteTestBase):
             self._seed_review(
                 review_id, owner_sub=OWNER, output_s3_key=f"outputs/{review_id}/out.docx"
             )
-            self.assertEqual(
-                self.client.get(f"/api/reviews/{review_id}/output").status_code, 410
-            )
+            self.assertEqual(self.client.get(f"/api/reviews/{review_id}/output").status_code, 410)
 
         resp = self.client.get("/api/reviews/quota-live/output")
 

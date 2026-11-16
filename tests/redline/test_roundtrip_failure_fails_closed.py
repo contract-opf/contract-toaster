@@ -216,9 +216,7 @@ def test_round_trip_failure_fails_closed(failures: list) -> None:
     if result.get("status") != "ERROR":
         failures.append(f"expected ERROR, got {result.get('status')!r}")
     if result.get("reason") != redline_generate.REASON_BLOCK_EDITS_NOT_APPLIED:
-        failures.append(
-            f"expected reason=block_edits_not_applied, got {result.get('reason')!r}"
-        )
+        failures.append(f"expected reason=block_edits_not_applied, got {result.get('reason')!r}")
     # The load-bearing one: bytes that failed a round trip are suspect, and the
     # one thing that must not happen next is handing them to a lawyer as their
     # deliverable.
@@ -235,9 +233,7 @@ def test_the_round_trip_cause_survives_into_the_report(failures: list) -> None:
         raise ValueError("boom")
 
     report = _run(exploding_verify).get("analysis_report") or {}
-    reasons = {
-        entry.get("reason") for entry in (report.get("changes_not_applied") or [])
-    }
+    reasons = {entry.get("reason") for entry in (report.get("changes_not_applied") or [])}
     if "round_trip_verification_failed" not in reasons:
         failures.append(
             "the report does not say the round trip was what failed; a reader "
@@ -293,9 +289,7 @@ def test_the_outer_gate_catches_a_caller_that_skipped_the_inner_one(failures: li
         redline_block_apply.apply_block_transcript = original_apply
 
     if result.get("status") != "ERROR":
-        failures.append(
-            f"outer gate: expected ERROR, got {result.get('status')!r}"
-        )
+        failures.append(f"outer gate: expected ERROR, got {result.get('status')!r}")
     if result.get("reason") != "round_trip_verification_failed":
         failures.append(
             f"outer gate: expected round_trip_verification_failed, got {result.get('reason')!r}"

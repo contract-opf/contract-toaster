@@ -122,6 +122,7 @@ def extract_server_blocks_and_locations(text: str):
 # Check 1 — CSP header present with default-src 'self' and frame-ancestors 'none'
 # ---------------------------------------------------------------------------
 
+
 def check_1_csp_present() -> list[str]:
     print("\nCheck 1: Content-Security-Policy header present …")
     failures: list[str] = []
@@ -157,6 +158,7 @@ def check_1_csp_present() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check 2 — no unsafe-eval / unsafe-inline in script-src
 # ---------------------------------------------------------------------------
+
 
 def check_2_script_src_strict() -> list[str]:
     print("\nCheck 2: script-src has no unsafe-eval / unsafe-inline …")
@@ -195,6 +197,7 @@ def check_2_script_src_strict() -> list[str]:
 # Check 3 — style-src DOES include unsafe-inline
 # ---------------------------------------------------------------------------
 
+
 def check_3_style_src_unsafe_inline() -> list[str]:
     print("\nCheck 3: style-src includes 'unsafe-inline' (toaster inline styles) …")
     failures: list[str] = []
@@ -228,26 +231,31 @@ def check_3_style_src_unsafe_inline() -> list[str]:
 # Check 4 — nosniff + Referrer-Policy present
 # ---------------------------------------------------------------------------
 
+
 def check_4_nosniff_and_referrer_policy() -> list[str]:
     print("\nCheck 4: X-Content-Type-Options nosniff + Referrer-Policy present …")
     failures: list[str] = []
 
     text = read(NGINX_CONF)
 
-    nosniff = bool(re.search(
-        r'add_header\s+X-Content-Type-Options\s+"nosniff"',
-        text,
-    ))
+    nosniff = bool(
+        re.search(
+            r'add_header\s+X-Content-Type-Options\s+"nosniff"',
+            text,
+        )
+    )
     failures += check(
         nosniff,
         "4a: X-Content-Type-Options: nosniff present",
         "4a: X-Content-Type-Options: nosniff missing from nginx.conf",
     )
 
-    referrer_policy = bool(re.search(
-        r'add_header\s+Referrer-Policy\s+"[^"]+"',
-        text,
-    ))
+    referrer_policy = bool(
+        re.search(
+            r'add_header\s+Referrer-Policy\s+"[^"]+"',
+            text,
+        )
+    )
     failures += check(
         referrer_policy,
         "4b: Referrer-Policy present",
@@ -260,6 +268,7 @@ def check_4_nosniff_and_referrer_policy() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check 4b — Permissions-Policy + COOP at server level; HSTS only on TLS
 # ---------------------------------------------------------------------------
+
 
 def check_4b_hardening_headers() -> list[str]:
     """
@@ -288,7 +297,7 @@ def check_4b_hardening_headers() -> list[str]:
     )
     failures += check(
         permissions is not None,
-        "4b-i: server-level `add_header Permissions-Policy \"…\" always;` present",
+        '4b-i: server-level `add_header Permissions-Policy "…" always;` present',
         "4b-i: no server-level Permissions-Policy add_header with `always` "
         "found -- it must sit outside every location block (check 5) and "
         "carry `always` so it is emitted on error responses too",
@@ -297,8 +306,7 @@ def check_4b_hardening_headers() -> list[str]:
         value = permissions.group(1)
         missing = [
             feature
-            for feature in ("camera=()", "microphone=()", "geolocation=()",
-                            "payment=()", "usb=()")
+            for feature in ("camera=()", "microphone=()", "geolocation=()", "payment=()", "usb=()")
             if feature not in value
         ]
         failures += check(
@@ -310,13 +318,15 @@ def check_4b_hardening_headers() -> list[str]:
             "`()` is strictly stronger than `self`",
         )
 
-    coop = bool(re.search(
-        r'add_header\s+Cross-Origin-Opener-Policy\s+"same-origin"\s+always\s*;',
-        server_level,
-    ))
+    coop = bool(
+        re.search(
+            r'add_header\s+Cross-Origin-Opener-Policy\s+"same-origin"\s+always\s*;',
+            server_level,
+        )
+    )
     failures += check(
         coop,
-        '4b-iii: server-level `add_header Cross-Origin-Opener-Policy '
+        "4b-iii: server-level `add_header Cross-Origin-Opener-Policy "
         '"same-origin" always;` present',
         '4b-iii: no server-level Cross-Origin-Opener-Policy "same-origin" '
         "add_header with `always` found -- it severs window.opener to "
@@ -354,6 +364,7 @@ def check_4b_hardening_headers() -> list[str]:
 # Check 5 — no location block silently drops server-level headers
 # ---------------------------------------------------------------------------
 
+
 def check_5_no_location_drops_headers() -> list[str]:
     print("\nCheck 5: no location block re-declares add_header without the CSP …")
     failures: list[str] = []
@@ -380,8 +391,7 @@ def check_5_no_location_drops_headers() -> list[str]:
 
     failures += check(
         len(offending) == 0,
-        "5b: no location block re-declares add_header without also "
-        "re-declaring the CSP",
+        "5b: no location block re-declares add_header without also re-declaring the CSP",
         f"5b: location block(s) re-declare add_header without the CSP, which "
         f"would silently drop it for that location: {offending}",
     )
@@ -392,6 +402,7 @@ def check_5_no_location_drops_headers() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check 6 — Cache-Control map: no-cache default, immutable for /assets/
 # ---------------------------------------------------------------------------
+
 
 def extract_cache_control_map(
     text: str,
@@ -424,9 +435,7 @@ def extract_cache_control_map(
     assets_m = re.search(r'~\*?\^?/assets/[^\s"]*\s+"([^"]*)"', body)
     assets_value = assets_m.group(1) if assets_m else None
 
-    proxied_m = re.search(
-        r'~\*?\^?/\([^)]*\bapi/[^)]*\)[^\s"]*\s+"([^"]*)"', body
-    )
+    proxied_m = re.search(r'~\*?\^?/\([^)]*\bapi/[^)]*\)[^\s"]*\s+"([^"]*)"', body)
     proxied_value = proxied_m.group(1) if proxied_m else None
 
     return source_var, output_var, default_value, assets_value, proxied_value
@@ -437,8 +446,8 @@ def check_6_cache_control_map() -> tuple[list[str], str | None]:
     failures: list[str] = []
 
     text = read(NGINX_CONF)
-    source_var, output_var, default_value, assets_value, proxied_value = (
-        extract_cache_control_map(text)
+    source_var, output_var, default_value, assets_value, proxied_value = extract_cache_control_map(
+        text
     )
 
     failures += check(
@@ -453,8 +462,8 @@ def check_6_cache_control_map() -> tuple[list[str], str | None]:
 
     failures += check(
         default_value == "no-cache",
-        "6a: map default arm is \"no-cache\" (covers / and /index.html)",
-        f"6a: map default arm is {default_value!r}, expected \"no-cache\" -- "
+        '6a: map default arm is "no-cache" (covers / and /index.html)',
+        f'6a: map default arm is {default_value!r}, expected "no-cache" -- '
         "index.html must always revalidate or a redeploy leaves stale "
         "sessions running the old bundle (issue #467)",
     )
@@ -471,9 +480,8 @@ def check_6_cache_control_map() -> tuple[list[str], str | None]:
 
     failures += check(
         proxied_value == "",
-        "6d: map has an empty-value arm for the proxied api/version/health/"
-        "openapi.json prefixes",
-        f"6d: map's proxied-prefix arm is {proxied_value!r}, expected \"\" -- "
+        "6d: map has an empty-value arm for the proxied api/version/health/openapi.json prefixes",
+        f'6d: map\'s proxied-prefix arm is {proxied_value!r}, expected "" -- '
         "nginx omits `add_header` when the map value is empty, so this arm "
         "must be empty or the server-level Cache-Control would also be "
         "added to reverse-proxied backend responses (which set their own, "
@@ -486,6 +494,7 @@ def check_6_cache_control_map() -> tuple[list[str], str | None]:
 # ---------------------------------------------------------------------------
 # Check 7 — Cache-Control applied via server-level add_header, not a location
 # ---------------------------------------------------------------------------
+
 
 def check_7_cache_control_server_level(map_output_var: str | None) -> list[str]:
     print("\nCheck 7: Cache-Control add_header is at server level …")
@@ -517,9 +526,7 @@ def check_7_cache_control_server_level(map_output_var: str | None) -> list[str]:
         )
 
     offending = [
-        block.splitlines()[0].strip()
-        for block in location_blocks
-        if "Cache-Control" in block
+        block.splitlines()[0].strip() for block in location_blocks if "Cache-Control" in block
     ]
     failures += check(
         len(offending) == 0,
@@ -535,6 +542,7 @@ def check_7_cache_control_server_level(map_output_var: str | None) -> list[str]:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> int:
     print("DTS nginx CSP parity (#387) + Cache-Control (#467) locking gate")
@@ -554,10 +562,7 @@ def main() -> int:
 
     print("\n" + "=" * 70)
     if all_failures:
-        print(
-            f"\nFAIL: {len(all_failures)} check(s) failed.\n"
-            "See output above for details."
-        )
+        print(f"\nFAIL: {len(all_failures)} check(s) failed.\nSee output above for details.")
         return 1
 
     print("\nPASS: all DTS nginx CSP (#387) + Cache-Control (#467) checks passed.")

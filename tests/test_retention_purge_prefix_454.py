@@ -66,9 +66,7 @@ sys.path.insert(0, str(PURGE_WORKER_DIR))
 
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 os.environ.setdefault("REVIEWS_TABLE", "contract-toaster-reviews-454-test")
-os.environ.setdefault(
-    "RETENTION_SETTINGS_TABLE", "contract-toaster-retention-settings-454-test"
-)
+os.environ.setdefault("RETENTION_SETTINGS_TABLE", "contract-toaster-retention-settings-454-test")
 os.environ.setdefault("AUDIT_TABLE", "contract-toaster-audit-454-test")
 os.environ.setdefault("UPLOADS_BUCKET", "contract-toaster-uploads-454-test")
 os.environ.setdefault("OUTPUTS_BUCKET", "contract-toaster-outputs-454-test")
@@ -246,12 +244,8 @@ class PurgePrefixTestBase(unittest.TestCase):
             item["upload_s3_key"] = upload_s3_key or input_key
         self.reviews_table.put_item(Item=item)
 
-        self.s3.put_object(
-            Bucket=os.environ["UPLOADS_BUCKET"], Key=input_key, Body=b"input-doc"
-        )
-        self.s3.put_object(
-            Bucket=os.environ["OUTPUTS_BUCKET"], Key=output_key, Body=b"output-doc"
-        )
+        self.s3.put_object(Bucket=os.environ["UPLOADS_BUCKET"], Key=input_key, Body=b"input-doc")
+        self.s3.put_object(Bucket=os.environ["OUTPUTS_BUCKET"], Key=output_key, Body=b"output-doc")
         return input_key, output_key
 
     # -- assertions ------------------------------------------------------
@@ -278,6 +272,7 @@ class PurgePrefixTestBase(unittest.TestCase):
 # (1) The input document at the real layout is actually deleted.
 # ---------------------------------------------------------------------------
 
+
 class TestInputDocumentIsPurged(PurgePrefixTestBase):
     def test_backend_sweep_deletes_input_document_at_the_real_layout(self):
         input_key, output_key = self._seed_review("rid-probe")
@@ -294,20 +289,23 @@ class TestInputDocumentIsPurged(PurgePrefixTestBase):
         self.assertObjectGone(os.environ["OUTPUTS_BUCKET"], output_key)
         row = self.reviews_table.get_item(Key={"review_id": "rid-probe"})["Item"]
         self.assertNotIn(
-            "normalization_notes", row,
+            "normalization_notes",
+            row,
             "A purged row must lose normalization_notes -- it names a "
             "paragraph heading from the counterparty document, the same "
             "Confidential-substance reasoning as summary (issue #563 "
             "follow-up).",
         )
         self.assertNotIn(
-            "attorney_disposition_note", row,
+            "attorney_disposition_note",
+            row,
             "A purged row must lose attorney_disposition_note -- the same "
             "Confidential-substance reasoning, per docs/data-handling.md's "
             "field table (issue #486 follow-up).",
         )
         self.assertNotIn(
-            "cover_note_draft", row,
+            "cover_note_draft",
+            row,
             "A purged row must lose cover_note_draft -- the same "
             "Confidential-substance reasoning, per docs/data-handling.md's "
             "field table (issue #499 follow-up). This is backend/src/"
@@ -318,13 +316,15 @@ class TestInputDocumentIsPurged(PurgePrefixTestBase):
             "string would pass the whole suite.",
         )
         self.assertNotIn(
-            "toaster_guidance", row,
+            "toaster_guidance",
+            row,
             "A purged row must lose toaster_guidance -- the submitter's own "
             "free-text prose, Confidential per docs/data-handling.md, was "
             "in NEITHER purge list before this fix.",
         )
         self.assertIn(
-            "purged_at", row,
+            "purged_at",
+            row,
             "A purged row must carry the purged_at marker, stamped in the "
             "same update as the substance-field clear.",
         )
@@ -342,23 +342,27 @@ class TestInputDocumentIsPurged(PurgePrefixTestBase):
         self.assertObjectGone(os.environ["OUTPUTS_BUCKET"], output_key)
         row = self.reviews_table.get_item(Key={"review_id": "rid-lambda"})["Item"]
         self.assertNotIn(
-            "attorney_disposition_note", row,
+            "attorney_disposition_note",
+            row,
             "The production Lambda's SUBSTANCE_FIELDS must clear this too -- "
             "fixing only backend/src/retention.py would leave the deployment "
             "broken (issue #486 follow-up).",
         )
         self.assertNotIn(
-            "cover_note_draft", row,
+            "cover_note_draft",
+            row,
             "The production Lambda's SUBSTANCE_FIELDS must clear this too -- "
             "fixing only backend/src/retention.py would leave the deployment "
             "broken (issue #499 follow-up).",
         )
         self.assertNotIn(
-            "toaster_guidance", row,
+            "toaster_guidance",
+            row,
             "The production Lambda's SUBSTANCE_FIELDS must clear this too.",
         )
         self.assertIn(
-            "purged_at", row,
+            "purged_at",
+            row,
             "The production Lambda must stamp purged_at too -- fixing only "
             "backend/src/retention.py would leave the deployment with no "
             "marker at all.",
@@ -392,25 +396,28 @@ class TestInputDocumentIsPurged(PurgePrefixTestBase):
         self.assertObjectPresent(os.environ["UPLOADS_BUCKET"], recent_key)
         held_row = self.reviews_table.get_item(Key={"review_id": "rid-held"})["Item"]
         self.assertIn(
-            "normalization_notes", held_row,
+            "normalization_notes",
+            held_row,
             "A legal-held row must retain normalization_notes -- legal hold "
             "overrides purge for every substance field (issue #563 follow-up).",
         )
         self.assertIn(
-            "attorney_disposition_note", held_row,
+            "attorney_disposition_note",
+            held_row,
             "A legal-held row must retain attorney_disposition_note too -- "
             "legal hold overrides purge for every substance field "
             "(issue #486 follow-up).",
         )
         self.assertIn(
-            "toaster_guidance", held_row,
+            "toaster_guidance",
+            held_row,
             "A legal-held row must retain toaster_guidance too -- legal hold "
             "overrides purge for every substance field.",
         )
         self.assertNotIn(
-            "purged_at", held_row,
-            "A held review was never purged, so it must not carry the "
-            "purged_at marker either.",
+            "purged_at",
+            held_row,
+            "A held review was never purged, so it must not carry the purged_at marker either.",
         )
 
     def test_stored_pointer_naming_another_review_is_never_acted_on(self):
@@ -437,13 +444,12 @@ class TestInputDocumentIsPurged(PurgePrefixTestBase):
 # (2) Legal-hold tagging reaches the input object at the real layout.
 # ---------------------------------------------------------------------------
 
+
 class TestLegalHoldTagsInputObject(PurgePrefixTestBase):
     def test_set_hold_tags_the_input_document_at_the_real_layout(self):
         input_key, output_key = self._seed_review("rid-hold")
 
-        retention_module.set_legal_hold(
-            "rid-hold", "matter ref 123", ADMIN, self.ddb, self.s3
-        )
+        retention_module.set_legal_hold("rid-hold", "matter ref 123", ADMIN, self.ddb, self.s3)
 
         self.assertEqual(
             self._tags(os.environ["UPLOADS_BUCKET"], input_key).get(HOLD_TAG),
@@ -452,9 +458,7 @@ class TestLegalHoldTagsInputObject(PurgePrefixTestBase):
             "keys on -- otherwise the storage-layer backstop covers outputs "
             "only.",
         )
-        self.assertEqual(
-            self._tags(os.environ["OUTPUTS_BUCKET"], output_key).get(HOLD_TAG), "true"
-        )
+        self.assertEqual(self._tags(os.environ["OUTPUTS_BUCKET"], output_key).get(HOLD_TAG), "true")
 
     def test_release_hold_removes_the_tag_from_the_input_document(self):
         input_key, _ = self._seed_review("rid-hold-release")
@@ -463,9 +467,7 @@ class TestLegalHoldTagsInputObject(PurgePrefixTestBase):
         )
         # Asserted before the release so this test cannot pass vacuously on a
         # tree where the input object was never tagged in the first place.
-        self.assertEqual(
-            self._tags(os.environ["UPLOADS_BUCKET"], input_key).get(HOLD_TAG), "true"
-        )
+        self.assertEqual(self._tags(os.environ["UPLOADS_BUCKET"], input_key).get(HOLD_TAG), "true")
 
         retention_module.release_legal_hold(
             "rid-hold-release", "Matter closed", ADMIN, self.ddb, self.s3
@@ -479,6 +481,7 @@ class TestLegalHoldTagsInputObject(PurgePrefixTestBase):
 # ---------------------------------------------------------------------------
 # (3) A failed delete must never be recorded as success.
 # ---------------------------------------------------------------------------
+
 
 class TestSuccessIsTiedToOutcome(PurgePrefixTestBase):
     def test_review_whose_object_survives_is_not_reported_deleted(self):
@@ -507,6 +510,7 @@ class TestSuccessIsTiedToOutcome(PurgePrefixTestBase):
 # ---------------------------------------------------------------------------
 # (4) Operator gate: dry run itemises the backlog and deletes nothing.
 # ---------------------------------------------------------------------------
+
 
 class TestDryRunOperatorGate(PurgePrefixTestBase):
     def test_dry_run_itemises_the_backlog_and_deletes_nothing(self):

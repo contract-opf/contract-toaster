@@ -78,8 +78,16 @@ SHAPES: dict[str, tuple[str, str, bool]] = {
     "NESTED_RANGES": ("two comments on one run, one range inside the other", "_build_nested", True),
     "UNTOUCHED": ("a comment on a paragraph the redline does not patch", "_build_untouched", False),
     "MIXED_RUN": ("text and reference in one run on an edited paragraph", "_build_mixed_run", True),
-    "STRUCK_SPAN": ("a comment on exactly the span the redline strikes", "_build_struck_span", True),
-    "SPANS_PARAGRAPHS": ("one range from an edited paragraph into the next", "_build_spans_paragraphs", True),
+    "STRUCK_SPAN": (
+        "a comment on exactly the span the redline strikes",
+        "_build_struck_span",
+        True,
+    ),
+    "SPANS_PARAGRAPHS": (
+        "one range from an edited paragraph into the next",
+        "_build_spans_paragraphs",
+        True,
+    ),
 }
 
 
@@ -125,9 +133,10 @@ def _document(comment_on: dict[str, list[str]]):
 
 def _rewrite_document_xml(docx_bytes: bytes, transform) -> bytes:
     out = io.BytesIO()
-    with zipfile.ZipFile(io.BytesIO(docx_bytes)) as src, zipfile.ZipFile(
-        out, "w", zipfile.ZIP_DEFLATED
-    ) as dst:
+    with (
+        zipfile.ZipFile(io.BytesIO(docx_bytes)) as src,
+        zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst,
+    ):
         for item in src.infolist():
             data = src.read(item.filename)
             if item.filename == "word/document.xml":
@@ -142,7 +151,9 @@ def _build_word_standard() -> bytes:
 
 def _build_annotation_ref() -> bytes:
     def add_annotation_ref(xml: str) -> str:
-        pattern = r'(<w:r><w:rPr><w:rStyle w:val="CommentReference"/></w:rPr>)(<w:commentReference )'
+        pattern = (
+            r'(<w:r><w:rPr><w:rStyle w:val="CommentReference"/></w:rPr>)(<w:commentReference )'
+        )
         new, count = re.subn(pattern, r"\1<w:annotationRef/>\2", xml)
         assert count == 1, f"expected one reference run to rewrite, found {count}"
         return new
@@ -171,7 +182,9 @@ def _build_mixed_run() -> bytes:
         assert count == 1, f"expected one paragraph to rewrite, found {count}"
         return new
 
-    return _rewrite_document_xml(_document({"p2": ["Margin note on the fee"]}), merge_reference_into_text_run)
+    return _rewrite_document_xml(
+        _document({"p2": ["Margin note on the fee"]}), merge_reference_into_text_run
+    )
 
 
 def _build_struck_span() -> bytes:
@@ -189,7 +202,9 @@ def _build_struck_span() -> bytes:
     document.add_paragraph().add_run(h.TERM_P2)
     document.add_paragraph("Section 2. Notices", style="Heading 1")
     document.add_paragraph().add_run(h.NOTICE_P1)
-    document.add_comment(runs=[struck_run], text="Margin note on the struck span", author="Other Side", initials="OS")
+    document.add_comment(
+        runs=[struck_run], text="Margin note on the struck span", author="Other Side", initials="OS"
+    )
     buf = io.BytesIO()
     document.save(buf)
     return buf.getvalue()
@@ -205,7 +220,9 @@ def _build_spans_paragraphs() -> bytes:
     last = document.add_paragraph().add_run(h.TERM_P2)
     document.add_paragraph("Section 2. Notices", style="Heading 1")
     document.add_paragraph().add_run(h.NOTICE_P1)
-    document.add_comment(runs=[first, last], text="Margin note across both", author="Other Side", initials="OS")
+    document.add_comment(
+        runs=[first, last], text="Margin note across both", author="Other Side", initials="OS"
+    )
     buf = io.BytesIO()
     document.save(buf)
     return buf.getvalue()
@@ -360,7 +377,9 @@ def _deliver(name: str) -> tuple[bytes, dict]:
         h = _harness()
         builder_name = SHAPES[name][1]
         source = globals()[builder_name]()
-        result = h._run_block_mode(h._reconciled(h._multi_edit_response(h._block_ids(source))), source)
+        result = h._run_block_mode(
+            h._reconciled(h._multi_edit_response(h._block_ids(source))), source
+        )
         _DELIVERED[name] = (source, result)
     return _DELIVERED[name]
 
@@ -390,9 +409,13 @@ def check_shape(name: str, mutate=None) -> list[str]:
     # [edit] the redline must have done something to the document.
     report = result.get("analysis_report")
     if report and "issue_changeset_failed" in repr(report):
-        failures.append(f"[{name}] [edit] the redline reported a failed issue changeset: {report!r}")
+        failures.append(
+            f"[{name}] [edit] the redline reported a failed issue changeset: {report!r}"
+        )
     if not (got.has_insertion and got.has_deletion):
-        failures.append(f"[{name}] [edit] the delivered document carries no tracked insertion and deletion")
+        failures.append(
+            f"[{name}] [edit] the delivered document carries no tracked insertion and deletion"
+        )
     if edited:
         for comment_id, was_edited in got.start_paragraph_edited.items():
             if not was_edited:
@@ -456,7 +479,10 @@ def run_all() -> list[str]:
 
 def _rewrite_part(docx_bytes: bytes, part: str, transform) -> bytes:
     out = io.BytesIO()
-    with zipfile.ZipFile(io.BytesIO(docx_bytes)) as src, zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst:
+    with (
+        zipfile.ZipFile(io.BytesIO(docx_bytes)) as src,
+        zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst,
+    ):
         for item in src.infolist():
             data = src.read(item.filename)
             if item.filename == part:
@@ -499,7 +525,11 @@ def _collapse_range(xml: str) -> str:
 def _wrap_reference_in_insertion(xml: str) -> str:
     pattern = r'(<w:r(?: [^>]*)?>(?:(?!</w:r>).)*?<w:commentReference w:id="0"\s*/>.*?</w:r>)'
     wrapped = re.sub(
-        pattern, r'<w:ins w:id="9999" w:author="X" w:date="2026-01-01T00:00:00Z">\1</w:ins>', xml, count=1, flags=re.S
+        pattern,
+        r'<w:ins w:id="9999" w:author="X" w:date="2026-01-01T00:00:00Z">\1</w:ins>',
+        xml,
+        count=1,
+        flags=re.S,
     )
     return _changed(xml, wrapped, "wrap the reference run")
 
@@ -510,35 +540,87 @@ def _drop_comments_relationship(xml: str) -> str:
 
 
 def _drop_comment_body(xml: str) -> str:
-    return _changed(xml, re.sub(r"<w:comment\b.*?</w:comment>", "", xml, flags=re.S), "drop a comment body")
+    return _changed(
+        xml, re.sub(r"<w:comment\b.*?</w:comment>", "", xml, flags=re.S), "drop a comment body"
+    )
 
 
 def _overwrite_author(xml: str) -> str:
-    return _changed(xml, xml.replace('w:author="Other Side"', 'w:author="X"'), "overwrite the author")
+    return _changed(
+        xml, xml.replace('w:author="Other Side"', 'w:author="X"'), "overwrite the author"
+    )
 
 
 #: (label, shape, corruption, the category that must fire).
 MUTATIONS = [
-    ("strip every anchor", "WORD_STANDARD",
-     _doc_xml(lambda x: _changed(x, re.sub(r"<w:commentRange(?:Start|End)\b[^>]*/>|<w:commentReference\b[^>]*/>", "", x), "strip anchors")),
-     "[anchors]"),
-    ("drop one commentRangeEnd", "WORD_STANDARD",
-     _doc_xml(lambda x: _changed(x, re.sub(r"<w:commentRangeEnd\b[^>]*/>", "", x, count=1), "drop a range end")),
-     "[anchors]"),
+    (
+        "strip every anchor",
+        "WORD_STANDARD",
+        _doc_xml(
+            lambda x: _changed(
+                x,
+                re.sub(
+                    r"<w:commentRange(?:Start|End)\b[^>]*/>|<w:commentReference\b[^>]*/>", "", x
+                ),
+                "strip anchors",
+            )
+        ),
+        "[anchors]",
+    ),
+    (
+        "drop one commentRangeEnd",
+        "WORD_STANDARD",
+        _doc_xml(
+            lambda x: _changed(
+                x, re.sub(r"<w:commentRangeEnd\b[^>]*/>", "", x, count=1), "drop a range end"
+            )
+        ),
+        "[anchors]",
+    ),
     ("collapse the range to nothing", "WORD_STANDARD", _doc_xml(_collapse_range), "[anchors]"),
     ("cross-wire two comments' ids", "NESTED_RANGES", _doc_xml(_swap_start_ids), "[anchors]"),
-    ("wrap the reference run in a tracked insertion", "WORD_STANDARD",
-     _doc_xml(_wrap_reference_in_insertion), "[anchors]"),
-    ("deliver the inbound bytes (the redline did nothing)", "WORD_STANDARD", lambda _delivered, source: source, "[edit]"),
-    ("delete a comment body", "WORD_STANDARD",
-     lambda d, _s: _rewrite_part(d, "word/comments.xml", _drop_comment_body), "[bodies]"),
-    ("overwrite a comment's author", "WORD_STANDARD",
-     lambda d, _s: _rewrite_part(d, "word/comments.xml", _overwrite_author), "[bodies]"),
-    ("drop the comments relationship", "WORD_STANDARD",
-     lambda d, _s: _rewrite_part(d, "word/_rels/document.xml.rels", _drop_comments_relationship), "[bodies]"),
-    ("change the deleted text", "WORD_STANDARD",
-     _doc_xml(lambda x: _changed(x, re.sub(r"(<w:delText[^>]*>)[^<]*(</w:delText>)", r"\1ZZZ\2", x), "alter deleted text")),
-     "[reject-all]"),
+    (
+        "wrap the reference run in a tracked insertion",
+        "WORD_STANDARD",
+        _doc_xml(_wrap_reference_in_insertion),
+        "[anchors]",
+    ),
+    (
+        "deliver the inbound bytes (the redline did nothing)",
+        "WORD_STANDARD",
+        lambda _delivered, source: source,
+        "[edit]",
+    ),
+    (
+        "delete a comment body",
+        "WORD_STANDARD",
+        lambda d, _s: _rewrite_part(d, "word/comments.xml", _drop_comment_body),
+        "[bodies]",
+    ),
+    (
+        "overwrite a comment's author",
+        "WORD_STANDARD",
+        lambda d, _s: _rewrite_part(d, "word/comments.xml", _overwrite_author),
+        "[bodies]",
+    ),
+    (
+        "drop the comments relationship",
+        "WORD_STANDARD",
+        lambda d, _s: _rewrite_part(d, "word/_rels/document.xml.rels", _drop_comments_relationship),
+        "[bodies]",
+    ),
+    (
+        "change the deleted text",
+        "WORD_STANDARD",
+        _doc_xml(
+            lambda x: _changed(
+                x,
+                re.sub(r"(<w:delText[^>]*>)[^<]*(</w:delText>)", r"\1ZZZ\2", x),
+                "alter deleted text",
+            )
+        ),
+        "[reject-all]",
+    ),
 ]
 
 
@@ -549,7 +631,9 @@ def mutation_failures() -> list[str]:
     for label, shape, corrupt, tag in MUTATIONS:
         fired = check_shape(shape, mutate=corrupt)
         if not any(tag in failure for failure in fired):
-            failures.append(f"mutation not detected: {label!r} on {shape} did not raise a {tag} failure")
+            failures.append(
+                f"mutation not detected: {label!r} on {shape} did not raise a {tag} failure"
+            )
     return failures
 
 
@@ -564,7 +648,9 @@ def main() -> int:
     if failures:
         print(f"\n{len(failures)} failure(s)")
         return 1
-    print(f"PASS: inbound comment anchors and bodies survive the block redline across {len(SHAPES)} run shapes")
+    print(
+        f"PASS: inbound comment anchors and bodies survive the block redline across {len(SHAPES)} run shapes"
+    )
     return 0
 
 

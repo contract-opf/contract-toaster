@@ -95,7 +95,9 @@ function resolveValue(raw, map, warnings, depth, originName) {
     if (varMatch[2] !== undefined) {
       return resolveValue(varMatch[2], map, warnings, depth + 1, originName);
     }
-    warnings.push(`${originName}: var(${refName}) has no fallback and ${refName} is undefined — skipped`);
+    warnings.push(
+      `${originName}: var(${refName}) has no fallback and ${refName} is undefined — skipped`,
+    );
     return SKIP;
   }
 
@@ -126,11 +128,7 @@ function normalizeHex(hex) {
 
 function hexToRgb(hex) {
   const h = hex.slice(1);
-  return [
-    parseInt(h.slice(0, 2), 16),
-    parseInt(h.slice(2, 4), 16),
-    parseInt(h.slice(4, 6), 16),
-  ];
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
 }
 
 function linearize(c) {
@@ -165,7 +163,12 @@ const PAIRS = [
   { label: '--ct-danger vs --ct-danger-bg', fg: '--ct-danger', bg: '--ct-danger-bg', min: 4.5 },
   { label: '--ct-info vs --ct-info-bg', fg: '--ct-info', bg: '--ct-info-bg', min: 4.5 },
   { label: '--ct-neutral vs --ct-neutral-bg', fg: '--ct-neutral', bg: '--ct-neutral-bg', min: 4.5 },
-  { label: '--ct-accent-contrast vs --ct-accent', fg: '--ct-accent-contrast', bg: '--ct-accent', min: 4.5 },
+  {
+    label: '--ct-accent-contrast vs --ct-accent',
+    fg: '--ct-accent-contrast',
+    bg: '--ct-accent',
+    min: 4.5,
+  },
   {
     label: '--ct-accent vs --ct-bg (UI-component / focus-indicator threshold)',
     fg: '--ct-accent',
@@ -182,7 +185,12 @@ const PAIRS = [
   // original labels because they are the status-token-on-surface
   // thresholds any headline-sized status text still has to clear.
   { label: '--ct-ok vs --ct-bg (outcome headline)', fg: '--ct-ok', bg: '--ct-bg', min: 4.5 },
-  { label: '--ct-ok vs --ct-surface (outcome headline)', fg: '--ct-ok', bg: '--ct-surface', min: 4.5 },
+  {
+    label: '--ct-ok vs --ct-surface (outcome headline)',
+    fg: '--ct-ok',
+    bg: '--ct-surface',
+    min: 4.5,
+  },
   { label: '--ct-warn vs --ct-bg (outcome headline)', fg: '--ct-warn', bg: '--ct-bg', min: 4.5 },
   {
     label: '--ct-warn vs --ct-surface (outcome headline)',
@@ -190,14 +198,24 @@ const PAIRS = [
     bg: '--ct-surface',
     min: 4.5,
   },
-  { label: '--ct-danger vs --ct-bg (outcome headline)', fg: '--ct-danger', bg: '--ct-bg', min: 4.5 },
+  {
+    label: '--ct-danger vs --ct-bg (outcome headline)',
+    fg: '--ct-danger',
+    bg: '--ct-bg',
+    min: 4.5,
+  },
   {
     label: '--ct-danger vs --ct-surface (outcome headline)',
     fg: '--ct-danger',
     bg: '--ct-surface',
     min: 4.5,
   },
-  { label: '--ct-accent vs --ct-bg (outcome headline)', fg: '--ct-accent', bg: '--ct-bg', min: 4.5 },
+  {
+    label: '--ct-accent vs --ct-bg (outcome headline)',
+    fg: '--ct-accent',
+    bg: '--ct-bg',
+    min: 4.5,
+  },
   {
     label: '--ct-accent vs --ct-surface (outcome headline)',
     fg: '--ct-accent',
@@ -247,9 +265,14 @@ function main() {
   const nightMap = { ...dayMap, ...nightOverrides };
 
   const driftKeys = [];
-  for (const key of new Set([...Object.keys(nightOverrides), ...Object.keys(nightMediaOverrides)])) {
+  for (const key of new Set([
+    ...Object.keys(nightOverrides),
+    ...Object.keys(nightMediaOverrides),
+  ])) {
     if (nightOverrides[key] !== nightMediaOverrides[key]) {
-      driftKeys.push(`${key}: [data-theme='dark'] has "${nightOverrides[key]}", @media block has "${nightMediaOverrides[key]}"`);
+      driftKeys.push(
+        `${key}: [data-theme='dark'] has "${nightOverrides[key]}", @media block has "${nightMediaOverrides[key]}"`,
+      );
     }
   }
 
@@ -269,9 +292,7 @@ function main() {
       const pass = ratio >= pair.min;
       results.push({ theme: themeName, ...pair, ratio, pass });
       if (!pass) {
-        failures.push(
-          `[${themeName}] ${pair.label}: ${ratio.toFixed(2)}:1 (need ${pair.min}:1)`,
-        );
+        failures.push(`[${themeName}] ${pair.label}: ${ratio.toFixed(2)}:1 (need ${pair.min}:1)`);
       }
     }
   }
@@ -283,9 +304,13 @@ function main() {
   }
 
   if (driftKeys.length > 0) {
-    console.error("\nFAIL: :root[data-theme='dark'] and the @media(prefers-color-scheme: dark) block have drifted apart:");
+    console.error(
+      "\nFAIL: :root[data-theme='dark'] and the @media(prefers-color-scheme: dark) block have drifted apart:",
+    );
     for (const d of driftKeys) console.error(`  - ${d}`);
-    console.error('\ntokens.css documents these as required to stay identical — fix one to match the other.');
+    console.error(
+      '\ntokens.css documents these as required to stay identical — fix one to match the other.',
+    );
     process.exitCode = 1;
     return;
   }

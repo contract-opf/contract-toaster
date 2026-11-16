@@ -125,9 +125,7 @@ describe('#133 — the History tab', () => {
       expect(cell.textContent).not.toContain('MANUAL_REVIEW_REQUIRED');
       expect(cell.textContent?.toLowerCase()).not.toContain('manual review');
     }
-    expect(screen.getByTestId('history-outcome-rev-done').textContent).not.toContain(
-      FAILED.label,
-    );
+    expect(screen.getByTestId('history-outcome-rev-done').textContent).not.toContain(FAILED.label);
   });
 
   it('lists legacy rows under the "Failed / Stopped" filter, with the modern failure', async () => {

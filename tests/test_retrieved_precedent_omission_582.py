@@ -192,9 +192,10 @@ def test_nonempty_precedent_still_composes_the_block_plain_string(failures: list
         failures.append(
             f"[2d] Manifest block order changed when precedent is non-empty: {dict(zip(required_tags_in_order, positions))}"  # noqa: B905
         )
-    if pp.UNTRUSTED_BLOCK_WARNING not in prompt.split("<RETRIEVED_PRECEDENT>")[0].split(
-        "<ANCHORED_CLAUSES>"
-    )[-1]:
+    if (
+        pp.UNTRUSTED_BLOCK_WARNING
+        not in prompt.split("<RETRIEVED_PRECEDENT>")[0].split("<ANCHORED_CLAUSES>")[-1]
+    ):
         failures.append(
             "[2e] The RETRIEVED_PRECEDENT block must still carry the "
             "untrusted-input warning immediately before it."
@@ -207,7 +208,9 @@ def test_nonempty_precedent_still_composes_the_block_cached_path(failures: list[
         doc_text="Section 8. Aggregate liability shall not exceed $75,000.",
         prompt_caching_enabled=True,
     )
-    pass_specific_text = content[-1].get("text", "") if isinstance(content, list) and content else ""
+    pass_specific_text = (
+        content[-1].get("text", "") if isinstance(content, list) and content else ""
+    )
     if "<RETRIEVED_PRECEDENT>" not in pass_specific_text:
         failures.append(
             "[2f] The prompt-caching path's pass-specific block must still "

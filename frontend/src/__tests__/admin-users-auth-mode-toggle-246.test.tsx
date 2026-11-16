@@ -175,12 +175,10 @@ describe('AdminUsers — auth-mode toggle renders server-supplied choices (#246)
     await screen.findByTestId('user-row-sub-reviewer');
 
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
-    const select = (await screen.findByTestId(
-      'admin-users-auth-mode-select',
-    )) as HTMLSelectElement;
-    expect(Array.from(select.options).map((o) => ({ value: o.value, label: o.textContent }))).toEqual(
-      AUTH_MODE_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
-    );
+    const select = (await screen.findByTestId('admin-users-auth-mode-select')) as HTMLSelectElement;
+    expect(
+      Array.from(select.options).map((o) => ({ value: o.value, label: o.textContent })),
+    ).toEqual(AUTH_MODE_OPTIONS.map((o) => ({ value: o.value, label: o.label })));
     expect(select.value).toBe('sso');
   });
 
@@ -195,9 +193,7 @@ describe('AdminUsers — auth-mode toggle renders server-supplied choices (#246)
     await screen.findByTestId('user-row-sub-reviewer');
 
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
-    const select = (await screen.findByTestId(
-      'admin-users-auth-mode-select',
-    )) as HTMLSelectElement;
+    const select = (await screen.findByTestId('admin-users-auth-mode-select')) as HTMLSelectElement;
     expect(select.value).toBe('');
     expect(Array.from(select.options).map((o) => o.value)).not.toContain('legacy-mode');
     expect(select.options[0].disabled).toBe(true);

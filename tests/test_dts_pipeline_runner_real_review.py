@@ -138,7 +138,9 @@ _DOC_NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main
 
 
 def _heading_p(text: str, level: int = 1) -> str:
-    return f'<w:p><w:pPr><w:pStyle w:val="Heading{level}"/></w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>'
+    return (
+        f'<w:p><w:pPr><w:pStyle w:val="Heading{level}"/></w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>'
+    )
 
 
 def _body_p(text: str) -> str:
@@ -347,8 +349,14 @@ class FakeReviewsTable:
     def __init__(self, status: str = "PENDING"):
         self.item: dict[str, Any] = {"review_id": REVIEW_ID, "status": status}
 
-    def update_item(self, Key, UpdateExpression, ConditionExpression=None,
-                     ExpressionAttributeNames=None, ExpressionAttributeValues=None):
+    def update_item(
+        self,
+        Key,
+        UpdateExpression,
+        ConditionExpression=None,
+        ExpressionAttributeNames=None,
+        ExpressionAttributeValues=None,
+    ):
         names = ExpressionAttributeNames or {}
         values = ExpressionAttributeValues or {}
         cur_status = self.item.get("status")
@@ -434,11 +442,13 @@ def _payload(playbook_id: str = "synthetic-generic") -> dict[str, Any]:
 
 class TestDefaultRunnerSelectsRealVsMock(unittest.TestCase):
     def test_openrouter_flag_selects_real_pipeline(self) -> None:
-        with patch.object(pr, "run_real_pipeline") as real, \
-             patch.object(pr, "run_mock_pipeline") as mock, \
-             patch.object(pr, "_ddb_resource", return_value="ddb"), \
-             patch.object(pr, "_s3_client", return_value="s3"), \
-             patch.dict(os.environ, {"MODEL_PROVIDER": "openrouter"}):
+        with (
+            patch.object(pr, "run_real_pipeline") as real,
+            patch.object(pr, "run_mock_pipeline") as mock,
+            patch.object(pr, "_ddb_resource", return_value="ddb"),
+            patch.object(pr, "_s3_client", return_value="s3"),
+            patch.dict(os.environ, {"MODEL_PROVIDER": "openrouter"}),
+        ):
             pr.InProcessStepFunctionsClient._default_runner(REVIEW_ID, _payload())
         real.assert_called_once()
         mock.assert_not_called()
@@ -446,11 +456,13 @@ class TestDefaultRunnerSelectsRealVsMock(unittest.TestCase):
     def test_unset_flag_keeps_selecting_mock_pipeline(self) -> None:
         env = dict(os.environ)
         env.pop("MODEL_PROVIDER", None)
-        with patch.object(pr, "run_real_pipeline") as real, \
-             patch.object(pr, "run_mock_pipeline") as mock, \
-             patch.object(pr, "_ddb_resource", return_value="ddb"), \
-             patch.object(pr, "_s3_client", return_value="s3"), \
-             patch.dict(os.environ, env, clear=True):
+        with (
+            patch.object(pr, "run_real_pipeline") as real,
+            patch.object(pr, "run_mock_pipeline") as mock,
+            patch.object(pr, "_ddb_resource", return_value="ddb"),
+            patch.object(pr, "_s3_client", return_value="s3"),
+            patch.dict(os.environ, env, clear=True),
+        ):
             pr.InProcessStepFunctionsClient._default_runner(REVIEW_ID, _payload())
         mock.assert_called_once()
         real.assert_not_called()
@@ -475,8 +487,10 @@ class TestRunRealPipeline(unittest.TestCase):
 
         with patch.object(pr, "_settle_reservation") as settle:
             pr.run_real_pipeline(
-                REVIEW_ID, _payload(),
-                dynamodb_resource=FakeDDB(reviews_table), s3_client=s3,
+                REVIEW_ID,
+                _payload(),
+                dynamodb_resource=FakeDDB(reviews_table),
+                s3_client=s3,
                 model_client=client,
             )
 
@@ -499,8 +513,10 @@ class TestRunRealPipeline(unittest.TestCase):
 
         with patch.object(pr, "_settle_reservation"):
             pr.run_real_pipeline(
-                REVIEW_ID, _payload(),
-                dynamodb_resource=FakeDDB(reviews_table), s3_client=s3,
+                REVIEW_ID,
+                _payload(),
+                dynamodb_resource=FakeDDB(reviews_table),
+                s3_client=s3,
                 model_client=client,
             )
 
@@ -562,8 +578,10 @@ class TestRunRealPipeline(unittest.TestCase):
 
         with patch.object(pr, "_settle_reservation") as settle:
             pr.run_real_pipeline(
-                REVIEW_ID, _payload(),
-                dynamodb_resource=FakeDDB(reviews_table), s3_client=s3,
+                REVIEW_ID,
+                _payload(),
+                dynamodb_resource=FakeDDB(reviews_table),
+                s3_client=s3,
                 model_client=client,
             )
 
@@ -571,7 +589,8 @@ class TestRunRealPipeline(unittest.TestCase):
         # output_object above: a REQUEST_CHANGE that DID persist an object
         # stays DONE, untouched by this fix.
         self.assertNotEqual(
-            reviews_table.item["status"], "DONE",
+            reviews_table.item["status"],
+            "DONE",
             "A REQUEST_CHANGE with no output object must not report DONE.",
         )
         self.assertEqual(reviews_table.item["status"], "ERROR")
@@ -618,8 +637,10 @@ class TestRunRealPipeline(unittest.TestCase):
 
         with patch.object(pr, "_settle_reservation") as settle:
             pr.run_real_pipeline(
-                REVIEW_ID, _payload(),
-                dynamodb_resource=FakeDDB(reviews_table), s3_client=s3,
+                REVIEW_ID,
+                _payload(),
+                dynamodb_resource=FakeDDB(reviews_table),
+                s3_client=s3,
                 model_client=object(),
             )
 
@@ -637,12 +658,15 @@ class TestRunRealPipeline(unittest.TestCase):
         empty_playbooks = FakePlaybooksTable({})  # nothing active anywhere
         s3 = FakeS3({f"uploads/user-1/{REVIEW_ID}/in.docx": b"must never be read"})
 
-        with patch.object(pr, "_settle_reservation") as settle, patch.object(
-            pr, "_load_playbook_bundle"
-        ) as load_bundle:
+        with (
+            patch.object(pr, "_settle_reservation") as settle,
+            patch.object(pr, "_load_playbook_bundle") as load_bundle,
+        ):
             pr.run_real_pipeline(
-                REVIEW_ID, _payload(),
-                dynamodb_resource=FakeDDB(reviews_table, empty_playbooks), s3_client=s3,
+                REVIEW_ID,
+                _payload(),
+                dynamodb_resource=FakeDDB(reviews_table, empty_playbooks),
+                s3_client=s3,
                 model_client=object(),
             )
 
@@ -784,9 +808,7 @@ class TestDecisionNeverWrittenBesideANonDoneStatus95(unittest.TestCase):
         for status_value in ("ERROR", "CANCELLED"):
             for decision_value in ("ACCEPT", "REQUEST_CHANGE"):
                 with self.subTest(status=status_value, decision=decision_value):
-                    table = self._write(
-                        {"status": status_value, "decision": decision_value}
-                    )
+                    table = self._write({"status": status_value, "decision": decision_value})
                     self.assertEqual(table.item["status"], status_value)
                     self.assertNotIn("decision", table.item)
 

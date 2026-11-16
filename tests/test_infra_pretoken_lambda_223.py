@@ -164,12 +164,15 @@ def check_synth_exits_zero() -> tuple[list[str], subprocess.CompletedProcess | N
 
 
 def check_defect_a_no_cryptography_dependency(zip_file_source: str) -> list[str]:
-    print("\nCheck 2 (defect a): pre-token Lambda source has no unavailable "
-          "'cryptography' dependency …")
+    print(
+        "\nCheck 2 (defect a): pre-token Lambda source has no unavailable "
+        "'cryptography' dependency …"
+    )
     failures: list[str] = []
 
     real_import_lines = [
-        line for line in zip_file_source.splitlines()
+        line
+        for line in zip_file_source.splitlines()
         if line.strip().startswith("from cryptography")
         or line.strip().startswith("import cryptography")
     ]
@@ -185,8 +188,7 @@ def check_defect_a_no_cryptography_dependency(zip_file_source: str) -> list[str]
     # Positive check: the pure-Python replacement signer must actually be present
     # (not merely deleted with nothing standing in for it).
     has_pure_python_signer = (
-        "_rsa_sign_sha256" in zip_file_source
-        and "_rsa_private_key_from_pem" in zip_file_source
+        "_rsa_sign_sha256" in zip_file_source and "_rsa_private_key_from_pem" in zip_file_source
     )
     failures += _assert(
         has_pure_python_signer,
@@ -200,8 +202,10 @@ def check_defect_a_no_cryptography_dependency(zip_file_source: str) -> list[str]
 
 
 def check_defect_b_impersonates_real_user(zip_file_source: str) -> list[str]:
-    print("\nCheck 3 (defect b): domain-wide-delegation JWT impersonates a real "
-          "Workspace admin user, not the group address …")
+    print(
+        "\nCheck 3 (defect b): domain-wide-delegation JWT impersonates a real "
+        "Workspace admin user, not the group address …"
+    )
     failures: list[str] = []
 
     sets_sub_to_group = '"sub": LEGAL_ADMIN_GROUP' in zip_file_source
@@ -229,16 +233,17 @@ def check_defect_b_impersonates_real_user(zip_file_source: str) -> list[str]:
 
 
 def check_defect_c_dynamodb_write_grant(template: dict, role_logical_id: str) -> list[str]:
-    print("\nCheck 4 (defect c): pre-token Lambda role is granted "
-          "dynamodb:PutItem + dynamodb:UpdateItem on the users table …")
+    print(
+        "\nCheck 4 (defect c): pre-token Lambda role is granted "
+        "dynamodb:PutItem + dynamodb:UpdateItem on the users table …"
+    )
     failures: list[str] = []
 
     policies = _find_role_policies(template, role_logical_id)
     failures += _assert(
         bool(policies),
         "At least one AWS::IAM::Policy is attached to the PreTokenLambda role",
-        f"No AWS::IAM::Policy resource found with Roles containing a Ref to "
-        f"{role_logical_id!r}.",
+        f"No AWS::IAM::Policy resource found with Roles containing a Ref to {role_logical_id!r}.",
     )
     if not policies:
         return failures
@@ -246,7 +251,9 @@ def check_defect_c_dynamodb_write_grant(template: dict, role_logical_id: str) ->
     granted_actions: set[str] = set()
     dynamodb_resources: list = []
     for policy in policies:
-        for statement in policy.get("Properties", {}).get("PolicyDocument", {}).get("Statement", []):
+        for statement in (
+            policy.get("Properties", {}).get("PolicyDocument", {}).get("Statement", [])
+        ):
             if statement.get("Effect") != "Allow":
                 continue
             actions = statement.get("Action", [])
@@ -262,8 +269,7 @@ def check_defect_c_dynamodb_write_grant(template: dict, role_logical_id: str) ->
 
     failures += _assert(
         has_put and has_update,
-        "PreTokenLambda role policy grants both dynamodb:PutItem and "
-        "dynamodb:UpdateItem",
+        "PreTokenLambda role policy grants both dynamodb:PutItem and dynamodb:UpdateItem",
         "Per issue #223 defect (c): the JIT-create path "
         "(_jit_create_user_row) needs PutItem (conditional create on first "
         f"sign-in) and UpdateItem (last_auth_at bump on repeat sign-in). "
@@ -311,8 +317,7 @@ def main() -> int:
     found = _find_pre_token_lambda(template)
     all_failures += _assert(
         found is not None,
-        "PreTokenLambda AWS::Lambda::Function resource found in the synthesized "
-        "AuthStack template",
+        "PreTokenLambda AWS::Lambda::Function resource found in the synthesized AuthStack template",
     )
     if found is None:
         print("\n" + "=" * 60)

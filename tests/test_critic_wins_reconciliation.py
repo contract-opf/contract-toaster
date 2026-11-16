@@ -365,7 +365,9 @@ def test_a_dropped_hard_rejection_is_retained_in_reconcile(failures: list[str]) 
     elif retained[0].get("issue_key") == "I1":
         failures.append("[2c] H kept a key the critic's own issue (and transcript) uses")
     if result["decision"] != "REQUEST_CHANGE":
-        failures.append(f"[2d] a retained hard rejection forces REQUEST_CHANGE; got {result['decision']!r}")
+        failures.append(
+            f"[2d] a retained hard rejection forces REQUEST_CHANGE; got {result['decision']!r}"
+        )
     if result.get("block_patches") != critic["block_patches"]:
         failures.append(
             "[2e] the forwarded transcript must be the critic's alone -- H's primary "
@@ -388,9 +390,7 @@ def test_a_dropped_hard_rejection_is_retained_in_reconcile(failures: list[str]) 
         primary_result=soft, critic_result=accept, hard_rejection_rule_ids=hard_ids
     )
     if softened["issues"] or softened["decision"] != "ACCEPT":
-        failures.append(
-            f"[2h] a dropped non-hard issue must not survive the critic: {softened!r}"
-        )
+        failures.append(f"[2h] a dropped non-hard issue must not survive the critic: {softened!r}")
 
 
 def test_a_dropped_hard_rejection_is_retained_end_to_end(failures: list[str]) -> None:
@@ -407,9 +407,9 @@ def test_a_dropped_hard_rejection_is_retained_end_to_end(failures: list[str]) ->
             f"reason={result.get('reason')!r}"
         )
     findings = result.get("findings") or []
-    if [
-        (f.get("playbook_topic_id"), f.get("provenance")) for f in findings
-    ] != [(HARD_RULE_ID, recon.PROVENANCE_PRIMARY_RETAINED)]:
+    if [(f.get("playbook_topic_id"), f.get("provenance")) for f in findings] != [
+        (HARD_RULE_ID, recon.PROVENANCE_PRIMARY_RETAINED)
+    ]:
         failures.append(f"[2j] H must be the one finding, primary-retained: {findings!r}")
     redline = result.get("redline_bytes")
     if redline and TEXT_A in _document_xml(redline):
@@ -460,7 +460,9 @@ def test_a_failed_critic_fails_the_review(failures: list[str]) -> None:
     if result.get("status") != "ERROR":
         failures.append(f"[4a] a failed critic must fail the review; got {result.get('status')!r}")
     if result.get("reason") != review_spine.REASON_CRITIC_SCHEMA_INVALID:
-        failures.append(f"[4b] the status must carry the critic's reason; got {result.get('reason')!r}")
+        failures.append(
+            f"[4b] the status must carry the critic's reason; got {result.get('reason')!r}"
+        )
     if result.get("redline_bytes") is not None or result.get("findings"):
         failures.append("[4c] no redline and no findings when the critic fails")
 
@@ -619,7 +621,9 @@ def test_each_instance_of_a_hard_rule_is_retained(failures: list[str]) -> None:
     if len(keys) != len(set(keys)):
         failures.append(f"[8b] the final issues repeat an issue_key: {keys!r}")
     if result["decision"] != "REQUEST_CHANGE":
-        failures.append(f"[8c] a retained hard rejection forces REQUEST_CHANGE; got {result['decision']!r}")
+        failures.append(
+            f"[8c] a retained hard rejection forces REQUEST_CHANGE; got {result['decision']!r}"
+        )
     dropped = [
         (o.get("issue_id"), o.get("retained"))
         for o in _overrides(result, recon.OVERRIDE_SOURCE_COMPUTED)
@@ -649,7 +653,10 @@ def test_a_keep_whose_issue_is_absent_fails_closed_at_the_merger(failures: list[
             failures.append(
                 f"[9a] a {disposition} over an absent issue must fail closed: {composed!r}"
             )
-        if review_spine.critic_failure_reason(composed) != review_spine.REASON_CRITIC_SCHEMA_INVALID:
+        if (
+            review_spine.critic_failure_reason(composed)
+            != review_spine.REASON_CRITIC_SCHEMA_INVALID
+        ):
             failures.append(
                 f"[9b] a {disposition} over an absent issue must read as critic_schema_invalid; "
                 f"got {review_spine.critic_failure_reason(composed)!r}"
@@ -660,9 +667,7 @@ def test_a_keep_whose_issue_is_absent_fails_closed_at_the_merger(failures: list[
     # Not over-eager: a KEEP whose issue the critic restated under a re-worded
     # section reference still pairs (on the topic) and is carried.
     reworded = json.loads(
-        _response(
-            [_sec8_issue(section_ref="Section 8")], [], critic_delta=_delta([("I1", "KEEP")])
-        )
+        _response([_sec8_issue(section_ref="Section 8")], [], critic_delta=_delta([("I1", "KEEP")]))
     )
     try:
         kept = recon.reconcile(primary_result=primary, critic_result=reworded)
@@ -838,9 +843,7 @@ def test_every_audit_record_text_is_scanned(failures: list[str]) -> None:
     # segment itself.
     removed = f"{_SEC8_DRAFT_TEXT} {leaked}"
     clean = recon.reconcile(
-        primary_result=json.loads(
-            _response(sec8, [_replace_text("p0001", removed, TEXT_A)])
-        ),
+        primary_result=json.loads(_response(sec8, [_replace_text("p0001", removed, TEXT_A)])),
         critic_result=json.loads(
             _response(sec8, [_replace_text("p0001", removed, TEXT_B)], critic_delta=_revise())
         ),
@@ -859,9 +862,7 @@ def test_every_audit_record_text_is_scanned(failures: list[str]) -> None:
     outcome = ls.scan_model_output(
         {
             "critic_delta": {
-                "overrides": [
-                    {"source": recon.OVERRIDE_SOURCE_COMPUTED, "primary_edits": leaked}
-                ]
+                "overrides": [{"source": recon.OVERRIDE_SOURCE_COMPUTED, "primary_edits": leaked}]
             }
         },
         corpus,
@@ -916,10 +917,7 @@ def test_a_planted_audit_record_gram_never_reaches_the_analysis_artifact(
     ]
     for label, primary, critic in cases:
         result = _run(docx_bytes, primary, [critic])
-        if (
-            result.get("status") != "ERROR"
-            or result.get("reason") != "leakage_detected"
-        ):
+        if result.get("status") != "ERROR" or result.get("reason") != "leakage_detected":
             failures.append(
                 f"[10f] a playbook gram in {label} must fail the review as leakage_detected; got "
                 f"status={result.get('status')!r} reason={result.get('reason')!r}"
@@ -973,7 +971,9 @@ def test_a_dropped_floor_invariant_issue_is_retained_in_an_opf_review(
         return
     invariant_id = floor_invariants[0]["id"]
     if invariant_id not in recon.hard_rejection_rule_ids(bundle, floor_invariants):
-        failures.append(f"[11b] {invariant_id!r} must resolve as a hard-rejection id from the Floor")
+        failures.append(
+            f"[11b] {invariant_id!r} must resolve as a hard-rejection id from the Floor"
+        )
     if recon.hard_rejection_rule_ids(bundle):
         failures.append("[11c] setup: an OPF bundle must supply no v1 hard_rejections ids")
 
@@ -1003,7 +1003,9 @@ def test_a_dropped_floor_invariant_issue_is_retained_in_an_opf_review(
         (f.get("playbook_topic_id"), f.get("provenance")) for f in result.get("findings") or []
     ]
     if findings != [(invariant_id, recon.PROVENANCE_PRIMARY_RETAINED)]:
-        failures.append(f"[11e] the Floor issue must be the one finding, primary-retained: {findings!r}")
+        failures.append(
+            f"[11e] the Floor issue must be the one finding, primary-retained: {findings!r}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1111,7 +1113,14 @@ def test_a_dropped_issue_never_pairs_in_reconcile(failures: list[str]) -> None:
             hard_rejection_rule_ids=hard_ids,
         )
         _check_drop_vs_pairing(
-            "12a", label, result["issues"], result.get("critic_delta"), shape, dropped, added, failures
+            "12a",
+            label,
+            result["issues"],
+            result.get("critic_delta"),
+            shape,
+            dropped,
+            added,
+            failures,
         )
         if result["decision"] != "REQUEST_CHANGE":
             failures.append(f"[12a] {label}: expected REQUEST_CHANGE; got {result['decision']!r}")
@@ -1143,7 +1152,6 @@ def test_a_dropped_issue_never_pairs_end_to_end(failures: list[str]) -> None:
             failures.append(f"[12b] {label}: the primary's edit shipped on its own")
 
 
-
 # ---------------------------------------------------------------------------
 # 13. A guard-1 addition never ships under a no-change summary (issue #156).
 # ---------------------------------------------------------------------------
@@ -1166,7 +1174,9 @@ def _check_guard_one_summary(
         failures.append(f"[{row}] {label}: the summary still reads as no-change: {summary!r}")
     for text in (_SEC8_DRAFT_TEXT, TEXT_A, TEXT_B, HARD_RULE_ID, _hard_rule_description()):
         if text in summary:
-            failures.append(f"[{row}] {label}: the summary carries clause or rule text: {summary!r}")
+            failures.append(
+                f"[{row}] {label}: the summary carries clause or rule text: {summary!r}"
+            )
     if html.escape(summary) != summary:
         failures.append(f"[{row}] {label}: the summary is not markup-free: {summary!r}")
 
@@ -1179,9 +1189,7 @@ def test_a_retained_hard_rejection_never_ships_a_no_change_summary_end_to_end(
     summary)."""
     docx_bytes, block_id = _draft()
     primary = _response([_hard_issue()], [_replace_sec8(block_id, TEXT_A)])
-    critic = _response(
-        [], [], critic_delta=_delta([("I1", "DROP")]), summary=NO_CHANGE_SUMMARY
-    )
+    critic = _response([], [], critic_delta=_delta([("I1", "DROP")]), summary=NO_CHANGE_SUMMARY)
     result = _run(docx_bytes, primary, [critic])
     if result.get("status") != "OK" or result.get("decision") != "REQUEST_CHANGE":
         failures.append(
@@ -1194,7 +1202,9 @@ def test_a_retained_hard_rejection_never_ships_a_no_change_summary_end_to_end(
         "Changes are requested: 1 playbook hard rejection from the first review "
         "was retained after the second review dropped it."
     )
-    _check_guard_one_summary("13a", "critic ACCEPT, one retained", result.get("summary"), expected, failures)
+    _check_guard_one_summary(
+        "13a", "critic ACCEPT, one retained", result.get("summary"), expected, failures
+    )
 
 
 def test_a_guard_one_addition_names_itself_in_reconcile(failures: list[str]) -> None:
@@ -1300,13 +1310,16 @@ def test_a_guard_one_addition_names_itself_in_reconcile(failures: list[str]) -> 
             hard_rejection_rule_ids=hard_ids,
         )
         if result["decision"] != decision:
-            failures.append(f"[13b] {label}: decision {result['decision']!r}, expected {decision!r}")
+            failures.append(
+                f"[13b] {label}: decision {result['decision']!r}, expected {decision!r}"
+            )
         summary = result.get("verdict_summary")
         if expected in (NO_CHANGE_SUMMARY, CRITIC_CHANGE_SUMMARY):
             if summary != expected:
                 failures.append(f"[13b] {label}: the critic's summary was rewritten: {summary!r}")
             continue
         _check_guard_one_summary("13b", label, summary, expected, failures)
+
 
 TESTS = [
     test_the_redline_carries_the_critics_text,

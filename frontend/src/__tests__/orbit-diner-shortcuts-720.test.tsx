@@ -214,9 +214,9 @@ describe('issue #720 — a dialog owns its own keys', () => {
     const before = soundKey?.getAttribute('aria-label');
     expect(before).toContain('App sounds on');
     expect(fireEvent.keyDown(inner, { key: 'm', metaKey: true, shiftKey: true })).toBe(true);
-    expect(
-      document.querySelector('[aria-label^="App sounds"]')?.getAttribute('aria-label'),
-    ).toBe(before);
+    expect(document.querySelector('[aria-label^="App sounds"]')?.getAttribute('aria-label')).toBe(
+      before,
+    );
   });
 
   it('Escape inside a dialog does not eject the file', async () => {
@@ -246,9 +246,9 @@ describe('issue #720 — a dialog owns its own keys', () => {
     const before = soundKey?.getAttribute('aria-label');
 
     expect(fireEvent.keyDown(pad, { key: 'm' })).toBe(true);
-    expect(
-      document.querySelector('[aria-label^="App sounds"]')?.getAttribute('aria-label'),
-    ).toBe(before);
+    expect(document.querySelector('[aria-label^="App sounds"]')?.getAttribute('aria-label')).toBe(
+      before,
+    );
   });
 });
 

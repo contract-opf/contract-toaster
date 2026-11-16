@@ -153,9 +153,7 @@ describe('issue #723 — a resumed review plays no lever motion and no lever sou
 
     expect(sounded(onSound)).toContain('submit-accepted');
     expect(
-      animations.some(
-        (call) => (call.element as HTMLElement).dataset.part === 'lever-handle',
-      ),
+      animations.some((call) => (call.element as HTMLElement).dataset.part === 'lever-handle'),
     ).toBe(true);
   });
 
@@ -168,9 +166,7 @@ describe('issue #723 — a resumed review plays no lever motion and no lever sou
     // review was already running when the page loaded.
     expect(sounded(onSound)).not.toContain('submit-accepted');
     expect(
-      animations.some(
-        (call) => (call.element as HTMLElement).dataset.part === 'lever-handle',
-      ),
+      animations.some((call) => (call.element as HTMLElement).dataset.part === 'lever-handle'),
     ).toBe(false);
   });
 
@@ -273,7 +269,12 @@ describe('issue #723 — two consoles mounted at once stay independent', () => {
     const view = render(tree(start, start));
     const roots = Array.from(document.querySelectorAll<HTMLElement>('.od-console'));
     expect(roots).toHaveLength(2);
-    return { roots, onSoundA, onSoundB, rerender: (a: ReviewModel, b: ReviewModel) => view.rerender(tree(a, b)) };
+    return {
+      roots,
+      onSoundA,
+      onSoundB,
+      rerender: (a: ReviewModel, b: ReviewModel) => view.rerender(tree(a, b)),
+    };
   };
 
   it('no id minted by one console appears in the other', () => {

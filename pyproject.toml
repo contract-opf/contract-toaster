@@ -60,6 +60,18 @@ external = ["A002", "ANN001", "ARG001", "ARG002", "N801", "N802", "N803", "PLC04
 # the contract, not a smell.
 "scripts/pre-push-confidentiality.py" = ["S603", "S607", "BLE001"]
 
+[tool.ruff.format]
+# Everything under the lint roots is formatted EXCEPT scripts/pre-push-confidentiality.py,
+# which is kept byte-identical to the playbook-engine copy it is vendored from
+# (see the per-file-ignores above). It happens to satisfy the formatter today;
+# the exclusion is so a future re-vendor of the engine's file can never turn this
+# repo's gate red. Defaults otherwise: line-length comes from [tool.ruff], and
+# quote style and magic-trailing-comma are ruff's own. Do not add a second
+# exclusion without naming, here, why that file must stay as it is.
+# `*.md`: ruff 0.16 also reformats the Python fences inside Markdown. Prose and
+# its examples are not code under this gate, so they are left as written.
+exclude = ["scripts/pre-push-confidentiality.py", "*.md"]
+
 [tool.mypy]
 python_version = "3.13"
 strict = true

@@ -26,7 +26,9 @@ class ReadmeOpfPointers(unittest.TestCase):
     def test_the_author_your_own_instruction_does_not_name_the_v1_schema(self) -> None:
         (line,) = [ln for ln in README.splitlines() if ln.startswith("- **Author your own:**")]
         self.assertNotIn("playbooks/schema.json", line)
-        self.assertTrue(re.search(r"OPF\]\(https://github\.com/contract-opf/opf\) 0\.6", line), line)
+        self.assertTrue(
+            re.search(r"OPF\]\(https://github\.com/contract-opf/opf\) 0\.6", line), line
+        )
 
 
 if __name__ == "__main__":

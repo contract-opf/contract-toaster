@@ -61,7 +61,9 @@ _DOC_NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main
 
 
 def _heading_p(text: str, level: int = 1) -> str:
-    return f'<w:p><w:pPr><w:pStyle w:val="Heading{level}"/></w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>'
+    return (
+        f'<w:p><w:pPr><w:pStyle w:val="Heading{level}"/></w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>'
+    )
 
 
 def _body_p(text: str) -> str:
@@ -166,9 +168,7 @@ def main() -> None:
         ],
         "must_not_flag": [],
         "fp_tolerance": 0,
-        "redline_checks": [
-            {"anchor": "sec-10-non-exclusive", "source_text_hash": redline_hash}
-        ],
+        "redline_checks": [{"anchor": "sec-10-non-exclusive", "source_text_hash": redline_hash}],
         "case_type": "document_level",
         "synthetic": True,
         "gc_signoff": "pending",

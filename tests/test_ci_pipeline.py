@@ -132,28 +132,52 @@ def check_cicd_stack() -> list[str]:
 
     # Image signing
     failures += _assert(
-        bool(re.search(r"sign|cosign|Cosign|Notation|notation|signer|Signer|ECRSigning", text, re.IGNORECASE)),
+        bool(
+            re.search(
+                r"sign|cosign|Cosign|Notation|notation|signer|Signer|ECRSigning",
+                text,
+                re.IGNORECASE,
+            )
+        ),
         "cicd-stack.ts references image signing",
         "Per AC: on success, the CI builds a container image, signs it, and pushes it to ECR.",
     )
 
     # Signature verification before promote
     failures += _assert(
-        bool(re.search(r"verif|Verif|unsigned.*cannot|cannot.*unsigned|verify.*sign|sign.*verify", text, re.IGNORECASE)),
+        bool(
+            re.search(
+                r"verif|Verif|unsigned.*cannot|cannot.*unsigned|verify.*sign|sign.*verify",
+                text,
+                re.IGNORECASE,
+            )
+        ),
         "cicd-stack.ts references signature verification (unsigned digest cannot be promoted)",
         "Per AC: image signatures are verified at/before deploy; unsigned digest cannot be promoted.",
     )
 
     # Digest-promotion mechanism
     failures += _assert(
-        bool(re.search(r"promot|Promot|digest.*update|update.*digest|SSM|ParameterStore|parameter.*store", text, re.IGNORECASE)),
+        bool(
+            re.search(
+                r"promot|Promot|digest.*update|update.*digest|SSM|ParameterStore|parameter.*store",
+                text,
+                re.IGNORECASE,
+            )
+        ),
         "cicd-stack.ts defines a digest-promotion mechanism",
         "Per AC: promotion to a new digest is a deliberate, audited step.",
     )
 
     # Promotion audit row
     failures += _assert(
-        bool(re.search(r"audit|Audit|promotion.*log|log.*promotion|who.*promot|promot.*who", text, re.IGNORECASE)),
+        bool(
+            re.search(
+                r"audit|Audit|promotion.*log|log.*promotion|who.*promot|promot.*who",
+                text,
+                re.IGNORECASE,
+            )
+        ),
         "cicd-stack.ts references promotion audit (who promoted which digest, when)",
         "Per AC: the promotion writes an audit row (who promoted which digest, when).",
     )
@@ -163,7 +187,9 @@ def check_cicd_stack() -> list[str]:
 
 def check_ci_workflow() -> list[str]:
     """Check B: GitHub Actions CI workflow exists with required steps."""
-    print("Check B: .github/workflows/ci-pipeline.yml — tests, lint, scan, build/sign/push, audit …")
+    print(
+        "Check B: .github/workflows/ci-pipeline.yml — tests, lint, scan, build/sign/push, audit …"
+    )
     failures = []
 
     # Find the CI pipeline workflow file
@@ -199,14 +225,22 @@ def check_ci_workflow() -> list[str]:
 
     # Runs security/dependency scan
     failures += _assert(
-        bool(re.search(r"scan|trivy|snyk|bandit|safety|audit|dependabot|vulnerability", text, re.IGNORECASE)),
+        bool(
+            re.search(
+                r"scan|trivy|snyk|bandit|safety|audit|dependabot|vulnerability", text, re.IGNORECASE
+            )
+        ),
         "ci-pipeline.yml runs a security/dependency scan",
         "Per AC: CI runs security/dependency scans on every change.",
     )
 
     # Builds and pushes to ECR
     failures += _assert(
-        bool(re.search(r"docker.*build|build.*docker|docker.*push|push.*ecr|ecr.*push", text, re.IGNORECASE)),
+        bool(
+            re.search(
+                r"docker.*build|build.*docker|docker.*push|push.*ecr|ecr.*push", text, re.IGNORECASE
+            )
+        ),
         "ci-pipeline.yml builds and pushes a container image to ECR",
         "Per AC: on success, CI builds a container image and pushes it to ECR.",
     )
@@ -220,14 +254,26 @@ def check_ci_workflow() -> list[str]:
 
     # Promotion audit row
     failures += _assert(
-        bool(re.search(r"audit|promotion.*log|log.*promotion|who.*promot|promot.*who|digest.*audit", text, re.IGNORECASE)),
+        bool(
+            re.search(
+                r"audit|promotion.*log|log.*promotion|who.*promot|promot.*who|digest.*audit",
+                text,
+                re.IGNORECASE,
+            )
+        ),
         "ci-pipeline.yml references promotion audit (who promoted which digest, when)",
         "Per AC: the promotion writes an audit row (who promoted which digest, when).",
     )
 
     # Signature verification before promote
     failures += _assert(
-        bool(re.search(r"verif|unsigned.*reject|reject.*unsigned|verify.*sign|sign.*verify", text, re.IGNORECASE)),
+        bool(
+            re.search(
+                r"verif|unsigned.*reject|reject.*unsigned|verify.*sign|sign.*verify",
+                text,
+                re.IGNORECASE,
+            )
+        ),
         "ci-pipeline.yml verifies image signature before promotion",
         "Per AC: unsigned or unverifiable digest cannot be promoted.",
     )
@@ -258,12 +304,16 @@ def check_promote_path() -> list[str]:
     - The cosign certificate identity is pinned to refs/heads/main, matching
       the CDK default in contract-toaster-stack.ts, not the dispatching ref.
     """
-    print("Check B2: ci-pipeline.yml promote path — audit fail-closed, same ECR repo, pinned identity …")
+    print(
+        "Check B2: ci-pipeline.yml promote path — audit fail-closed, same ECR repo, pinned identity …"
+    )
     failures: list[str] = []
     text = _read(WORKFLOWS_DIR / "ci-pipeline.yml")
     build = _job_text(text, "build-sign-push")
     promote = _job_text(text, "promote")
-    failures += _assert(bool(build) and bool(promote), "ci-pipeline.yml has build-sign-push and promote jobs")
+    failures += _assert(
+        bool(build) and bool(promote), "ci-pipeline.yml has build-sign-push and promote jobs"
+    )
     steps = _steps(promote)
 
     audit_steps = [st for st in steps if "dynamodb put-item" in st]
@@ -279,7 +329,9 @@ def check_promote_path() -> list[str]:
         )
     audit_idx = next((i for i, st in enumerate(steps) if "STEP I" in st.split("\n", 1)[0]), -1)
     ssm_idx = next((i for i, st in enumerate(steps) if "STEP J" in st.split("\n", 1)[0]), -1)
-    failures += _assert(0 <= audit_idx < ssm_idx, "audit row (STEP I) precedes the SSM update (STEP J)")
+    failures += _assert(
+        0 <= audit_idx < ssm_idx, "audit row (STEP I) precedes the SSM update (STEP J)"
+    )
 
     repos = set(re.findall(r"(?m)^\s*ECR_REPOSITORY:\s*(\S.*?)\s*$", text))
     failures += _assert(
@@ -297,7 +349,8 @@ def check_promote_path() -> list[str]:
     m = re.search(r"(?m)^\s*CERT_IDENTITY:\s*(\S.*?)\s*$", verify)
     identity = m.group(1) if m else ""
     failures += _assert(
-        identity.endswith("/.github/workflows/ci-pipeline.yml@refs/heads/main") and "github.ref" not in identity,
+        identity.endswith("/.github/workflows/ci-pipeline.yml@refs/heads/main")
+        and "github.ref" not in identity,
         "STEP H pins CERT_IDENTITY to ci-pipeline.yml@refs/heads/main",
         f"got: {identity}",
     )
@@ -310,7 +363,9 @@ def check_promote_path() -> list[str]:
 
 def check_architecture_md() -> list[str]:
     """Check C: ARCHITECTURE.md documents the CI pipeline constraints."""
-    print("Check C: ARCHITECTURE.md — docs-lint, detector-correctness, promotion audit, signature verification …")
+    print(
+        "Check C: ARCHITECTURE.md — docs-lint, detector-correctness, promotion audit, signature verification …"
+    )
     failures = []
 
     failures += _assert(ARCHITECTURE_MD.exists(), "ARCHITECTURE.md exists")
@@ -335,25 +390,29 @@ def check_architecture_md() -> list[str]:
 
     # Promotion audit documented
     failures += _assert(
-        bool(re.search(
-            r"promot.*audit|audit.*promot|who.*promot.*digest|digest.*promot.*audit"
-            r"|promotion.*writes.*audit|audit.*row.*promot",
-            text,
-            re.IGNORECASE | re.DOTALL,
-        )),
+        bool(
+            re.search(
+                r"promot.*audit|audit.*promot|who.*promot.*digest|digest.*promot.*audit"
+                r"|promotion.*writes.*audit|audit.*row.*promot",
+                text,
+                re.IGNORECASE | re.DOTALL,
+            )
+        ),
         "ARCHITECTURE.md documents promotion audit row (who promoted which digest, when)",
         "Per AC: the promotion writes an audit row (who promoted which digest, when).",
     )
 
     # Signature verification before promote
     failures += _assert(
-        bool(re.search(
-            r"unsigned.*cannot.*promot|cannot.*promot.*unsigned"
-            r"|sign.*verif.*before.*promot|verif.*sign.*before.*deploy"
-            r"|unsigned.*unverifiable.*cannot|unverifiable.*cannot.*promot",
-            text,
-            re.IGNORECASE | re.DOTALL,
-        )),
+        bool(
+            re.search(
+                r"unsigned.*cannot.*promot|cannot.*promot.*unsigned"
+                r"|sign.*verif.*before.*promot|verif.*sign.*before.*deploy"
+                r"|unsigned.*unverifiable.*cannot|unverifiable.*cannot.*promot",
+                text,
+                re.IGNORECASE | re.DOTALL,
+            )
+        ),
         "ARCHITECTURE.md documents that unsigned/unverifiable digest cannot be promoted",
         "Per AC: image signatures are verified at/before deploy; unsigned digest cannot be promoted.",
     )

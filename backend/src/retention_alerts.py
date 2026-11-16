@@ -59,8 +59,11 @@ def _push_url(base: str, message: str) -> str | None:
     parts = urlsplit(base)
     if parts.scheme not in ("http", "https") or not parts.netloc:
         return None
-    query = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
-             if k not in ("status", "msg")]
+    query = [
+        (k, v)
+        for k, v in parse_qsl(parts.query, keep_blank_values=True)
+        if k not in ("status", "msg")
+    ]
     query += [("status", "down"), ("msg", message)]
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), ""))
 

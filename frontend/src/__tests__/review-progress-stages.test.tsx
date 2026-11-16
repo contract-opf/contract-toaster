@@ -79,8 +79,12 @@ function stubPollingFetch(reviewId: string, detail: { current: Record<string, un
         return { ok: true, status: 200, json: async () => DEFAULT_PLAYBOOKS } as Response;
       }
       if (method === 'POST' && pathname === '/api/reviews') {
-        // eslint-disable-next-line @typescript-eslint/require-await
-        return { ok: true, status: 200, json: async () => ({ review_id: reviewId, resumed: false }) } as Response;
+        return {
+          ok: true,
+          status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
+          json: async () => ({ review_id: reviewId, resumed: false }),
+        } as Response;
       }
       if (pathname === `/api/reviews/${reviewId}`) {
         // eslint-disable-next-line @typescript-eslint/require-await
@@ -154,9 +158,7 @@ describe('staged review progress — the toast darkens through four real stages'
     // One of the polite regions names this stage, in the caption from that
     // same stage table (issue #733).
     const spoken = stages[token as Stage].caption;
-    const polite = Array.from(
-      document.querySelectorAll<HTMLElement>('[aria-live="polite"]'),
-    );
+    const polite = Array.from(document.querySelectorAll<HTMLElement>('[aria-live="polite"]'));
     expect(polite.some((el) => (el.textContent ?? '').includes(spoken))).toBe(true);
   });
 
@@ -172,7 +174,9 @@ describe('staged review progress — the toast darkens through four real stages'
     detail.current = runningDetail('redline');
     await waitFor(
       () => {
-        expect(screen.getByTestId('review-progress-step-text').textContent).toContain('Step 4 of 4');
+        expect(screen.getByTestId('review-progress-step-text').textContent).toContain(
+          'Step 4 of 4',
+        );
       },
       { timeout: 6000 },
     );

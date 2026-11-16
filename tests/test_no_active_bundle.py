@@ -204,9 +204,7 @@ def gate_1a_route_refusal_behavioral() -> tuple[list[str], list[str], list[str]]
     # exists to catch. See tests/fastapi_route_inventory.py (issue #61).
     from fastapi_route_inventory import registered_route_pairs  # noqa: PLC0415
 
-    route_registered = ("/api/reviews", "POST") in registered_route_pairs(
-        backend_main.app
-    )
+    route_registered = ("/api/reviews", "POST") in registered_route_pairs(backend_main.app)
 
     if not route_registered:
         _skip(
@@ -280,8 +278,8 @@ def gate_1a_route_refusal_behavioral() -> tuple[list[str], list[str], list[str]]
         "status": "active",
         "is_admin": False,
     }
-    backend_main.app.dependency_overrides[review_routes.get_dynamodb_resource] = (
-        lambda: _EmptyDynamoDBResource()
+    backend_main.app.dependency_overrides[review_routes.get_dynamodb_resource] = lambda: (
+        _EmptyDynamoDBResource()
     )
     try:
         resp = client.post(
@@ -408,6 +406,7 @@ GOVERNANCE_DEACTIVATE_PATTERN = re.compile(
 # Gate runner helpers
 # ---------------------------------------------------------------------------
 
+
 def gate_1_no_active_bundle_refusal(
     arch_text: str,
 ) -> tuple[list[str], list[str], list[str]]:
@@ -528,10 +527,7 @@ def main() -> int:
 
     print()
     # ── Gate 2 ──────────────────────────────────────────────────────────────
-    print(
-        "Gate 2: Deactivate action defined, audited, GC-gated "
-        "(distinct from rollback)"
-    )
+    print("Gate 2: Deactivate action defined, audited, GC-gated (distinct from rollback)")
     g2 = gate_2_deactivate_action(arch_text)
     if g2:
         for f in g2:
@@ -553,10 +549,7 @@ def main() -> int:
 
     print()
     # ── Gate 4 ──────────────────────────────────────────────────────────────
-    print(
-        "Gate 4: docs/playbook-governance.md lifecycle updated "
-        "to include deactivated state"
-    )
+    print("Gate 4: docs/playbook-governance.md lifecycle updated to include deactivated state")
     g4 = gate_4_governance_updated(governance_text)
     if g4:
         for f in g4:

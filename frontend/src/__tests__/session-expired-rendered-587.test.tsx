@@ -90,8 +90,12 @@ function stubFetchWithExpiry(): { fetchMock: ReturnType<typeof vi.fn>; expireNow
     const pathname = new URL(String(input), 'http://localhost').pathname;
     if (pathname === '/api/auth/login') {
       loggedIn = true;
-      // eslint-disable-next-line @typescript-eslint/require-await
-      return { ok: true, status: 200, json: async () => ({ username: 'admin', is_admin: true }) } as Response;
+      return {
+        ok: true,
+        status: 200,
+        // eslint-disable-next-line @typescript-eslint/require-await
+        json: async () => ({ username: 'admin', is_admin: true }),
+      } as Response;
     }
     if (pathname === '/api/me') {
       if (!loggedIn) {
@@ -99,8 +103,12 @@ function stubFetchWithExpiry(): { fetchMock: ReturnType<typeof vi.fn>; expireNow
         return { ok: false, status: 401, json: async () => ({}) } as Response;
       }
       if (expired) {
-        // eslint-disable-next-line @typescript-eslint/require-await
-        return { ok: false, status: 401, json: async () => ({ detail: 'Not authenticated.' }) } as Response;
+        return {
+          ok: false,
+          status: 401,
+          // eslint-disable-next-line @typescript-eslint/require-await
+          json: async () => ({ detail: 'Not authenticated.' }),
+        } as Response;
       }
       return {
         ok: true,
@@ -110,8 +118,12 @@ function stubFetchWithExpiry(): { fetchMock: ReturnType<typeof vi.fn>; expireNow
       } as Response;
     }
     if (expired) {
-      // eslint-disable-next-line @typescript-eslint/require-await
-      return { ok: false, status: 401, json: async () => ({ detail: 'Not authenticated.' }) } as Response;
+      return {
+        ok: false,
+        status: 401,
+        // eslint-disable-next-line @typescript-eslint/require-await
+        json: async () => ({ detail: 'Not authenticated.' }),
+      } as Response;
     }
     const body = routes[pathname];
     if (body === undefined) {

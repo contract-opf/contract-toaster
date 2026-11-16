@@ -373,7 +373,9 @@ def test_block_level_content_control_reaches_extraction(failures: list) -> None:
         return
     headings = [p["heading"] for p in result["paragraphs"]]
     if _CONTROLLED_HEADING not in headings:
-        failures.append(f"the controlled clause's own heading must survive. Got headings: {headings!r}")
+        failures.append(
+            f"the controlled clause's own heading must survive. Got headings: {headings!r}"
+        )
         return
     controlled = next(p for p in result["paragraphs"] if p["heading"] == _CONTROLLED_HEADING)
     if _CONTROLLED_CLAUSE_TEXT not in controlled["text"]:
@@ -481,7 +483,9 @@ def test_all_three_views_agree_character_for_character(failures: list) -> None:
         try:
             third_view = _docx_editor_paragraph_texts(docx_bytes)
         except Exception as exc:  # noqa: BLE001
-            failures.append(f"[{label}] could not read docx_editor's view: {type(exc).__name__}: {exc}")
+            failures.append(
+                f"[{label}] could not read docx_editor's view: {type(exc).__name__}: {exc}"
+            )
             continue
         for index, p_el in enumerate(elements):
             writer_view = redline_block_apply._accepted_text(p_el)
@@ -583,7 +587,9 @@ def test_table_row_and_cell_level_controls_reach_extraction(failures: list) -> N
     for level, expected in (("row", _ROW_CONTROLLED_TEXT), ("cell", _CELL_CONTROLLED_TEXT)):
         filled = stage.extract_and_normalize(_table_sdt_docx(level=level, placeholder=False))
         if filled.get("status") != "normalized":
-            failures.append(f"[{level}-level] fixture must normalize, got: {filled.get('status')!r}")
+            failures.append(
+                f"[{level}-level] fixture must normalize, got: {filled.get('status')!r}"
+            )
             continue
         if expected not in repr(filled["paragraphs"]):
             failures.append(
@@ -593,7 +599,9 @@ def test_table_row_and_cell_level_controls_reach_extraction(failures: list) -> N
             )
         empty = stage.extract_and_normalize(_table_sdt_docx(level=level, placeholder=True))
         if empty.get("status") != "normalized":
-            failures.append(f"[{level}-level placeholder] fixture must normalize, got: {empty.get('status')!r}")
+            failures.append(
+                f"[{level}-level placeholder] fixture must normalize, got: {empty.get('status')!r}"
+            )
             continue
         if expected in repr(empty["paragraphs"]):
             failures.append(
@@ -680,7 +688,9 @@ def test_repeated_word_content_control_edit_lands_in_the_operative_text(failures
         block_map,
     )
     if proven["status"] != "proven":
-        failures.append(f"the repeated-word block must prove; got {proven['status']!r}: {proven.get('failures')!r}")
+        failures.append(
+            f"the repeated-word block must prove; got {proven['status']!r}: {proven.get('failures')!r}"
+        )
         return
 
     result = redline_block_apply.apply_block_transcript(
@@ -709,7 +719,9 @@ def test_repeated_word_content_control_edit_lands_in_the_operative_text(failures
     for sdt_el in out_root.iter(_w("sdt")):
         inside = "".join(t.text or "" for t in sdt_el.iter(_w("t")))
         if inside != _FILLED_PARTY_NAME:
-            failures.append(f"the content control's own text must be untouched; it now reads {inside!r}")
+            failures.append(
+                f"the content control's own text must be untouched; it now reads {inside!r}"
+            )
         if any(sdt_el.iter(_w("ins"))) or any(sdt_el.iter(_w("del"))):
             failures.append("no tracked change may be written inside the content control")
 
@@ -735,7 +747,9 @@ def test_placeholder_control_edit_fails_closed_without_voiding_the_batch(failure
     block_map = _block_map_of(docx_bytes)
     ids = list(block_map)
     if len(ids) != 2:
-        failures.append(f"fixture must yield two blocks (controlled + clean), got {len(ids)}: {ids!r}")
+        failures.append(
+            f"fixture must yield two blocks (controlled + clean), got {len(ids)}: {ids!r}"
+        )
         return
     controlled_id, clean_id = ids
     controlled_text = block_map[controlled_id]["text"]
@@ -764,7 +778,9 @@ def test_placeholder_control_edit_fails_closed_without_voiding_the_batch(failure
         block_map,
     )
     if proven["status"] != "proven":
-        failures.append(f"both blocks must prove; got {proven['status']!r}: {proven.get('failures')!r}")
+        failures.append(
+            f"both blocks must prove; got {proven['status']!r}: {proven.get('failures')!r}"
+        )
         return
 
     result = redline_block_apply.apply_block_transcript(
@@ -793,10 +809,14 @@ def test_placeholder_control_edit_fails_closed_without_voiding_the_batch(failure
     out_root = _document_root(result["docx_bytes"])
     for sdt_el in out_root.iter(_w("sdt")):
         if any(sdt_el.iter(_w("ins"))) or any(sdt_el.iter(_w("del"))):
-            failures.append("no tracked change may ever be written inside an UNFILLED content control")
+            failures.append(
+                "no tracked change may ever be written inside an UNFILLED content control"
+            )
         inside = "".join(t.text or "" for t in sdt_el.iter(_w("t")))
         if inside != _PLACEHOLDER_DISPLAY_COPY:
-            failures.append(f"the unfilled control's display copy must be untouched; it now reads {inside!r}")
+            failures.append(
+                f"the unfilled control's display copy must be untouched; it now reads {inside!r}"
+            )
     controlled_p = list(out_root.iter(_w("p")))[1]
     if "the Purchaser" in redline_block_apply._accepted_text(controlled_p):
         failures.append("the refused edit must not have been written to the document at all")
@@ -837,7 +857,9 @@ def main() -> int:
     if all_failures:
         print(f"FAIL: {len(all_failures)} failure(s) (issue #94).")
         return 1
-    print("PASS: content controls and smart tags are transparent wrappers, except a genuine placeholder (issue #94).")
+    print(
+        "PASS: content controls and smart tags are transparent wrappers, except a genuine placeholder (issue #94)."
+    )
     return 0
 
 

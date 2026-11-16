@@ -81,9 +81,7 @@ describe('an unexpected console.error fails its test (issue #68)', () => {
 
   it('renders an Error argument with its message, not as [object Object]', () => {
     console.error(new Error('boom from a component catch'));
-    expect(() => assertNoUnexpectedConsoleErrors()).toThrowError(
-      /boom from a component catch/
-    );
+    expect(() => assertNoUnexpectedConsoleErrors()).toThrowError(/boom from a component catch/);
   });
 
   it('passes a test that logged nothing', () => {
@@ -145,9 +143,7 @@ describe('a single test can declare its own expected message (issue #68)', () =>
     allowConsoleErrorsInThisTest(/DYNAMODB_TABLE_NAME not configured/);
     console.error('DYNAMODB_TABLE_NAME not configured.');
     console.error('and something nobody expected');
-    expect(() => assertNoUnexpectedConsoleErrors()).toThrowError(
-      /something nobody expected/
-    );
+    expect(() => assertNoUnexpectedConsoleErrors()).toThrowError(/something nobody expected/);
   });
 });
 

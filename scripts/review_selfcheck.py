@@ -409,7 +409,9 @@ def _bound_checks(
     return checks
 
 
-def _validate_response(raw_text: str, *, expected_check_id: str) -> tuple[bool, dict[str, Any] | None]:
+def _validate_response(
+    raw_text: str, *, expected_check_id: str
+) -> tuple[bool, dict[str, Any] | None]:
     """Parse + strictly validate one judge response.
 
     Mirrors `floor_judge._validate_judge_response` (and, behind it,

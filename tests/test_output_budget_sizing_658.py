@@ -164,8 +164,9 @@ class BudgetRecordingClient:
         return nxt
 
 
-def _run_primary(client: Any, doc_text: str, model_id: str = _DECLARING_MODEL_ID,
-                 **overrides: Any) -> dict[str, Any]:
+def _run_primary(
+    client: Any, doc_text: str, model_id: str = _DECLARING_MODEL_ID, **overrides: Any
+) -> dict[str, Any]:
     return pp.run_primary_pass(
         review_id="budget-658",
         retrieved_precedent=[],
@@ -294,7 +295,10 @@ def test_a_model_that_declares_no_cap_fails_closed(failures: list[str]) -> None:
             f"[4b] a model declaring no cap must fail closed to "
             f"{model_client.DEFAULT_MAX_OUTPUT_TOKENS}; got {resolved}"
         )
-    if model_client.openrouter_model_max_output_tokens("") != model_client.DEFAULT_MAX_OUTPUT_TOKENS:
+    if (
+        model_client.openrouter_model_max_output_tokens("")
+        != model_client.DEFAULT_MAX_OUTPUT_TOKENS
+    ):
         failures.append("[4c] a falsy model_id must fail closed too, never match by accident")
     if (
         model_client.openrouter_model_max_output_tokens("anthropic.claude-opus-4-8")
@@ -306,9 +310,7 @@ def test_a_model_that_declares_no_cap_fails_closed(failures: list[str]) -> None:
     # at the declaring model's much larger figure.
     budget = model_client.output_budget_for_document(53_000, resolved)
     if budget != model_client.DEFAULT_MAX_OUTPUT_TOKENS:
-        failures.append(
-            f"[4e] the fail-closed cap must bound the budget too; got {budget}"
-        )
+        failures.append(f"[4e] the fail-closed cap must bound the budget too; got {budget}")
 
 
 def test_the_critic_pass_sizes_from_the_document_too(failures: list[str]) -> None:
@@ -386,7 +388,9 @@ def test_a_schema_rejection_does_not_consume_the_truncation_retry(
             f"attempt with more room; got {result!r}"
         )
     if len(client.budgets) != 3:
-        failures.append(f"[6b] expected 3 attempts (1 general + 1 truncation); got {client.budgets}")
+        failures.append(
+            f"[6b] expected 3 attempts (1 general + 1 truncation); got {client.budgets}"
+        )
         return
     if client.budgets[0] != client.budgets[1]:
         failures.append(
@@ -414,13 +418,9 @@ def test_the_truncation_allowance_is_bounded_not_a_free_loop(failures: list[str]
 
     if raised is None:
         failures.append("[7a] an unrecoverable truncation must still reach the caller")
-    expected_max = (
-        1 + pp.MAX_RETRIES_PER_PASS + pp.MAX_TRUNCATION_RETRIES_PER_PASS
-    )
+    expected_max = 1 + pp.MAX_RETRIES_PER_PASS + pp.MAX_TRUNCATION_RETRIES_PER_PASS
     if len(client.budgets) > expected_max:
-        failures.append(
-            f"[7b] at most {expected_max} attempts per pass; got {len(client.budgets)}"
-        )
+        failures.append(f"[7b] at most {expected_max} attempts per pass; got {len(client.budgets)}")
     if len(client.budgets) < 2:
         failures.append(f"[7c] a truncation must buy at least one retry; got {client.budgets}")
 
@@ -432,8 +432,7 @@ def test_the_widening_step_is_a_meaningful_jump_and_respects_the_cap(
     widened = model_client.widen_output_budget(20_000, cap)
     if widened - 20_000 < 4_000:
         failures.append(
-            f"[8a] the widening must be a meaningful jump, not a token or two; "
-            f"20000 -> {widened}"
+            f"[8a] the widening must be a meaningful jump, not a token or two; 20000 -> {widened}"
         )
     if widened >= 40_000:
         failures.append(
@@ -473,29 +472,29 @@ def test_the_reservation_is_computed_from_the_sizing_function(failures: list[str
     # now make -- pricing one fewer attempt than the pass can spend is the
     # under-reservation issue #658 called out.
     attempts = (
-        1
-        + reviews_module.MAX_RETRIES_PER_PASS
-        + reviews_module.MAX_TRUNCATION_RETRIES_PER_PASS
+        1 + reviews_module.MAX_RETRIES_PER_PASS + reviews_module.MAX_TRUNCATION_RETRIES_PER_PASS
     )
-    expected_cents = int(round(  # noqa: RUF046
-        attempts
-        * (
-            (
-                reviews_module.MAX_INPUT_TOKENS
-                * reviews_module.PRIMARY_INPUT_RATE_USD_PER_MILLION
-                + reviews_module.MAX_OUTPUT_TOKENS
-                * reviews_module.PRIMARY_OUTPUT_RATE_USD_PER_MILLION
+    expected_cents = int(  # noqa: RUF046
+        round(
+            attempts
+            * (
+                (
+                    reviews_module.MAX_INPUT_TOKENS
+                    * reviews_module.PRIMARY_INPUT_RATE_USD_PER_MILLION
+                    + reviews_module.MAX_OUTPUT_TOKENS
+                    * reviews_module.PRIMARY_OUTPUT_RATE_USD_PER_MILLION
+                )
+                + (
+                    reviews_module.MAX_INPUT_TOKENS
+                    * reviews_module.CRITIC_INPUT_RATE_USD_PER_MILLION
+                    + reviews_module.MAX_OUTPUT_TOKENS
+                    * reviews_module.CRITIC_OUTPUT_RATE_USD_PER_MILLION
+                )
             )
-            + (
-                reviews_module.MAX_INPUT_TOKENS
-                * reviews_module.CRITIC_INPUT_RATE_USD_PER_MILLION
-                + reviews_module.MAX_OUTPUT_TOKENS
-                * reviews_module.CRITIC_OUTPUT_RATE_USD_PER_MILLION
-            )
+            / 1_000_000
+            * 100
         )
-        / 1_000_000
-        * 100
-    ))
+    )
     actual_cents = reviews_module.compute_worst_case_reservation_usd_cents()
     if actual_cents != expected_cents:
         failures.append(
@@ -569,9 +568,7 @@ def test_the_documented_under_reservation_matches_the_arithmetic(
         return  # the reservation really does bound settle; nothing to police
 
     attempts = (
-        1
-        + reviews_module.MAX_RETRIES_PER_PASS
-        + reviews_module.MAX_TRUNCATION_RETRIES_PER_PASS
+        1 + reviews_module.MAX_RETRIES_PER_PASS + reviews_module.MAX_TRUNCATION_RETRIES_PER_PASS
     )
 
     def _usd(output_tokens: int) -> float:

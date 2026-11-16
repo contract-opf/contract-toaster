@@ -243,7 +243,7 @@ BINDING_INTRO = (
     "FLAG IT FOR ATTORNEY REVIEW and say why. Do not silently override it, and do not silently "
     "comply with it against the facts — the determination is an attorney's to make, in either "
     "direction.\n"
-    "A Floor invariant phrased in terms of \"the counterparty\" is DIRECTIONAL: the "
+    'A Floor invariant phrased in terms of "the counterparty" is DIRECTIONAL: the '
     "counterparty is the other party to this agreement, never us, and a term that "
     "runs in our favour does not violate such a rule."
 )
@@ -323,11 +323,7 @@ def _strip_x_keys(value: Any) -> Any:
     extensions, engine #180 -- unknown provenance, excluded from every
     prompt block regardless of how deeply nested)."""
     if isinstance(value, dict):
-        return {
-            key: _strip_x_keys(val)
-            for key, val in value.items()
-            if not key.startswith("x_")
-        }
+        return {key: _strip_x_keys(val) for key, val in value.items() if not key.startswith("x_")}
     if isinstance(value, list):
         return [_strip_x_keys(item) for item in value]
     return value
@@ -433,8 +429,8 @@ DIGEST_INTRO = (
     "= same legal effect; + more protective of us; - less protective of us; x+, x-, x0 "
     "omitted, with a more protective, less protective or no effect for us. Additions no "
     "part covers are marked +, - or 0 the same way.\n"
-    "- A label marked \"adjudicated: weigh with care\" was contested: two independent "
-    "readings disagreed and a third decided it. One marked \"unchecked: weigh with care\" "
+    '- A label marked "adjudicated: weigh with care" was contested: two independent '
+    'readings disagreed and a third decided it. One marked "unchecked: weigh with care" '
     "has not been confirmed by an independent reading. Check the cited text with more care "
     "before you rely on either. An unmarked label was confirmed by an independent reading "
     "or set by the owner. How settled a label is says how far to trust the label, never "
@@ -450,12 +446,12 @@ DIGEST_INTRO = (
     "playbook never says why a form changed; only an owner's note, when one is shown, "
     "does.\n"
     "- Signed without this clause: signed deals that carry no text for the clause. "
-    "\"Verified\" means our check found no matching text in that deal's executed copy. It "
+    '"Verified" means our check found no matching text in that deal\'s executed copy. It '
     "is not proof the deal lacked the clause: an amendment, cover sheet or order form can "
-    "incorporate terms that are not in the copy, so say \"our check found none\", never "
-    "that the deal was signed without the clause. \"Possibly absent ... not verified\" "
+    'incorporate terms that are not in the copy, so say "our check found none", never '
+    'that the deal was signed without the clause. "Possibly absent ... not verified" '
     "means a passage may carry the clause unrecognised, so it is evidence of nothing either "
-    "way; never add it to the verified count. \"Could not be checked\" means the executed "
+    'way; never add it to the verified count. "Could not be checked" means the executed '
     "copy gave nothing readable to check: it is no evidence of absence at all. Neither is "
     "the same as the playbook having no precedent for a clause.\n"
     "- Every count is of distinct deals. A citation [document@version §clause] names "
@@ -464,9 +460,9 @@ DIGEST_INTRO = (
     "cites one of our own former forms, not a deal.\n"
     "Each quoted entry is a summary of at most 300 characters ending on a sentence "
     "boundary, not necessarily the whole clause: do not present it as quoted in full "
-    "from the corpus.\n"
-    + SILENT_PLAYBOOK_DEFAULT
+    "from the corpus.\n" + SILENT_PLAYBOOK_DEFAULT
 )
+
 
 class PromptCompositionError(ValueError):
     """Raised when an OPF document cannot compose a knowledge prompt.
@@ -603,7 +599,10 @@ def _fmt_cite(ref: Any, where: str) -> str:
     every engine-built playbook's.
     """
     if ref is None:
-        _omit("citation — entry has no ref, so it reaches the model ungrounded, with no corpus location an operator or auditor can resolve it to", where)
+        _omit(
+            "citation — entry has no ref, so it reaches the model ungrounded, with no corpus location an operator or auditor can resolve it to",
+            where,
+        )
         return ""
     if not isinstance(ref, dict):
         _omit(f"citation — ref is a {type(ref).__name__}, not an object; not rendered", where)
@@ -640,7 +639,10 @@ def _fmt_label(entry: dict, where: str) -> str:
     if label is None:
         return ""
     if not isinstance(label, str):
-        _omit(f"vs_standard label — value is a {type(label).__name__}, not a string; not rendered", where)
+        _omit(
+            f"vs_standard label — value is a {type(label).__name__}, not a string; not rendered",
+            where,
+        )
         return ""
     return f"[{_LABEL_WORDS.get(label, label)}{_settled_marker(entry, where)}] "
 
@@ -706,7 +708,11 @@ def _fmt_judgment(entry: dict, show_part_map: bool, where: str) -> list[str]:
     lines: list[str] = []
     reason = entry.get("reason")
     if isinstance(reason, str) and reason:
-        who = "Owner's label; owner's reason" if entry.get("label_by") == "owner" else "Judged difference"
+        who = (
+            "Owner's label; owner's reason"
+            if entry.get("label_by") == "owner"
+            else "Judged difference"
+        )
         lines.append(f"      {who}: {reason}")
     elif reason is not None:
         _omit("vs_standard reason — not a string; the label renders without its reason", where)
@@ -728,15 +734,20 @@ def _fmt_signed_variant(
     """One signed-variant line (plus its judgment), or the collapsed
     equivalent-wording entry."""
     if not isinstance(entry, dict):
-        _omit(f"signed variant — entry is a {type(entry).__name__}, not an object; not rendered", where)
+        _omit(
+            f"signed variant — entry is a {type(entry).__name__}, not an object; not rendered",
+            where,
+        )
         return []
     n_deals = _count(entry.get("n_deals"), "n_deals", where)
     facts = [f"signed in {_plural(n_deals, 'deal')}"] if n_deals is not None else []
     span = _signed_span(entry)
     if span:
         facts.append(span)
-    for field, words in (("n_from_standard", "reached from our standard in"),
-                         ("n_unchanged", "signed unchanged from the opening text in")):
+    for field, words in (
+        ("n_from_standard", "reached from our standard in"),
+        ("n_unchanged", "signed unchanged from the opening text in"),
+    ):
         n = _count(entry.get(field), field, where)
         if n:
             facts.append(f"{words} {n}")
@@ -757,9 +768,14 @@ def _fmt_signed_variant(
             facts.append(settled_note)
         exemplars = entry.get("exemplars") if isinstance(entry.get("exemplars"), list) else []
         if not exemplars:
-            _omit("equivalent-wording exemplars — collapsed entry rendered with no example text", where)
+            _omit(
+                "equivalent-wording exemplars — collapsed entry rendered with no example text",
+                where,
+            )
         examples = "; ".join(
-            _fmt_quote(e, where) + _fmt_cite(e.get("ref"), where) for e in exemplars if isinstance(e, dict)
+            _fmt_quote(e, where) + _fmt_cite(e.get("ref"), where)
+            for e in exemplars
+            if isinstance(e, dict)
         )
         line = f"  - {_fmt_label(entry, where)}{', '.join(facts)}"
         return [line + (f"; for example {examples}" if examples else "")]
@@ -776,7 +792,9 @@ def _fmt_refused_ask(entry: Any, show_part_map: bool, where: str) -> list[str]:
     this list for replacement wording when it read as a menu).
     """
     if not isinstance(entry, dict):
-        _omit(f"refused ask — entry is a {type(entry).__name__}, not an object; not rendered", where)
+        _omit(
+            f"refused ask — entry is a {type(entry).__name__}, not an object; not rendered", where
+        )
         return []
     n_deals = _count(entry.get("n_deals"), "n_deals", where)
     facts = [f"refused in {_plural(n_deals, 'deal')}"] if n_deals is not None else []
@@ -791,7 +809,10 @@ def _fmt_refused_ask(entry: Any, show_part_map: bool, where: str) -> list[str]:
 def _fmt_changed_opening(entry: Any, show_part_map: bool, where: str) -> list[str]:
     """`"<text>" — <n> deal(s)[, ended at our standard in X][, struck in Y] [ref]`."""
     if not isinstance(entry, dict):
-        _omit(f"changed opening — entry is a {type(entry).__name__}, not an object; not rendered", where)
+        _omit(
+            f"changed opening — entry is a {type(entry).__name__}, not an object; not rendered",
+            where,
+        )
         return []
     n_deals = _count(entry.get("n_deals"), "n_deals", where)
     facts = [_plural(n_deals, "deal")] if n_deals is not None else []
@@ -809,7 +830,10 @@ def _entry_list(clause: dict, field: str, where: str) -> list:
         _omit(f"{field} — absent; the section is not rendered", where)
         return []
     if not isinstance(entries, list):
-        _omit(f"{field} — value is a {type(entries).__name__}, not a list; the whole section is skipped", where)
+        _omit(
+            f"{field} — value is a {type(entries).__name__}, not a list; the whole section is skipped",
+            where,
+        )
         return []
     return entries
 
@@ -895,8 +919,11 @@ def _fmt_former_form(form: Any, show_part_map: bool, where: str) -> list[str]:
     facts: list[str] = []
     if n_opened:
         facts.append(f"opened on it in {_plural(n_opened, 'signed deal')}")
-        for field, words in (("n_kept", "kept it in"), ("n_conceded", "conceded in"),
-                             ("n_moved_to_current", "moved to today's standard in")):
+        for field, words in (
+            ("n_kept", "kept it in"),
+            ("n_conceded", "conceded in"),
+            ("n_moved_to_current", "moved to today's standard in"),
+        ):
             n = _count(form.get(field), field, where)
             if n is not None:
                 facts.append(f"{words} {n}")
@@ -940,17 +967,23 @@ def _standard_history_lines(clause: dict, show_part_map: bool, where: str) -> li
         forms = []
     lines: list[str] = []
     for index, form in enumerate(forms):
-        lines.extend(_fmt_former_form(form, show_part_map, f"{where} / standard_history.forms[{index}]"))
+        lines.extend(
+            _fmt_former_form(form, show_part_map, f"{where} / standard_history.forms[{index}]")
+        )
     note = history.get("why_changed")
     note_text = note.get("text") if isinstance(note, dict) else None
     if note is not None and not (isinstance(note_text, str) and note_text):
         _omit("why_changed — present but carries no text; not rendered", where)
     if not lines and not (isinstance(note_text, str) and note_text):
         return []
-    out = ["\nOur former forms of this clause:" if lines else "\nOur former forms of this clause: none on record."]
+    out = [
+        "\nOur former forms of this clause:"
+        if lines
+        else "\nOur former forms of this clause: none on record."
+    ]
     out.extend(lines)
     if isinstance(note_text, str) and note_text:
-        out.append(f"  Owner's note on why our standard changed: \"{_neutralise(note_text)}\"")
+        out.append(f'  Owner\'s note on why our standard changed: "{_neutralise(note_text)}"')
     return out
 
 
@@ -975,7 +1008,9 @@ def _absence_line(clause: dict, where: str, unverifiable: int = 0) -> str | None
         names = [
             entry["document_id"]
             for entry in (deals if isinstance(deals, list) else [])
-            if isinstance(entry, dict) and isinstance(entry.get("document_id"), str) and entry["document_id"]
+            if isinstance(entry, dict)
+            and isinstance(entry.get("document_id"), str)
+            and entry["document_id"]
         ]
         if not isinstance(deals, list):
             _omit("verified_absent_deals — not a list; the verified deals are not named", where)
@@ -993,7 +1028,11 @@ def _absence_line(clause: dict, where: str, unverifiable: int = 0) -> str | None
         cannot = min(max(unverifiable, 0), possible)
         note = ""
         if cannot:
-            note = " (all could not be checked)" if cannot == possible else f" ({cannot} could not be checked)"
+            note = (
+                " (all could not be checked)"
+                if cannot == possible
+                else f" ({cannot} could not be checked)"
+            )
         parts.append(f"possibly absent in {possible}{more}{noun}; not verified{note}")
     if not parts:
         return None
@@ -1097,7 +1136,9 @@ def _digest_clause_block(
 
     taxonomy_id = clause.get("taxonomy_id")
     absence = _absence_line(
-        clause, where, (unverifiable or {}).get(taxonomy_id, 0) if isinstance(taxonomy_id, str) else 0
+        clause,
+        where,
+        (unverifiable or {}).get(taxonomy_id, 0) if isinstance(taxonomy_id, str) else 0,
     )
     if absence:
         lines.append(absence)
@@ -1116,7 +1157,9 @@ def _digest_clause_block(
     lines.append(header if variants else header + " no other wording signed.")
     for index, entry in enumerate(variants):
         lines.extend(
-            _fmt_signed_variant(entry, show_part_map, f"{where} / signed_variants[{index}]", prior_forms)
+            _fmt_signed_variant(
+                entry, show_part_map, f"{where} / signed_variants[{index}]", prior_forms
+            )
         )
 
     refused = _entry_list(clause, "refused_asks", where)
@@ -1129,7 +1172,9 @@ def _digest_clause_block(
     if openings:
         lines.append("\nOpening language not signed as proposed (never replacement language):")
         for index, entry in enumerate(openings):
-            lines.extend(_fmt_changed_opening(entry, show_part_map, f"{where} / changed_openings[{index}]"))
+            lines.extend(
+                _fmt_changed_opening(entry, show_part_map, f"{where} / changed_openings[{index}]")
+            )
 
     # The digest caps each list; its totals are uncapped. Say what the cap
     # left out rather than let the model read a partial list as the whole one.
@@ -1139,8 +1184,12 @@ def _digest_clause_block(
     for total_field, shown, singular, plural in (
         ("n_variants_total", _texts_shown(variants), "signed variant", "signed variants"),
         ("n_refused_total", len(refused), "refused ask", "refused asks"),
-        ("n_changed_openings_total", len(openings),
-         "opening not signed as proposed", "openings not signed as proposed"),
+        (
+            "n_changed_openings_total",
+            len(openings),
+            "opening not signed as proposed",
+            "openings not signed as proposed",
+        ),
     ):
         total = _count(clause.get(total_field), total_field, where)
         if total is not None and total > shown:
@@ -1159,7 +1208,10 @@ def _corpus_line(digest: dict) -> str | None:
         return None
     n_deals, n_signed = corpus.get("n_deals"), corpus.get("n_signed")
     if not isinstance(n_deals, int) or not isinstance(n_signed, int):
-        _omit("digest corpus counts — not integers; the block does not say how many deals it rests on", "digest")
+        _omit(
+            "digest corpus counts — not integers; the block does not say how many deals it rests on",
+            "digest",
+        )
         return None
     line = f"From {_plural(n_deals, 'deal')} ({n_signed} signed)"
     first, last = corpus.get("first_signed"), corpus.get("last_signed")
@@ -1195,7 +1247,10 @@ def _uncovered_line(digest: dict) -> str | None:
     """
     entries = digest.get("uncovered_clause_types")
     if entries is None:
-        _omit("uncovered_clause_types — absent; the block does not say which clause types have no precedent", "digest")
+        _omit(
+            "uncovered_clause_types — absent; the block does not say which clause types have no precedent",
+            "digest",
+        )
         return None
     if not isinstance(entries, list):
         _omit(
@@ -1301,7 +1356,10 @@ def floor_clause_context(opf_doc: dict) -> dict[str, dict[str, str]]:
     return out
 
 
-def resolve_floor_invariants(opf_doc: dict, overrides: Optional[dict] = None) -> list[dict[str, Any]]:  # noqa: UP045
+def resolve_floor_invariants(
+    opf_doc: dict,
+    overrides: Optional[dict] = None,  # noqa: UP045
+) -> list[dict[str, Any]]:
     """Union of `opf.floor.invariants` and `overrides.floor_additions`,
     genesis first, stable order (issue #294 scope item 4). No dedup logic
     needed: `scripts/bind_bundle.py::bind_bundle` already rejects any
@@ -1363,7 +1421,9 @@ def policy_rules_by_strength(policy: Optional[dict], strength: str) -> list[dict
 
 
 def _binding_block(
-    opf_doc: dict, overrides: Optional[dict] = None, policy: Optional[dict] = None  # noqa: UP045
+    opf_doc: dict,
+    overrides: Optional[dict] = None,  # noqa: UP045
+    policy: Optional[dict] = None,  # noqa: UP045
 ) -> str | None:
     """The rules that bind: Floor invariants, then policy `must` rules.
 
@@ -1441,9 +1501,11 @@ def _binding_block(
         direction = opf_integrity.direction_of(invariant)
         if direction:
             line += f" (Direction — {DIRECTION_WORDS[direction]}.)"
-        clause_title = clause_context.get(invariant.get("x_taxonomy_id"), {}).get("title") if isinstance(
-            invariant.get("x_taxonomy_id"), str
-        ) else None
+        clause_title = (
+            clause_context.get(invariant.get("x_taxonomy_id"), {}).get("title")
+            if isinstance(invariant.get("x_taxonomy_id"), str)
+            else None
+        )
         if clause_title:
             line += f" (Clause: {_neutralise(clause_title)}.)"
         if rationale:
@@ -1543,9 +1605,7 @@ def _manifest_rule_lines(
         # piece is a piece of the fallback (exempt), and the label is
         # shorter than any gram.
         lines.append("   Fallback language:")
-        lines.extend(
-            f"      {line.strip()}" for line in fallback.splitlines() if line.strip()
-        )
+        lines.extend(f"      {line.strip()}" for line in fallback.splitlines() if line.strip())
     elif fallback is None:
         lines.append("   Fallback language: none.")
     else:
@@ -1671,7 +1731,8 @@ def _recognition_key(name: str) -> str:
 
 
 def resolve_party_recognition_set(
-    opf_doc: dict, entity_roster: Optional[Sequence[str]] = None  # noqa: UP045
+    opf_doc: dict,
+    entity_roster: Optional[Sequence[str]] = None,  # noqa: UP045
 ) -> list[str]:
     """Every legal-entity name that IS us, as ONE flat, deduplicated,
     source-free list (issue #678).

@@ -163,7 +163,8 @@ def _comparison_text(text: str) -> str:
     text = "".join(
         ch
         for ch in text
-        if unicodedata.category(ch) != "Cf" and not normalize_input.find_suspicious_control_characters(ch)
+        if unicodedata.category(ch) != "Cf"
+        and not normalize_input.find_suspicious_control_characters(ch)
     )
     return confusables.skeleton(text)
 
@@ -206,9 +207,7 @@ def _is_smuggled_invisible(text: str) -> bool:
     isolates, and TAG characters, count unconditionally -- they have no
     benign use in contract prose.
     """
-    return bool(
-        _INTERLEAVED_ZERO_WIDTH_RE.search(text) or _DIRECTION_OVERRIDE_RE.search(text)
-    )
+    return bool(_INTERLEAVED_ZERO_WIDTH_RE.search(text) or _DIRECTION_OVERRIDE_RE.search(text))
 
 
 def scan_document(docx_bytes: bytes) -> list[dict[str, Any]]:

@@ -87,6 +87,7 @@ def read(path: Path) -> str:
 
 # ── Check A — playbook_id in vector metadata model ────────────────────────────
 
+
 def check_a() -> list[str]:
     """ARCHITECTURE.md metadata-model bullet list must include playbook_id."""
     text = read(ARCHITECTURE)
@@ -116,6 +117,7 @@ def check_a() -> list[str]:
 
 # ── Check B — playbook_id in reviews row ──────────────────────────────────────
 
+
 def check_b() -> list[str]:
     """ARCHITECTURE.md DynamoDB reviews table row must include playbook_id."""
     text = read(ARCHITECTURE)
@@ -136,6 +138,7 @@ def check_b() -> list[str]:
 
 
 # ── Check C — POST /api/reviews accepts a playbook selector ──────────────────
+
 
 def check_c() -> list[str]:
     """POST /api/reviews route must reference a playbook selector / playbook_id."""
@@ -158,6 +161,7 @@ def check_c() -> list[str]:
 
 
 # ── Check D — Data flow step 3 scopes by playbook ────────────────────────────
+
 
 def check_d() -> list[str]:
     """Data flow step 3 must reference playbook-scoped bundle resolution."""
@@ -186,6 +190,7 @@ def check_d() -> list[str]:
 
 # ── Check E — playbook_id in canonical field dictionary ──────────────────────
 
+
 def check_e() -> list[str]:
     """docs/data-handling.md canonical reviews field table must list playbook_id."""
     text = read(DATA_HANDLING)
@@ -204,6 +209,7 @@ def check_e() -> list[str]:
 
 # ── Check F — evaluation namespacing by playbook_id ──────────────────────────
 
+
 def check_f() -> list[str]:
     """docs/evaluation.md must mention playbook_id namespacing of eval suites."""
     text = read(EVALUATION)
@@ -221,6 +227,7 @@ def check_f() -> list[str]:
 
 # ── Check G — phase-0 issue #12 ACs reference playbook_id ────────────────────
 
+
 def check_g() -> list[str]:
     """docs/phase-0-issues.md issue #12 ACs must reference playbook_id in metadata."""
     text = read(PHASE0)
@@ -230,7 +237,9 @@ def check_g() -> list[str]:
     # the issue-12 heading. Find the heading first, then grab the begin/end block.
     issue12_start = text.find("## 12. Bedrock Knowledge Base")
     if issue12_start < 0:
-        return ["  Could not locate '## 12. Bedrock Knowledge Base' heading in docs/phase-0-issues.md"]
+        return [
+            "  Could not locate '## 12. Bedrock Knowledge Base' heading in docs/phase-0-issues.md"
+        ]
 
     # Find the begin/end block that belongs to issue 12
     begin_idx = text.find("---begin---", issue12_start)
@@ -242,7 +251,7 @@ def check_g() -> list[str]:
             "in docs/phase-0-issues.md"
         ]
 
-    section_text = text[begin_idx:end_idx + len("---end---")]
+    section_text = text[begin_idx : end_idx + len("---end---")]
     if "playbook_id" not in section_text:
         return [
             "  docs/phase-0-issues.md issue #12 ACs do not reference `playbook_id`\n"
@@ -304,15 +313,26 @@ def _build_synthetic_registry(root: Path) -> Path:
         anchor_map_path = f"standard-forms/{playbook_id}-v1.0.0.anchor-map.json"
         fixtures_dir = f"tests/gold-fixtures/{playbook_id}"
 
-        _write_json(root / playbook_path, {
-            "playbook": {"id": playbook_id, "version": "1.0.0", "topics": [], "hard_rejections": []}
-        })
-        _write_json(root / section_config_path, {
-            "sections": sections,
-            "coverage_exempt_rationales": {},
-            "absent_from_form_anchors": [],
-            "structural_anchors": [],
-        })
+        _write_json(
+            root / playbook_path,
+            {
+                "playbook": {
+                    "id": playbook_id,
+                    "version": "1.0.0",
+                    "topics": [],
+                    "hard_rejections": [],
+                }
+            },
+        )
+        _write_json(
+            root / section_config_path,
+            {
+                "sections": sections,
+                "coverage_exempt_rationales": {},
+                "absent_from_form_anchors": [],
+                "structural_anchors": [],
+            },
+        )
         anchors = {
             anchor: {
                 "heading": heading,
@@ -323,13 +343,16 @@ def _build_synthetic_registry(root: Path) -> Path:
             }
             for anchor, heading, _sub_split, _parent in sections
         }
-        _write_json(root / anchor_map_path, {
-            "schema_version": "1",
-            "playbook_version": "1.0.0",
-            "coverage_exempt_anchors": [],
-            "coverage_exempt_rationales": {},
-            "anchors": anchors,
-        })
+        _write_json(
+            root / anchor_map_path,
+            {
+                "schema_version": "1",
+                "playbook_version": "1.0.0",
+                "coverage_exempt_anchors": [],
+                "coverage_exempt_rationales": {},
+                "anchors": anchors,
+            },
+        )
         (root / fixtures_dir).mkdir(parents=True, exist_ok=True)
 
         registry["playbooks"][playbook_id] = {
@@ -346,13 +369,16 @@ def _build_synthetic_registry(root: Path) -> Path:
     # would pick THIS file for every playbook_id, since "zzz..." > "eiaa...").
     # It carries an anchor no real playbook registers, so a resolver that
     # picked it by filename order (instead of playbook_id) is caught red-handed.
-    _write_json(root / "standard-forms" / "zzz-decoy.anchor-map.json", {
-        "schema_version": "1",
-        "playbook_version": "999.0.0",
-        "coverage_exempt_anchors": [],
-        "coverage_exempt_rationales": {},
-        "anchors": {"WRONG-ANCHOR-FROM-DECOY": {"heading": "Decoy", "heading_hash": "x"}},
-    })
+    _write_json(
+        root / "standard-forms" / "zzz-decoy.anchor-map.json",
+        {
+            "schema_version": "1",
+            "playbook_version": "999.0.0",
+            "coverage_exempt_anchors": [],
+            "coverage_exempt_rationales": {},
+            "anchors": {"WRONG-ANCHOR-FROM-DECOY": {"heading": "Decoy", "heading_hash": "x"}},
+        },
+    )
 
     registry_path = root / "playbooks" / "registry.json"
     _write_json(registry_path, registry)
@@ -360,6 +386,7 @@ def _build_synthetic_registry(root: Path) -> Path:
 
 
 # ── Check H — registry-driven path resolution, not the literal eiaa path ─────
+
 
 def check_h() -> list[str]:
     """canonicalize.py / eval_harness.py / every reader of a playbook's own
@@ -378,7 +405,9 @@ def check_h() -> list[str]:
         return [f"  Could not import scripts/playbook_registry.py or its consumers: {exc}"]
 
     if not hasattr(playbook_registry, "resolve_playbook"):
-        return ["  scripts/playbook_registry.py has no resolve_playbook() -- no registry exists yet."]
+        return [
+            "  scripts/playbook_registry.py has no resolve_playbook() -- no registry exists yet."
+        ]
 
     import tempfile
 
@@ -446,6 +475,7 @@ def check_h() -> list[str]:
 
 # ── Check I — SECTION_CONFIG / COVERAGE_EXEMPT_RATIONALES are DATA ───────────
 
+
 def check_i() -> list[str]:
     """A playbook's section config must be a per-playbook DATA FILE resolved
     through the registry, not a Python literal shared identically across
@@ -496,6 +526,7 @@ def check_i() -> list[str]:
 
 
 # ── Check J — anchor-map selection by playbook_id, not lexically-last file ───
+
 
 def check_j() -> list[str]:
     """Anchor-map resolution must select the map by playbook_id via the
@@ -549,6 +580,7 @@ def check_j() -> list[str]:
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
+
 
 def main() -> int:
     checks = [

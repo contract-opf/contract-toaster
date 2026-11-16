@@ -184,17 +184,10 @@ function consoleModel(patch: Partial<ReviewModel> = {}): ReviewModel {
   };
 }
 
-function renderConsole(
-  model: ReviewModel,
-): { onAction: ReturnType<typeof vi.fn> } {
+function renderConsole(model: ReviewModel): { onAction: ReturnType<typeof vi.fn> } {
   const onAction = vi.fn();
   render(
-    <OrbitDiner
-      model={model}
-      onFile={() => {}}
-      onPreferences={() => {}}
-      onAction={onAction}
-    />,
+    <OrbitDiner model={model} onFile={() => {}} onPreferences={() => {}} onAction={onAction} />,
   );
   return { onAction };
 }
@@ -564,13 +557,9 @@ describe('issue #726 — the retry keys reach the existing loaders', () => {
     catalogFails = false;
     fireEvent.click(key);
 
-    await waitFor(() =>
-      expect(calls.filter((c) => c === 'GET /api/playbooks')).toHaveLength(2),
-    );
+    await waitFor(() => expect(calls.filter((c) => c === 'GET /api/playbooks')).toHaveLength(2));
     // The channel recovered: the entry — and the whole region with it — is gone.
-    await waitFor(() =>
-      expect(screen.queryByText('Contract types unavailable')).toBeNull(),
-    );
+    await waitFor(() => expect(screen.queryByText('Contract types unavailable')).toBeNull());
   });
 
   it('polls again on Check now, and never reports the review itself as burnt', async () => {
@@ -595,9 +584,7 @@ describe('issue #726 — the retry keys reach the existing loaders', () => {
     fireEvent.click(key);
 
     await waitFor(() =>
-      expect(calls.filter((c) => c === 'GET /api/reviews/rev-1').length).toBeGreaterThan(
-        before,
-      ),
+      expect(calls.filter((c) => c === 'GET /api/reviews/rev-1').length).toBeGreaterThan(before),
     );
     await waitFor(() => expect(console_()).toHaveAttribute('data-status', 'running'));
     expect(screen.queryByText('Still checking')).toBeNull();
@@ -628,13 +615,9 @@ describe('issue #726 — the retry keys reach the existing loaders', () => {
     const dialog = document.querySelector<HTMLElement>('dialog.od-dialog')!;
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save original' }));
 
+    await waitFor(() => expect(calls).toContain('GET /api/reviews/rev-1/input'));
     await waitFor(() =>
-      expect(calls).toContain('GET /api/reviews/rev-1/input'),
-    );
-    await waitFor(() =>
-      expect(downloads[downloads.length - 1]?.href).toBe(
-        'https://example.invalid/original.docx',
-      ),
+      expect(downloads[downloads.length - 1]?.href).toBe('https://example.invalid/original.docx'),
     );
   }, 14_000);
 });

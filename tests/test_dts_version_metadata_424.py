@@ -76,6 +76,7 @@ def check(condition: bool, pass_msg: str, fail_msg: str) -> list[str]:
 # Check 1 — deploy/dts/backend.Dockerfile ARG/ENV contract
 # ---------------------------------------------------------------------------
 
+
 def check_1_dockerfile_arg_env() -> list[str]:
     print("\nCheck 1: deploy/dts/backend.Dockerfile declares ARG + ENV metadata …")
     failures: list[str] = []
@@ -87,9 +88,7 @@ def check_1_dockerfile_arg_env() -> list[str]:
 
     for var in METADATA_VARS:
         # ARG must be declared with the graceful-degrade default.
-        arg_default = re.search(
-            rf"^\s*ARG\s+{var}\s*=\s*(\S+)\s*$", text, re.MULTILINE
-        )
+        arg_default = re.search(rf"^\s*ARG\s+{var}\s*=\s*(\S+)\s*$", text, re.MULTILINE)
         failures += check(
             arg_default is not None,
             f"1a[{var}]: ARG {var}=<default> declared",
@@ -108,9 +107,7 @@ def check_1_dockerfile_arg_env() -> list[str]:
             )
 
         # ENV must forward the ARG (ENV VERSION=${VERSION}).
-        env_line = re.search(
-            rf"^\s*ENV\s+{var}\s*=\s*\$\{{{var}\}}\s*$", text, re.MULTILINE
-        )
+        env_line = re.search(rf"^\s*ENV\s+{var}\s*=\s*\$\{{{var}\}}\s*$", text, re.MULTILINE)
         failures += check(
             env_line is not None,
             f"1c[{var}]: ENV {var}=${{{var}}} forwards the build arg to runtime",
@@ -125,6 +122,7 @@ def check_1_dockerfile_arg_env() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check 2 — the publish workflow passes real --build-arg values
 # ---------------------------------------------------------------------------
+
 
 def check_2_workflow_build_args() -> list[str]:
     print("\nCheck 2: dts-image-publish.yml passes --build-arg VERSION/COMMIT_SHA …")
@@ -163,6 +161,7 @@ def check_2_workflow_build_args() -> list[str]:
 # Check 3 — compose must not clobber the baked-in image ENV
 # ---------------------------------------------------------------------------
 
+
 def _backend_environment_block(text: str) -> str | None:
     """Return the raw text of the `backend:` service's `environment:` block."""
     svc = re.search(r"^  backend:\n(.*?)(?=^  \S|\Z)", text, re.MULTILINE | re.DOTALL)
@@ -193,9 +192,7 @@ def check_3_compose_does_not_clobber() -> list[str]:
             entry = re.search(rf"^\s*{var}:(.*)$", block, re.MULTILINE)
             if entry is None:
                 # Absent is safe: the image ENV simply survives untouched.
-                failures += ok(
-                    f"3[{rel}/{var}]: not set in compose (image ENV survives)"
-                )
+                failures += ok(f"3[{rel}/{var}]: not set in compose (image ENV survives)")
                 continue
             value = entry.group(1).strip()
             failures += check(
@@ -215,6 +212,7 @@ def check_3_compose_does_not_clobber() -> list[str]:
 # Check 4 — the build-from-source compose forwards the values as build args
 # ---------------------------------------------------------------------------
 
+
 def check_4_local_compose_build_args() -> list[str]:
     print("\nCheck 4: docker-compose.yml forwards VERSION/COMMIT_SHA as build args …")
     failures: list[str] = []
@@ -224,9 +222,7 @@ def check_4_local_compose_build_args() -> list[str]:
 
     text = read(COMPOSE_LOCAL)
 
-    args_block = re.search(
-        r"^(\s*)args:\n(.*?)(?=^\1\S|\Z)", text, re.MULTILINE | re.DOTALL
-    )
+    args_block = re.search(r"^(\s*)args:\n(.*?)(?=^\1\S|\Z)", text, re.MULTILINE | re.DOTALL)
     failures += check(
         args_block is not None,
         "4a: a build `args:` block is present",
@@ -239,8 +235,7 @@ def check_4_local_compose_build_args() -> list[str]:
     body = args_block.group(2)
     for var in ("VERSION", "COMMIT_SHA"):
         failures += check(
-            re.search(rf"^\s*{var}:\s*\$\{{{var}:-\S+\}}\s*$", body, re.MULTILINE)
-            is not None,
+            re.search(rf"^\s*{var}:\s*\$\{{{var}:-\S+\}}\s*$", body, re.MULTILINE) is not None,
             f"4b[{var}]: build arg {var} forwards ${{{var}:-{DEFAULTS[var]}}}",
             f"4b[{var}]: build arg {var} is missing or does not use the "
             f"${{{var}:-<default>}} host-override convention",
@@ -252,6 +247,7 @@ def check_4_local_compose_build_args() -> list[str]:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> int:
     print("DTS version-metadata plumbing gate (issue #424)")
@@ -265,10 +261,7 @@ def main() -> int:
 
     print("\n" + "=" * 70)
     if all_failures:
-        print(
-            f"\nFAIL: {len(all_failures)} check(s) failed.\n"
-            "See output above for details."
-        )
+        print(f"\nFAIL: {len(all_failures)} check(s) failed.\nSee output above for details.")
         return 1
 
     print("\nPASS: all DTS version-metadata checks passed (issue #424).")

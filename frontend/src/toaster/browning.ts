@@ -107,9 +107,7 @@ export function toMarkupIntensity(level: BrowningLevel): MarkupIntensity {
  * an unrecognised setting is not painted, and here it is not silently
  * downgraded to Medium either. The caller leaves the dial alone.
  */
-export function fromMarkupIntensity(
-  value: string | null | undefined,
-): BrowningLevel | null {
+export function fromMarkupIntensity(value: string | null | undefined): BrowningLevel | null {
   if (value === null || value === undefined || value === '') return DEFAULT_BROWNING;
   switch (value) {
     case 'light':

@@ -11,3 +11,20 @@ package-lock.json
 # Never formatted, never edited: the designer's source of record and the
 # baseline the next supplier patch verifies its before-hashes against.
 vendor/orbit-diner
+
+# Our working copy of that kit. Not vendored, but MERGED AGAINST the vendored one
+# by diff (vendor/orbit-diner/README.md, "Applying the next supplier patch"), so
+# reformatting it buries our local edits in layout noise: sounds.ts goes from 13
+# differing lines against the supplier's file to 197, OrbitDiner.tsx from 992 to
+# 1605. orbit.css is also read by tests that find a rule by its literal selector
+# text, and Prettier flips its attribute selectors to single quotes. ESLint still
+# covers this directory; only the formatter is kept off it.
+src/orbit-diner
+
+# A committed STUB that `python3 scripts/generate_aws_exports.py` overwrites at
+# deploy time (see the file's own header). The generator writes its own layout,
+# not Prettier's, so the formatted-file contract cannot hold for what it emits,
+# and tests/test_generate_aws_exports.py holds the emitted shape to this stub's.
+# Left exactly as committed rather than formatted to a layout the next deploy
+# discards.
+src/aws-exports.ts

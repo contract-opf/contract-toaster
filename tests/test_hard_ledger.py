@@ -106,7 +106,9 @@ INDEMNITY_CONDITION = {
 }
 
 DEFINITIONS = "Confidential Information means any non-public information disclosed by a party."
-CONFIDENTIALITY = "Confidential Information shall be protected for three (3) years after disclosure."
+CONFIDENTIALITY = (
+    "Confidential Information shall be protected for three (3) years after disclosure."
+)
 TERM = "Either party may terminate for convenience on thirty (30) days' written notice."
 GOVERNING_LAW = "This Agreement is governed by the laws of the State of Fixtureland."
 
@@ -119,9 +121,7 @@ GOVERNING_LAW = "This Agreement is governed by the laws of the State of Fixturel
 def _build_manifest(opf_doc: dict[str, Any]) -> dict[str, Any]:
     """Mirror of the engine's `build_manifest` (OPF-SPEC §3.12.3) over a
     valid Floor: one rule per invariant, in Floor order."""
-    by_taxonomy = {
-        clause.get("taxonomy_id"): clause for clause in opf_doc["evidence"]["clauses"]
-    }
+    by_taxonomy = {clause.get("taxonomy_id"): clause for clause in opf_doc["evidence"]["clauses"]}
     rules = []
     for invariant in opf_doc["floor"]["invariants"]:
         taxonomy_id = invariant.get("x_taxonomy_id")
@@ -402,7 +402,9 @@ def test_a_deleted_clause_is_asserted_into_the_redline() -> None:
     assert provenances == [f"ledger:{RULE_ID}"], provenances
     redline = result.get("redline_bytes")
     assert redline, "no redline was delivered"
-    assert _fallback(_opf_doc()) in _inserted_texts(redline), "fallback language is not a tracked insertion"
+    assert _fallback(_opf_doc()) in _inserted_texts(redline), (
+        "fallback language is not a tracked insertion"
+    )
     entry = _entry(result)
     assert entry["status"] == hl.STATUS_ASSERTED
     assert entry["reason"] == hl.REASON_CRITIC_ASSERTED
@@ -439,7 +441,10 @@ def test_a_cleared_claim_the_document_does_not_support_is_still_asserted() -> No
     elsewhere = _block_id(docx_bytes, "Governing Law")
     result, _client = _run(
         docx_bytes,
-        [_response(critic=True, ledger=[_cleared(elsewhere, GOVERNING_LAW)]), _verdict(JUDGED_RULE)],
+        [
+            _response(critic=True, ledger=[_cleared(elsewhere, GOVERNING_LAW)]),
+            _verdict(JUDGED_RULE),
+        ],
     )
     entry = _entry(result)
     assert entry["reason"] == hl.REASON_SPAN_OUTSIDE_CLAUSE, entry
@@ -462,7 +467,8 @@ def test_an_assert_naming_another_clause_does_not_place_the_insertion() -> None:
     absent = _docx(with_indemnity=False)
     governing = _block_id(absent, "Governing Law")
     result, _client = _run(
-        absent, [_response(critic=True, ledger=[_assert(block_id=governing)]), _verdict(JUDGED_RULE)]
+        absent,
+        [_response(critic=True, ledger=[_assert(block_id=governing)]), _verdict(JUDGED_RULE)],
     )
     assert result["status"] == "OK", result.get("reason")
     entry = _entry(result)
@@ -575,7 +581,10 @@ def test_a_cherry_picked_numeric_bound_span_stays_asserted() -> None:
         block_id = _block_id(docx_bytes, "Indemnification")
         result, _client = _run(
             docx_bytes,
-            [_response(critic=True, ledger=[_cleared(block_id, "runs for 3 years")]), _verdict(JUDGED_RULE)],
+            [
+                _response(critic=True, ledger=[_cleared(block_id, "runs for 3 years")]),
+                _verdict(JUDGED_RULE),
+            ],
             doc=doc,
         )
         assert result["status"] == "OK", result.get("reason")
@@ -622,7 +631,9 @@ def test_a_valid_span_with_a_satisfied_predicate_clears_the_entry() -> None:
 def test_a_span_differing_only_by_transcription_noise_still_validates() -> None:
     """Curly quotes and a collapsed whitespace run are transcription noise
     (`text_fold`); the hash is of the DOCUMENT's characters, not the copy."""
-    text = "Each party shall  indemnify the other against third-party claims \u2018as defined\u2019."
+    text = (
+        "Each party shall  indemnify the other against third-party claims \u2018as defined\u2019."
+    )
     docx_bytes = _docx(with_indemnity=True, indemnity_text=text)
     block_id = _block_id(docx_bytes, "Indemnification")
     cited = "Each party shall indemnify the other against third-party claims 'as defined'"
@@ -865,20 +876,31 @@ def _entry_with(condition: Any, reference_title: str | None = None) -> dict[str,
 
 
 def test_required_phrases_any_and_all() -> None:
-    all_of = _entry_with({"type": "required_phrases", "phrases": ["State of Delaware", "exclusive"]})
+    all_of = _entry_with(
+        {"type": "required_phrases", "phrases": ["State of Delaware", "exclusive"]}
+    )
     any_of = _entry_with(
-        {"type": "required_phrases", "phrases": ["State of Delaware", "State of New York"], "match": "any"}
+        {
+            "type": "required_phrases",
+            "phrases": ["State of Delaware", "State of New York"],
+            "match": "any",
+        }
     )
     text = "The courts of the  STATE OF DELAWARE have exclusive jurisdiction."
     assert hl.evaluate_predicate(all_of, text) is True
     assert hl.evaluate_predicate(all_of, "The courts of the State of Delaware.") is False
     assert hl.evaluate_predicate(any_of, "The courts of the State of New York.") is True
     assert hl.evaluate_predicate(any_of, "The courts of the State of Texas.") is False
-    assert hl.evaluate_predicate(_entry_with({"type": "required_phrases", "phrases": []}), text) is None
+    assert (
+        hl.evaluate_predicate(_entry_with({"type": "required_phrases", "phrases": []}), text)
+        is None
+    )
 
 
 def test_numeric_bound() -> None:
-    cap = _entry_with({"type": "numeric_bound", "pattern": "([0-9]+) years", "max": 5, "unit": "years"})
+    cap = _entry_with(
+        {"type": "numeric_bound", "pattern": "([0-9]+) years", "max": 5, "unit": "years"}
+    )
     assert hl.evaluate_predicate(cap, "This Agreement runs for 3 years.") is True
     assert hl.evaluate_predicate(cap, "This Agreement runs for 7 years.") is False
     assert hl.evaluate_predicate(cap, "3 years, renewable once for 9 years.") is False
@@ -899,7 +921,10 @@ def test_cross_reference() -> None:
     entry = _entry_with({"type": "cross_reference", "clause_id": "clause.term"}, "Term")
     assert hl.evaluate_predicate(entry, "Sections survive the end of the Term.") is True
     assert hl.evaluate_predicate(entry, "Sections survive the termination.") is False
-    assert hl.evaluate_predicate(_entry_with({"type": "cross_reference", "clause_id": "x"}), "Term") is None
+    assert (
+        hl.evaluate_predicate(_entry_with({"type": "cross_reference", "clause_id": "x"}), "Term")
+        is None
+    )
 
 
 def test_judged_is_presence_and_unknown_kinds_fail_closed() -> None:
@@ -930,28 +955,45 @@ def test_insertion_anchor_branches() -> None:
     #    section end, exactly as if the critic had named nothing.
     assert hl.insertion_anchor({**entry, "block_id": "p0003"}, two) == "p0002"
     assert hl.insertion_anchor({**entry, "block_id": None}, two) == "p0002"
-    assert hl.insertion_anchor({**entry, "block_id": _block_id(docx_bytes, "Term and Termination")}, block_map) == indemnity
+    assert (
+        hl.insertion_anchor(
+            {**entry, "block_id": _block_id(docx_bytes, "Term and Termination")}, block_map
+        )
+        == indemnity
+    )
     #    An entry with no title binds no block: the critic's is never honoured.
     assert hl.insertion_anchor({**entry, "title": None, "block_id": "p0001"}, two) == "p0002"
     # 2. the clause's own section
     assert hl.insertion_anchor({**entry, "block_id": None}, block_map) == indemnity
     # 3a. absent, present sections precede it in template order: the nearest (Confidentiality, 9) wins
-    term_like = {**entry, "block_id": None, "title": "Missing", "clause_id": "clause.missing", "order": (10,)}
+    term_like = {
+        **entry,
+        "block_id": None,
+        "title": "Missing",
+        "clause_id": "clause.missing",
+        "order": (10,),
+    }
     assert hl.insertion_anchor(term_like, block_map) == _block_id(docx_bytes, "Confidentiality")
     # 3b. absent, nothing precedes it: just ahead of the first section after it
     absent = _block_map(_docx(with_indemnity=False))
     earliest = {**term_like, "order": (8,)}
-    assert hl.insertion_anchor(earliest, absent) == _block_id(_docx(with_indemnity=False), "Definitions")
+    assert hl.insertion_anchor(earliest, absent) == _block_id(
+        _docx(with_indemnity=False), "Definitions"
+    )
     only_confidentiality = {
         block_id: block for block_id, block in absent.items() if block["heading"] != "Definitions"
     }
     assert hl.insertion_anchor(earliest, only_confidentiality) == "start"
     # 4. no order and no heading: the document's last block
-    assert hl.insertion_anchor({**term_like, "order": None}, block_map) == _block_id(docx_bytes, "Governing Law")
+    assert hl.insertion_anchor({**term_like, "order": None}, block_map) == _block_id(
+        docx_bytes, "Governing Law"
+    )
     assert hl.insertion_anchor(term_like, {}) is None
 
 
-def _asserted(rule_id: str, clause_id: str = "clause.indemnification", reason: str = hl.REASON_CRITIC_ASSERTED) -> dict[str, Any]:
+def _asserted(
+    rule_id: str, clause_id: str = "clause.indemnification", reason: str = hl.REASON_CRITIC_ASSERTED
+) -> dict[str, Any]:
     return {
         "rule_id": rule_id,
         "clause_id": clause_id,
@@ -1076,7 +1118,9 @@ def test_the_internal_footnote_names_the_rule_and_the_reason() -> None:
     )
     assert result["status"] == "OK", result.get("reason")
     footnotes = _part(result["redline_bytes"], "word/footnotes.xml")
-    assert f"Hard-rejection ledger rule {RULE_ID} was not proven present" in footnotes, footnotes[:400]
+    assert f"Hard-rejection ledger rule {RULE_ID} was not proven present" in footnotes, footnotes[
+        :400
+    ]
     assert _opf_doc(INDEMNITY_CONDITION)["floor"]["invariants"][-1]["statement"] not in footnotes
 
 
@@ -1090,9 +1134,7 @@ def test_a_rule_with_no_standard_language_never_claims_an_insertion() -> None:
         INDEMNITY_CONDITION,
         extra=(_invariant("LOL-001", INDEMNITY_CONDITION, "limitation_of_liability"),),
     )
-    doc["floor"]["invariants"] = [
-        i for i in doc["floor"]["invariants"] if i["id"] != RULE_ID
-    ]
+    doc["floor"]["invariants"] = [i for i in doc["floor"]["invariants"] if i["id"] != RULE_ID]
     doc["manifest"] = _build_manifest(doc)
     (rule,) = [r for r in doc["manifest"]["hard_rules"] if r["rule_id"] == "LOL-001"]
     assert rule["fallback_language"] is None and rule["clause_id"] is None, rule
@@ -1171,7 +1213,9 @@ def test_every_asserted_rule_on_one_clause_reaches_an_internal_footnote() -> Non
         ],
         doc=doc,
     )
-    assert "Hard-rejection ledger rule" not in _part(external["redline_bytes"], "word/footnotes.xml")
+    assert "Hard-rejection ledger rule" not in _part(
+        external["redline_bytes"], "word/footnotes.xml"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1228,8 +1272,12 @@ def test_a_ledger_only_review_inserts_a_standard_the_pen_rules_would_refuse() ->
         assert [f["provenance"] for f in result["findings"]] == [f"ledger:{RULE_ID}"]
         redline = result["redline_bytes"]
         assert redline, "the ledger's insertion was not delivered"
-        assert _in_order(_texts(redline, "word/document.xml"), DEFINITIONS, standard, CONFIDENTIALITY)
-        assert standard.split(". ")[0] in _inserted_texts(redline), "standard is not a tracked insertion"
+        assert _in_order(
+            _texts(redline, "word/document.xml"), DEFINITIONS, standard, CONFIDENTIALITY
+        )
+        assert standard.split(". ")[0] in _inserted_texts(redline), (
+            "standard is not a tracked insertion"
+        )
         not_applied = (result.get("analysis_report") or {}).get("changes_not_applied") or []
         assert not_applied == [], not_applied
         record = result["hard_ledger"]
@@ -1309,7 +1357,9 @@ def test_only_ledger_provenance_is_exempt_from_the_pen_rules() -> None:
     # admits no `ledger:` value.
     import re
 
-    schema = json.loads((REPO_ROOT / "playbooks" / "output-schema-v3.json").read_text(encoding="utf-8"))
+    schema = json.loads(
+        (REPO_ROOT / "playbooks" / "output-schema-v3.json").read_text(encoding="utf-8")
+    )
     pattern = schema["definitions"]["Issue"]["properties"]["provenance"]["pattern"]
     assert re.match(pattern, f"ledger:{RULE_ID}") is None, pattern
     assert re.match(pattern, "ledger:ind-004") is None, pattern
@@ -1407,7 +1457,9 @@ def test_a_ledger_insertion_that_fails_to_compile_is_re_hosted_or_fails_closed()
     assert "sixty (60)" in _inserted_texts(redline), "the critic's own edit was not delivered"
     assert _fallback(_opf_doc()) not in _texts(redline, "word/document.xml")
     footnotes = _texts(redline, "word/footnotes.xml")
-    assert f"Hard-rejection ledger entry for Indemnification: {refused_note}" in footnotes, footnotes
+    assert f"Hard-rejection ledger entry for Indemnification: {refused_note}" in footnotes, (
+        footnotes
+    )
     assert "its standard language was inserted" not in footnotes, footnotes
     entry = _entry(result)
     assert (entry["inserted"], entry["anchor_block_id"], entry["issue_key"]) == (False, None, "I2")
@@ -1489,7 +1541,9 @@ def test_a_ledger_insertion_that_fails_to_compile_is_re_hosted_or_fails_closed()
         covered_external.get("reason"),
     )
     assert covered_external["redline_bytes"]
-    assert _fallback(_opf_doc()) not in _texts(covered_external["redline_bytes"], "word/document.xml")
+    assert _fallback(_opf_doc()) not in _texts(
+        covered_external["redline_bytes"], "word/document.xml"
+    )
     assert _entry(covered_external)["inserted"] is False
 
     # Deletions only beside the refusal: a footnote hangs only on a
@@ -1516,9 +1570,7 @@ def test_a_ledger_insertion_that_fails_to_compile_is_re_hosted_or_fails_closed()
         ("Indemnification", redline_block_apply.REASON_BLOCK_OP_UNSUPPORTED_IN_TABLE)
     ], not_applied
     # External mode carries no internal note to lose: the deletion ships.
-    deletions_external, _client = _run(
-        docx_bytes, [json.dumps(deletion), _verdict(JUDGED_RULE)]
-    )
+    deletions_external, _client = _run(docx_bytes, [json.dumps(deletion), _verdict(JUDGED_RULE)])
     assert deletions_external["status"] == "OK", (
         deletions_external.get("status"),
         deletions_external.get("reason"),
@@ -1595,9 +1647,10 @@ def test_a_ledger_insertion_that_fails_to_compile_is_not_reported_as_inserted() 
             label,
             row,
         )
-        assert "has been inserted" not in json.dumps(
-            result.get("analysis_report")
-        ), (label, result.get("analysis_report"))
+        assert "has been inserted" not in json.dumps(result.get("analysis_report")), (
+            label,
+            result.get("analysis_report"),
+        )
         # The issue itself is unchanged: only the not-applied row is reworded.
         (ledger_finding,) = [
             f for f in result["findings"] if f["provenance"] == f"ledger:{RULE_ID}"
@@ -1727,7 +1780,9 @@ def test_a_critic_copy_of_a_standard_the_pen_rules_would_refuse_is_delivered() -
         ), not_applied
         redline = result["redline_bytes"]
         assert redline, "the restored standard was not delivered"
-        assert html.unescape(_inserted_texts(redline)).count(standard) == 1, "standard not delivered once"
+        assert html.unescape(_inserted_texts(redline)).count(standard) == 1, (
+            "standard not delivered once"
+        )
         assert _in_order(_texts(redline, "word/document.xml"), CONFIDENTIALITY, standard, TERM)
         record = result["hard_ledger"]
         entry = _entry(result)
@@ -1895,9 +1950,9 @@ def test_only_a_pure_copy_of_a_standard_covers_and_escapes_the_pen_rules() -> No
     # A near copy is the critic's own language: not covered.
     _result, record = enforce({**copy, "new_text": standard + " Forever."})
     assert record["inserted"] == 1, record
-    assert hl.standard_texts([_asserted("IND-004"), {**_asserted("X"), "status": hl.STATUS_CLEARED}]) == [
-        standard
-    ]
+    assert hl.standard_texts(
+        [_asserted("IND-004"), {**_asserted("X"), "status": hl.STATUS_CLEARED}]
+    ) == [standard]
 
     proven = {
         "blocks": [],
@@ -1920,10 +1975,34 @@ def test_only_a_pure_copy_of_a_standard_covers_and_escapes_the_pen_rules() -> No
 def test_settle_keeps_only_delivered_insertions() -> None:
     record = {
         "entries": [
-            {"rule_id": "A", "status": hl.STATUS_ASSERTED, "inserted": True, "anchor_block_id": "p0001", "issue_key": "I2"},
-            {"rule_id": "B", "status": hl.STATUS_ASSERTED, "inserted": True, "anchor_block_id": "p0003", "issue_key": "I3"},
-            {"rule_id": "C", "status": hl.STATUS_ASSERTED, "inserted": False, "anchor_block_id": None, "issue_key": "I4"},
-            {"rule_id": "D", "status": hl.STATUS_CLEARED, "inserted": False, "anchor_block_id": None, "issue_key": None},
+            {
+                "rule_id": "A",
+                "status": hl.STATUS_ASSERTED,
+                "inserted": True,
+                "anchor_block_id": "p0001",
+                "issue_key": "I2",
+            },
+            {
+                "rule_id": "B",
+                "status": hl.STATUS_ASSERTED,
+                "inserted": True,
+                "anchor_block_id": "p0003",
+                "issue_key": "I3",
+            },
+            {
+                "rule_id": "C",
+                "status": hl.STATUS_ASSERTED,
+                "inserted": False,
+                "anchor_block_id": None,
+                "issue_key": "I4",
+            },
+            {
+                "rule_id": "D",
+                "status": hl.STATUS_CLEARED,
+                "inserted": False,
+                "anchor_block_id": None,
+                "issue_key": None,
+            },
         ],
         "cleared": 1,
         "asserted": 3,
@@ -1946,14 +2025,19 @@ def test_settle_keeps_only_delivered_insertions() -> None:
         "One clause needs work. 3 required protections were not found in the agreement: "
         "1 is asserted in the redline and 2 are flagged only."
     )
-    assert hl.settled_verdict_summary({"decision": "ACCEPT", "verdict_summary": "Fine."}, nothing) == (
+    assert hl.settled_verdict_summary(
+        {"decision": "ACCEPT", "verdict_summary": "Fine."}, nothing
+    ) == (
         "Changes are requested: 3 required protections were not found in the agreement and "
         "are flagged only; no standard language was inserted for them."
     )
     # Nothing asserted: the reconciled summary is untouched.
-    assert hl.settled_verdict_summary(
-        {"decision": "ACCEPT", "verdict_summary": "Fine."}, {"asserted": 0, "inserted": 0}
-    ) == "Fine."
+    assert (
+        hl.settled_verdict_summary(
+            {"decision": "ACCEPT", "verdict_summary": "Fine."}, {"asserted": 0, "inserted": 0}
+        )
+        == "Fine."
+    )
 
 
 def test_delivered_issue_keys_are_only_those_of_a_delivered_document() -> None:
@@ -1977,7 +2061,9 @@ def test_redline_generate_restates_the_ledger_sentences_exactly() -> None:
     refused = hl.internal_note(RULE_ID, hl.REASON_CRITIC_ASSERTED, hl.OUTCOME_REFUSED)
     assert inserted.endswith(" " + rg._LEDGER_INSERTED_OUTCOME), inserted
     assert refused.endswith(" " + rg._LEDGER_REFUSED_OUTCOME), refused
-    assert inserted[: -len(rg._LEDGER_INSERTED_OUTCOME)] == refused[: -len(rg._LEDGER_REFUSED_OUTCOME)]
+    assert (
+        inserted[: -len(rg._LEDGER_INSERTED_OUTCOME)] == refused[: -len(rg._LEDGER_REFUSED_OUTCOME)]
+    )
     assert refused == (
         f"Hard-rejection ledger rule {RULE_ID} was not proven present: the second review did "
         "not find it in the agreement; its standard language did not pass the redline's "

@@ -154,8 +154,7 @@ def _validate_pen_rules_floor_refs(pen_rules: dict, opf_doc: dict) -> None:
     `opf.floor.invariants` -- fail closed on any unknown ref (issue #293
     scope item 4), never a silently-ignored typo."""
     known_ids = {
-        invariant.get("id")
-        for invariant in (opf_doc.get("floor") or {}).get("invariants") or []
+        invariant.get("id") for invariant in (opf_doc.get("floor") or {}).get("invariants") or []
     }
     unknown = sorted(_collect_floor_refs(pen_rules) - known_ids)
     if unknown:
@@ -191,7 +190,9 @@ def _validate_overrides(
     posture_override = overrides.get("posture")
     if posture_override is not None:
         parent_digest = posture_override.get("parent_section_digest")
-        genesis_digest = ((opf_doc.get("identity") or {}).get("section_digests") or {}).get("posture")
+        genesis_digest = ((opf_doc.get("identity") or {}).get("section_digests") or {}).get(
+            "posture"
+        )
         if parent_digest != genesis_digest:
             raise BindBundleError(
                 f"--posture-override parent_section_digest {parent_digest!r} does not match "
@@ -218,7 +219,11 @@ def _validate_overrides(
             for invariant in (opf_doc.get("floor") or {}).get("invariants") or []
         }
         collisions = sorted(
-            {addition.get("id") for addition in floor_additions if addition.get("id") in genesis_ids}
+            {
+                addition.get("id")
+                for addition in floor_additions
+                if addition.get("id") in genesis_ids
+            }
         )
         if collisions:
             raise BindBundleError(
@@ -390,13 +395,17 @@ def bind_bundle(
     try:
         jsonschema.validate(instance=bundle_doc, schema=_load_bundle_schema())
     except jsonschema.ValidationError as exc:  # pragma: no cover - defensive; should be unreachable
-        raise BindBundleError(f"bind_bundle produced a bundle that fails its own schema: {exc.message}") from None
+        raise BindBundleError(
+            f"bind_bundle produced a bundle that fails its own schema: {exc.message}"
+        ) from None
 
     return bundle_doc
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument(
         "--opf",
         required=True,
@@ -406,8 +415,14 @@ def main() -> int:
             "way its identity.content_hash must verify."
         ),
     )
-    parser.add_argument("--model-policy", required=True, help="Path to a model-policy JSON file (model/provider config).")
-    parser.add_argument("--playbook-id", required=True, help="Registry key; must be the OPF's own id or alias.")
+    parser.add_argument(
+        "--model-policy",
+        required=True,
+        help="Path to a model-policy JSON file (model/provider config).",
+    )
+    parser.add_argument(
+        "--playbook-id", required=True, help="Registry key; must be the OPF's own id or alias."
+    )
     parser.add_argument(
         "--policy",
         default=None,
@@ -432,7 +447,9 @@ def main() -> int:
         help="Path to a JSON file with anchor_map_path/section_config_path/standard_form_docx/legacy_playbook_path.",
     )
     parser.add_argument("--approved-by", default=None, help="Activation approver (optional).")
-    parser.add_argument("--approved-at", default=None, help="Activation approval ISO-8601 timestamp (optional).")
+    parser.add_argument(
+        "--approved-at", default=None, help="Activation approval ISO-8601 timestamp (optional)."
+    )
     parser.add_argument(
         "--pen-rules",
         default=None,
@@ -509,7 +526,9 @@ def main() -> int:
     if args.precision_profile is not None:
         precision_path = Path(args.precision_profile)
         if not precision_path.exists():
-            print(f"ERROR: --precision-profile path does not exist: {precision_path}", file=sys.stderr)
+            print(
+                f"ERROR: --precision-profile path does not exist: {precision_path}", file=sys.stderr
+            )
             return 1
         with open(precision_path, encoding="utf-8") as f:
             precision = json.load(f)
@@ -527,7 +546,10 @@ def main() -> int:
     if args.posture_override is not None:
         posture_override_path = Path(args.posture_override)
         if not posture_override_path.exists():
-            print(f"ERROR: --posture-override path does not exist: {posture_override_path}", file=sys.stderr)
+            print(
+                f"ERROR: --posture-override path does not exist: {posture_override_path}",
+                file=sys.stderr,
+            )
             return 1
         with open(posture_override_path, encoding="utf-8") as f:
             posture_override = json.load(f)
@@ -536,7 +558,10 @@ def main() -> int:
     if args.floor_additions is not None:
         floor_additions_path = Path(args.floor_additions)
         if not floor_additions_path.exists():
-            print(f"ERROR: --floor-additions path does not exist: {floor_additions_path}", file=sys.stderr)
+            print(
+                f"ERROR: --floor-additions path does not exist: {floor_additions_path}",
+                file=sys.stderr,
+            )
             return 1
         with open(floor_additions_path, encoding="utf-8") as f:
             floor_additions = json.load(f)
@@ -545,7 +570,10 @@ def main() -> int:
     if args.previous_bundle is not None:
         previous_bundle_path = Path(args.previous_bundle)
         if not previous_bundle_path.exists():
-            print(f"ERROR: --previous-bundle path does not exist: {previous_bundle_path}", file=sys.stderr)
+            print(
+                f"ERROR: --previous-bundle path does not exist: {previous_bundle_path}",
+                file=sys.stderr,
+            )
             return 1
         with open(previous_bundle_path, encoding="utf-8") as f:
             previous_bundle = json.load(f)

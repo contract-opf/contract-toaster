@@ -139,6 +139,7 @@ def output_withheld(result: dict[str, Any]) -> bool:
     in any form (see `OUTPUT_WITHHELD_KEY`)."""
     return bool(result.get(OUTPUT_WITHHELD_KEY))
 
+
 # Issue #585 finding 1 (review round 2): the umbrella reason for a batch
 # whose `analysis_report` carries ONLY deliberate, never-attempted
 # flag-only issues (mode='none', retry-exhausted, ...) -- NOT a single
@@ -317,9 +318,7 @@ def _field_code_counts(zf: zipfile.ZipFile) -> dict[tuple[str, str], int]:
         try:
             root = ET.fromstring(xml_bytes)  # noqa: S314
         except ET.ParseError as exc:
-            raise OutputScanError(
-                "malformed_output_part", f"{name} did not parse: {exc}"
-            ) from exc
+            raise OutputScanError("malformed_output_part", f"{name} did not parse: {exc}") from exc
         inserted: set[int] = set()
         for ins in root.iter(f"{{{WORD_NS}}}ins"):
             inserted.update(id(el) for el in ins.iter())
@@ -341,7 +340,8 @@ def _field_code_counts(zf: zipfile.ZipFile) -> dict[tuple[str, str], int]:
 
 
 def _check_no_field_codes(
-    zf: zipfile.ZipFile, baseline: Optional[zipfile.ZipFile] = None  # noqa: UP045
+    zf: zipfile.ZipFile,
+    baseline: Optional[zipfile.ZipFile] = None,  # noqa: UP045
 ) -> None:
     """Defense-in-depth structural check that model-generated text
     (`proposed_replacement_text`, `external_rationale_for_footnote`) reached
@@ -374,7 +374,8 @@ def _check_no_field_codes(
 
 
 def run_output_ooxml_scan(
-    docx_bytes: bytes, baseline_docx_bytes: Optional[bytes] = None  # noqa: UP045
+    docx_bytes: bytes,
+    baseline_docx_bytes: Optional[bytes] = None,  # noqa: UP045
 ) -> None:
     """Subject a just-assembled redline `.docx` to the same
     external-relationship / embedded-object / macro-template scan as an
@@ -614,10 +615,9 @@ def _append_marker_paragraph(part_bytes: bytes, marker_text: str) -> bytes:
     text_el = ET.SubElement(run, _w("t"))
     text_el.set(f"{{{XML_NS}}}space", "preserve")
     text_el.text = marker_text
-    return (
-        b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
-        + ET.tostring(root, encoding="unicode").encode("utf-8")
-    )
+    return b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + ET.tostring(
+        root, encoding="unicode"
+    ).encode("utf-8")
 
 
 def _compute_new_footnote_entries(
@@ -644,9 +644,7 @@ def _compute_new_footnote_entries(
             footnote_text_by_anchor.get(patch["anchor"])
         )
         for text in texts:
-            entries.append(
-                {"id": next_footnote_id, "anchor": patch["anchor"], "text": text}
-            )
+            entries.append({"id": next_footnote_id, "anchor": patch["anchor"], "text": text})
             next_footnote_id += 1
     return entries
 
@@ -713,9 +711,7 @@ def inject_export_marker_and_footnotes(
     # the block compiler's own pass, so the same care applies.
     doc_xml_text = originals[ooxml_util.DOCUMENT_PART].decode("utf-8")
     original_root_open_tag = ooxml_util.root_open_tag(doc_xml_text)
-    ooxml_util.register_declared_namespaces(
-        ooxml_util.declared_namespaces(original_root_open_tag)
-    )
+    ooxml_util.register_declared_namespaces(ooxml_util.declared_namespaces(original_root_open_tag))
     doc_root = ET.fromstring(originals[ooxml_util.DOCUMENT_PART])  # noqa: S314
     body = doc_root.find(_w("body"))
 
@@ -823,19 +819,16 @@ def inject_export_marker_and_footnotes(
     # only in that case -- never touch a root tag that already has it.
     if new_marker_rids:
         already_declared = any(
-            uri == REL_NS
-            for _prefix, uri in ooxml_util.declared_namespaces(original_root_open_tag)
+            uri == REL_NS for _prefix, uri in ooxml_util.declared_namespaces(original_root_open_tag)
         )
         if not already_declared:
-            original_root_open_tag = (
-                original_root_open_tag[:-1] + f' xmlns:r="{REL_NS}">'
-            )
+            original_root_open_tag = original_root_open_tag[:-1] + f' xmlns:r="{REL_NS}">'
 
     # ---- Re-serialize document.xml, splicing the ORIGINAL root open tag
     # back in verbatim (same technique as ooxml_util.py documents).
     serialized = ET.tostring(doc_root, encoding="unicode")
     auto_root_open_tag = ooxml_util.root_open_tag(serialized)
-    body_and_close = serialized[len(auto_root_open_tag):]
+    body_and_close = serialized[len(auto_root_open_tag) :]
     new_document_xml = (
         b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
         + original_root_open_tag.encode("utf-8")
@@ -868,9 +861,7 @@ def inject_export_marker_and_footnotes(
                 + ET.tostring(footnotes_root, encoding="unicode").encode("utf-8")
             )
         else:
-            new_parts["word/footnotes.xml"] = docx_parts.build_footnotes_xml(
-                footnote_entries
-            )
+            new_parts["word/footnotes.xml"] = docx_parts.build_footnotes_xml(footnote_entries)
 
     # ---- word/_rels/document.xml.rels (only rewritten if it actually changed)
     if new_marker_rids or new_footnotes_rid:
@@ -1082,17 +1073,13 @@ def generate_redline(
     # the LABELLED reason a caller would otherwise have to re-derive from
     # `reconciled_result["issues"]` itself (issue #585 finding 2).
     issues = reconciled_result.get("issues") or []
-    flag_only = [
-        _flag_only_entry(issue, _labelled_flag_only_reason(issue)) for issue in issues
-    ]
+    flag_only = [_flag_only_entry(issue, _labelled_flag_only_reason(issue)) for issue in issues]
     return {
         "status": "OK",
         "decision": "REQUEST_CHANGE",
         "docx_bytes": None,
         "analysis_report": (
-            _build_analysis_report(flag_only, has_attempted_failure=False)
-            if flag_only
-            else None
+            _build_analysis_report(flag_only, has_attempted_failure=False) if flag_only else None
         ),
         "verdict_summary": reconciled_result.get("verdict_summary"),
         **({"flag_only": flag_only} if flag_only else {}),
@@ -1266,11 +1253,7 @@ def pure_deletion_issue_keys(proven: dict[str, Any]) -> set:
     burn the issue's whole change set over language nobody proposed, and
     would do it to every whole-clause striking the pipeline ever produces.
     """
-    return {
-        issue_key
-        for issue_key, texts in _insert_texts_by_issue(proven).items()
-        if not texts
-    }
+    return {issue_key for issue_key, texts in _insert_texts_by_issue(proven).items() if not texts}
 
 
 def pen_checked_text_by_issue(
@@ -1318,9 +1301,7 @@ def _transcript_has_edits(proven: dict[str, Any]) -> bool:
     return bool(proven.get("block_ops"))
 
 
-def _prune_proven_transcript(
-    proven: dict[str, Any], drop_issue_keys: set
-) -> dict[str, Any]:
+def _prune_proven_transcript(proven: dict[str, Any], drop_issue_keys: set) -> dict[str, Any]:
     """A PROVEN transcript with every edit authored by `drop_issue_keys`
     rolled back -- the change-set atomicity primitive.
 
@@ -1531,7 +1512,8 @@ def _rendered_override_records(critic_delta: Any) -> list[dict[str, Any]]:
     dropped_ids = {
         entry.get("issue_id")
         for entry in computed
-        if entry.get("change") == _OVERRIDE_CHANGE_DROPPED and isinstance(entry.get("issue_id"), str)
+        if entry.get("change") == _OVERRIDE_CHANGE_DROPPED
+        and isinstance(entry.get("issue_id"), str)
     }
     replaced_ids = {
         entry.get("issue_id")
@@ -1856,8 +1838,7 @@ def _ledger_flag_only_notes(
             {
                 "section_ref": section,
                 "text": (
-                    f"Hard-rejection ledger entry for {section or 'an unnamed section'}: "
-                    f"{text}"
+                    f"Hard-rejection ledger entry for {section or 'an unnamed section'}: {text}"
                 ),
             }
         )
@@ -2172,8 +2153,7 @@ def generate_redline_from_blocks(
         # Terminal for the batch: `validate_block_patches` never returns a
         # partial transcript, so there is no proven half to deliver.
         all_flag_only = [
-            _flag_only_entry(issue, REASON_BLOCK_TRANSCRIPT_REJECTED)
-            for issue in issues
+            _flag_only_entry(issue, REASON_BLOCK_TRANSCRIPT_REJECTED) for issue in issues
         ]
         return {
             "status": STATUS_ERROR,
@@ -2188,9 +2168,7 @@ def generate_redline_from_blocks(
         }
 
     by_issue = proven.get("by_issue") or {}
-    issues_by_key = {
-        issue.get("issue_key"): issue for issue in issues if issue.get("issue_key")
-    }
+    issues_by_key = {issue.get("issue_key"): issue for issue in issues if issue.get("issue_key")}
 
     # ---- Every edit must name an issue that EXISTS. `block_transcript`
     # proves an edit against the document and `_duplicate_issue_key_error`
@@ -2208,8 +2186,7 @@ def generate_redline_from_blocks(
     )
     if unattributed:
         all_flag_only = [
-            _flag_only_entry(issue, REASON_BLOCK_TRANSCRIPT_REJECTED)
-            for issue in issues
+            _flag_only_entry(issue, REASON_BLOCK_TRANSCRIPT_REJECTED) for issue in issues
         ]
         return {
             "status": STATUS_ERROR,
@@ -2329,14 +2306,10 @@ def generate_redline_from_blocks(
             working,
             author=author,
             timestamp_iso=docx_parts.iso_date(date),
-            rationale_by_issue={
-                key: text for key, text in rationale_by_issue.items() if text
-            },
+            rationale_by_issue={key: text for key, text in rationale_by_issue.items() if text},
         )
         batch_failures = [
-            failure
-            for failure in compile_result["failures"]
-            if not failure.get("issue_key")
+            failure for failure in compile_result["failures"] if not failure.get("issue_key")
         ]
         if batch_failures:
             # Batch-level and fail-closed for the whole document: the
@@ -2446,9 +2419,7 @@ def generate_redline_from_blocks(
         # `generate_redline`, so the issue #513 invariant "the marker is
         # present iff internal notes are actually included" holds on both
         # paths rather than only on the quote path.
-        docx_bytes = inject_export_marker_and_footnotes(
-            docx_bytes, [], {}, include_marker=True
-        )
+        docx_bytes = inject_export_marker_and_footnotes(docx_bytes, [], {}, include_marker=True)
 
     if docx_bytes is not None:
         try:
@@ -2483,9 +2454,7 @@ def generate_redline_from_blocks(
         # the issue's own "has been inserted" rationale. Fixed copy only --
         # no rule id, no clause text. (The pen rules never judge a ledger
         # issue, #164, so it never reaches `pen_failures`.)
-        refused_rationale = (
-            _LEDGER_NOT_INSERTED_RATIONALE if issue_key in ledger_keys else None
-        )
+        refused_rationale = _LEDGER_NOT_INSERTED_RATIONALE if issue_key in ledger_keys else None
         if issue_key in changeset_failures:
             all_flag_only.append(
                 _flag_only_entry(
@@ -2521,15 +2490,11 @@ def generate_redline_from_blocks(
         elif issue_key not in by_issue:
             # A TRUE flag-only issue: the model authored no edit for it at
             # all. Same #585 labelling the quote path gives it.
-            all_flag_only.append(
-                _flag_only_entry(issue, _labelled_flag_only_reason(issue))
-            )
+            all_flag_only.append(_flag_only_entry(issue, _labelled_flag_only_reason(issue)))
 
     has_attempted_failure = bool(changeset_failures or edit_failures or pen_failures)
     analysis_report = (
-        _build_analysis_report(
-            all_flag_only, has_attempted_failure=has_attempted_failure
-        )
+        _build_analysis_report(all_flag_only, has_attempted_failure=has_attempted_failure)
         if all_flag_only
         else None
     )

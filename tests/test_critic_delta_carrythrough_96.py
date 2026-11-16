@@ -407,8 +407,7 @@ def test_the_row_gains_the_band_while_the_status_stays_done() -> None:
         f"artifact; row has {table.item.get('confidence_band')!r}"
     )
     assert table.item["status"] == "DONE", (
-        "Option B: a completed review is DONE regardless of its band; got "
-        f"{table.item['status']!r}"
+        f"Option B: a completed review is DONE regardless of its band; got {table.item['status']!r}"
     )
     assert table.item.get("decision") in {"ACCEPT", "REQUEST_CHANGE"}, (
         "and it keeps its legal decision, which only a DONE row may carry (issue #95)"
@@ -425,9 +424,7 @@ def test_a_confident_review_grows_no_band_attribute_at_all() -> None:
     """Absent, never a null placeholder -- the same convention
     `critic_attempts`, `normalization_notes` and the leakage fields follow."""
     table = FakeReviewsTable()
-    pr._write_real_terminal(
-        REVIEW_ID, {"status": "OK", "decision": "ACCEPT"}, None, FakeDDB(table)
-    )
+    pr._write_real_terminal(REVIEW_ID, {"status": "OK", "decision": "ACCEPT"}, None, FakeDDB(table))
 
     assert "confidence_band" not in table.item, (
         "an OK review must not grow a null confidence_band placeholder on the row"

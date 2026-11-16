@@ -150,10 +150,7 @@ class TestPlaybookLeakage(unittest.TestCase):
         corpus = _build_test_corpus()
         scanner = ls.LeakageScanner(corpus)
         zero_width_space = chr(0x200B)
-        variant = (
-            f"The{zero_width_space} Company standard liability cap "
-            "is $150,000 aggregate."
-        )
+        variant = f"The{zero_width_space} Company standard liability cap is $150,000 aggregate."
         text = f"Summary: {variant}"
 
         result = scanner.scan(text, field_name="verdict_summary")
@@ -166,10 +163,7 @@ class TestPlaybookLeakage(unittest.TestCase):
         corpus = _build_test_corpus()
         scanner = ls.LeakageScanner(corpus)
         soft_hyphen = chr(0x00AD)
-        variant = (
-            f"The Com{soft_hyphen}pany standard liability cap "
-            "is $150,000 aggregate."
-        )
+        variant = f"The Com{soft_hyphen}pany standard liability cap is $150,000 aggregate."
         text = f"Summary: {variant}"
 
         result = scanner.scan(text, field_name="verdict_summary")
@@ -183,10 +177,7 @@ class TestPlaybookLeakage(unittest.TestCase):
         corpus = _build_test_corpus()
         scanner = ls.LeakageScanner(corpus)
         fullwidth_cap = "".join(chr(cp) for cp in (0xFF43, 0xFF41, 0xFF50))
-        variant = (
-            f"The Company standard liability {fullwidth_cap} "
-            "is $150,000 aggregate."
-        )
+        variant = f"The Company standard liability {fullwidth_cap} is $150,000 aggregate."
         text = f"Summary: {variant}"
 
         result = scanner.scan(text, field_name="verdict_summary")
@@ -631,9 +622,7 @@ class TestScanAllProseFields(unittest.TestCase):
 
         self.assertTrue(outcome.blocked)
         self.assertEqual(outcome.confidence_state, "ERROR_MANUAL_REVIEW_REQUIRED")
-        self.assertEqual(
-            outcome.field_name, "critic_delta.rationale_objections.objection"
-        )
+        self.assertEqual(outcome.field_name, "critic_delta.rationale_objections.objection")
 
     def test_a_clean_rationale_objection_still_passes(self) -> None:
         """Coverage must not become a blanket refusal: the critic disagreeing

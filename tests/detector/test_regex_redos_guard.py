@@ -126,8 +126,8 @@ def is_structurally_dangerous(pattern: str) -> tuple[bool, str]:
 # We check for the section header and key terms.
 GOVERNANCE_REQUIRED_PHRASES = [
     "Regex-dialect and ReDoS constraint",  # section heading
-    "backtrack",                            # explains the risk
-    "match.*regex.*timeout|timeout.*regex", # mentions per-rule timeout (re pattern check below)
+    "backtrack",  # explains the risk
+    "match.*regex.*timeout|timeout.*regex",  # mentions per-rule timeout (re pattern check below)
 ]
 
 
@@ -167,6 +167,7 @@ def check_a() -> list[str]:
 
 # ── Check B: schema documents the safe dialect ────────────────────────────────
 
+
 def check_b() -> list[str]:
     """Assert schema.json match description mentions forbidden constructs."""
     failures = []
@@ -187,6 +188,7 @@ def check_b() -> list[str]:
 
 
 # ── Check C: adversarial-pattern regression test ──────────────────────────────
+
 
 def _run_with_timeout(pattern: str, text: str, timeout: float) -> tuple[bool | None, float]:
     """
@@ -241,8 +243,7 @@ def check_c() -> list[str]:
 
     all_rules = playbook.get("hard_rejections", [])
     regex_rules = [
-        r for r in all_rules
-        if r.get("match") == "regex" or r.get("regex_trigger_terms")
+        r for r in all_rules if r.get("match") == "regex" or r.get("regex_trigger_terms")
     ]
 
     if not regex_rules:
@@ -274,8 +275,7 @@ def check_c() -> list[str]:
                     result, elapsed = _run_with_timeout(term, adv, REGEX_TIMEOUT_S)
                 except re.error as e:
                     failures.append(
-                        f"  Rule '{rule_id}', trigger_term {term!r}: "
-                        f"invalid regex: {e}"
+                        f"  Rule '{rule_id}', trigger_term {term!r}: invalid regex: {e}"
                     )
                     continue
 
@@ -297,18 +297,17 @@ def check_c() -> list[str]:
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
+
 def main() -> int:
     checks = [
         (
             "A",
-            "Governance doc records regex-dialect decision "
-            "(docs/playbook-governance.md)",
+            "Governance doc records regex-dialect decision (docs/playbook-governance.md)",
             check_a,
         ),
         (
             "B",
-            "Schema documents safe dialect and forbidden constructs "
-            "(playbooks/schema.json)",
+            "Schema documents safe dialect and forbidden constructs (playbooks/schema.json)",
             check_b,
         ),
         (

@@ -220,10 +220,10 @@ def main():
             details.append(
                 f"  Hunk in scope: {hunk_in_scope(case['hunk']['anchor'], rule_anchors)}"
             )
-            details.append(
-                f"  Expected rule to fire: {expected}, actual: {fired}"
-            )
-            if not rule_anchors or (SEC_NEW not in rule_anchors and case["hunk"]["anchor"] == SEC_NEW):
+            details.append(f"  Expected rule to fire: {expected}, actual: {fired}")
+            if not rule_anchors or (
+                SEC_NEW not in rule_anchors and case["hunk"]["anchor"] == SEC_NEW
+            ):
                 details.append(
                     f"  ROOT CAUSE: rule '{rule_id}' has no anchor covering '{SEC_NEW}' "
                     f"because the not_in_standard topics it references have empty "

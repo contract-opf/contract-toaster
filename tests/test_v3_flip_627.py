@@ -218,9 +218,7 @@ def test_no_v2_field_instruction_survives_anywhere_in_the_assembled_prompt(
     and `topics` (renders the modes block), which is the only shape that
     composes every contract-bearing block at once.
     """
-    playbook_path = (
-        REPO_ROOT / "tests" / "fixtures" / "playbooks" / "synthetic-generic-v1.0.0.json"
-    )
+    playbook_path = REPO_ROOT / "tests" / "fixtures" / "playbooks" / "synthetic-generic-v1.0.0.json"
     playbook = json.loads(playbook_path.read_text(encoding="utf-8"))
 
     # The fixture must actually exercise both blocks, or this test silently
@@ -491,9 +489,7 @@ def test_no_v2_field_instruction_survives_in_the_critic_user_prompt(
             ),
         ):
             if needle not in tasking:
-                failures.append(
-                    f"[11e] the {label} critic tasking never names {needle} -- {why}."
-                )
+                failures.append(f"[11e] the {label} critic tasking never names {needle} -- {why}.")
 
 
 def test_the_critic_tasking_wording_is_gated_on_the_active_contract(
@@ -548,12 +544,13 @@ def test_the_critic_tasking_wording_is_gated_on_the_active_contract(
             "is not actually gating anything."
         )
 
+
 def test_the_primary_prompt_teaches_block_transcript_authoring(failures: list[str]) -> None:
     overlay = pp.BINARY_DECISION_OVERLAY_BLOCK
 
     required = {
         "the block-id marker format": '"[p0001] "',
-        "the marker no-copy rule": "NEVER copy the \"[pNNNN]\" markers into any output field",
+        "the marker no-copy rule": 'NEVER copy the "[pNNNN]" markers into any output field',
         "the block_patches carrier": '"block_patches"',
         "the block_ops carrier": '"block_ops"',
         "one entry per block_id": "EXACTLY ONE entry per block_id",
@@ -653,7 +650,7 @@ def test_rendered_block_ids_match_the_block_map_exactly(failures: list[str]) -> 
             )
         # The marker is the ONLY thing added: strip it and the rest is what
         # the pre-#627 renderer produced.
-        body = rendered[len(marker):] if rendered.startswith(marker) else rendered
+        body = rendered[len(marker) :] if rendered.startswith(marker) else rendered
         heading = (block_map[block_id].get("heading") or "").strip()
         if heading and heading != "<untitled>" and not body.startswith(f"## {heading}"):
             failures.append(
@@ -903,7 +900,7 @@ def test_a_source_mismatch_buys_exactly_one_informed_retry(failures: list[str]) 
     if pp.RETRY_CORRECTION_HEADING not in second:
         failures.append("[6e] attempt 2's prompt carries no correction block")
         return
-    correction = second[second.index(pp.RETRY_CORRECTION_HEADING):]
+    correction = second[second.index(pp.RETRY_CORRECTION_HEADING) :]
 
     if block_transcript.REASON_SOURCE_MISMATCH not in correction:
         failures.append(
@@ -1065,7 +1062,10 @@ def _full_pipeline_response(block_map: dict) -> str:
                         },
                         {"op": "delete", "text": "one hundred dollars", "issue_key": "I2"},
                         {"op": "insert", "text": "fifty dollars", "issue_key": "I2"},
-                        {"op": "keep", "text": term_text[hundred_at + len("one hundred dollars"):]},
+                        {
+                            "op": "keep",
+                            "text": term_text[hundred_at + len("one hundred dollars") :],
+                        },
                     ],
                 }
             ],
@@ -1141,7 +1141,9 @@ def test_a_fake_v3_response_drives_the_full_pipeline_to_a_multi_edit_redline(
     findings = result.get("findings") or []
     derived = {f.get("issue_key"): f.get("proposed_replacement_text") for f in findings}
     if derived.get("I1") != "thirty (30)":
-        failures.append(f"[9h] I1's replacement text was not derived from the transcript: {derived!r}")
+        failures.append(
+            f"[9h] I1's replacement text was not derived from the transcript: {derived!r}"
+        )
 
     # And nothing about the counterparty document was lost.
     if "Effective Date" not in _plain_text(redline):
@@ -1196,7 +1198,9 @@ def _primary_result_with_key(issue_key: str) -> dict[str, Any]:
     }
 
 
-def _critic_result_dropping_and_adding(issue_key: str, *, orphan_key: str | None = None) -> dict[str, Any]:
+def _critic_result_dropping_and_adding(
+    issue_key: str, *, orphan_key: str | None = None
+) -> dict[str, Any]:
     """A reconcile-shaped critic FINAL result (issue #138, ADR 0001) that
     DROPS the primary's one issue and raises its own under `issue_key`. The
     critic numbers from "I1" in its own response, so its first issue
@@ -1222,9 +1226,7 @@ def _critic_result_dropping_and_adding(issue_key: str, *, orphan_key: str | None
             }
         ],
         "critic_delta": {
-            "dispositions": [
-                {"issue_id": "I1", "disposition": "DROP", "reason": "Not supported."}
-            ],
+            "dispositions": [{"issue_id": "I1", "disposition": "DROP", "reason": "Not supported."}],
             "overrides": [],
         },
         "verdict_summary": None,
@@ -1254,9 +1256,7 @@ def test_a_retained_hard_rejection_cannot_take_a_critic_issues_key(
     issues = merged["issues"]
     keys = [issue.get("issue_key") for issue in issues]
     if len(keys) != len(set(keys)):
-        failures.append(
-            f"[11a] the merged issues list carries a duplicate issue_key: {keys!r}"
-        )
+        failures.append(f"[11a] the merged issues list carries a duplicate issue_key: {keys!r}")
     by_topic = {issue.get("playbook_topic_id"): issue for issue in issues}
     if "term-length" not in by_topic:
         failures.append(f"[11b] the dropped hard rejection was not retained: {keys!r}")
@@ -1294,9 +1294,7 @@ def test_a_retained_hard_rejection_cannot_take_a_critic_issues_key(
     # requires keys unique across `issues` AND `added_issues`, and the
     # reconciler forwards the deprecated array verbatim.
     with_added = _critic_result_dropping_and_adding("I1")
-    with_added["critic_delta"]["added_issues"] = [
-        {**with_added["issues"][0], "issue_key": "I2"}
-    ]
+    with_added["critic_delta"]["added_issues"] = [{**with_added["issues"][0], "issue_key": "I2"}]
     spanned = recon.reconcile(
         primary_result=_primary_result_with_key("I1"),
         critic_result=with_added,
@@ -1336,6 +1334,7 @@ def test_a_detector_fire_cannot_take_a_model_issues_key(failures: list[str]) -> 
     arrives either unkeyed (nothing named it) or carrying a key minted
     without sight of the model's -- both have to be resolved against the
     merge, and neither had an assertion anywhere before this."""
+
     def _fire(topic: str, **extra: Any) -> dict[str, Any]:
         fire = {
             "section_ref": f"Section {topic}",
@@ -1359,9 +1358,7 @@ def test_a_detector_fire_cannot_take_a_model_issues_key(failures: list[str]) -> 
     )
     keys = [issue.get("issue_key") for issue in merged["issues"]]
     if len(keys) != len(set(keys)) or None in keys or "" in keys:
-        failures.append(
-            f"[12a] detector fires did not get response-unique issue_keys: {keys!r}"
-        )
+        failures.append(f"[12a] detector fires did not get response-unique issue_keys: {keys!r}")
     by_topic = {i.get("playbook_topic_id"): i.get("issue_key") for i in merged["issues"]}
     if by_topic.get("term-length") != "I1":
         failures.append(f"[12b] the model's own key was moved by a fire: {by_topic!r}")
@@ -1482,8 +1479,7 @@ def test_stage_five_and_a_half_is_gone_from_the_spine(failures: list[str]) -> No
         for node in ast.walk(tree)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
     }
-    for name in ("run_requote_repair", "requote_enabled", "revert_unrecovered",
-                 "count_recovered"):
+    for name in ("run_requote_repair", "requote_enabled", "revert_unrecovered", "count_recovered"):
         if name in called:
             failures.append(f"[10a] review_spine still calls {name}()")
 
@@ -1499,9 +1495,7 @@ def test_stage_five_and_a_half_is_gone_from_the_spine(failures: list[str]) -> No
     # Issue #628 finished the job: the module and its deployment flag are
     # gone, not merely unreferenced.
     if (SCRIPTS_DIR / "requote_repair.py").exists():
-        failures.append(
-            "[10c] scripts/requote_repair.py still exists; issue #628 deletes it"
-        )
+        failures.append("[10c] scripts/requote_repair.py still exists; issue #628 deletes it")
     import config as _config  # type: ignore
 
     if hasattr(_config, "requote_enabled"):
@@ -1622,7 +1616,7 @@ def test_the_retry_correction_is_the_third_path_and_it_is_clean(
         failures.append(
             "[15a] pass-time replacement-text enforcement is ON under the active contract, so "
             "`replacement_text_violation` IS producible and its correction block -- which "
-            "names \"proposed_replacement_text\" -- reaches the model. Re-word that branch or "
+            'names "proposed_replacement_text" -- reaches the model. Re-word that branch or '
             "re-gate the enforcement; do not leave both."
         )
 

@@ -172,9 +172,12 @@ def _stored_reservation_cents(submission: dict[str, Any]) -> int | None:
         return None
 
 
-def settle_spend(actual_usd_cents: int, dynamodb_resource: Any,
-                  now_epoch: float | None = None,
-                  reservation_amount_cents: int | None = None) -> None:
+def settle_spend(
+    actual_usd_cents: int,
+    dynamodb_resource: Any,
+    now_epoch: float | None = None,
+    reservation_amount_cents: int | None = None,
+) -> None:
     """MIRROR of backend/src/reviews.py's settle_spend -- reconciles the
     worst-case reservation against ledgered actual spend on today's
     daily_spend row. Reverses the amount stored on the submission row
@@ -312,8 +315,7 @@ def _write_terminal_reviews_state(event: dict[str, Any], dynamodb_resource: Any)
             Key={"review_id": review_id},
             UpdateExpression="SET " + ", ".join(set_clauses),
             ConditionExpression=(
-                "attribute_not_exists(#status) "
-                "OR (#status <> :error AND #status <> :cancelled)"
+                "attribute_not_exists(#status) OR (#status <> :error AND #status <> :cancelled)"
             ),
             ExpressionAttributeNames=names,
             ExpressionAttributeValues=values,

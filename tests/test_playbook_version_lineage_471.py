@@ -261,9 +261,7 @@ def _activate_real_playbook_version(
     playbook_versions_module.record_playbook_version_upload(
         playbook_id, version, "test-actor-471", ddb, content_hash=content_hash
     )
-    playbook_versions_module.activate_playbook_version(
-        playbook_id, version, "test-actor-471", ddb
-    )
+    playbook_versions_module.activate_playbook_version(playbook_id, version, "test-actor-471", ddb)
     ddb.Table(os.environ["PLAYBOOKS_TABLE"]).update_item(
         Key={"playbook_id": playbook_id},
         UpdateExpression="SET active_release_bundle_hash = :h",
@@ -309,12 +307,8 @@ class TestSubmissionRecordsPlaybookVersionLineage(unittest.TestCase):
     def test_a_second_activated_version_is_the_one_recorded(self):
         """Not just "any" playbook_versions row -- specifically the one
         whose content_hash matches what actually gated THIS submission."""
-        _activate_real_playbook_version(
-            self.ddb, version="1.0.0", content_hash="sha256:fixture-v1"
-        )
-        _activate_real_playbook_version(
-            self.ddb, version="2.0.0", content_hash="sha256:fixture-v2"
-        )
+        _activate_real_playbook_version(self.ddb, version="1.0.0", content_hash="sha256:fixture-v1")
+        _activate_real_playbook_version(self.ddb, version="2.0.0", content_hash="sha256:fixture-v2")
         sfn = FakeSfnClient()
 
         result = reviews_module.resolve_and_submit_review(
@@ -456,13 +450,11 @@ class TestProjectionCarriesPlaybookVersionLineage(_ReviewsProjectionTestCase):
     def test_list_carries_both_fields(self):
         items = reviews_module.list_reviews(
             _caller_row(OWNER), self._row_resource(VERSIONED_ROW, UNVERSIONED_ROW)
-        )['items']
+        )["items"]
         by_id = {item["review_id"]: item for item in items}
 
         self.assertEqual(by_id["rev-471-versioned"]["playbook_version"], SEEDED_VERSION)
-        self.assertEqual(
-            by_id["rev-471-versioned"]["playbook_content_hash"], SEEDED_CONTENT_HASH
-        )
+        self.assertEqual(by_id["rev-471-versioned"]["playbook_content_hash"], SEEDED_CONTENT_HASH)
         self.assertIsNone(by_id["rev-471-unversioned"]["playbook_version"])
         self.assertIsNone(by_id["rev-471-unversioned"]["playbook_content_hash"])
 

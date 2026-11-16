@@ -204,9 +204,7 @@ GOLDEN_OPF_ASSEMBLED_BARE_SHA256 = (
 )
 # The ASSEMBLED v1 system prompt (`primary_review_pass.assemble_system_blocks`
 # over V1_PLAYBOOK).
-GOLDEN_V1_ASSEMBLED_BARE_SHA256 = (
-    "1c7ba6c74adda6ed8b1ed162ee26e14a88161e9236c492be0f64ecad29d6ecac"
-)
+GOLDEN_V1_ASSEMBLED_BARE_SHA256 = "1c7ba6c74adda6ed8b1ed162ee26e14a88161e9236c492be0f64ecad29d6ecac"
 
 
 def _sha256(blocks: list[str]) -> str:
@@ -382,7 +380,9 @@ class TestTheResolver(unittest.TestCase):
             def Table(self, _name):  # noqa: N802
                 return _Table()
 
-        reviews._create_review_row("r", "o", "eiaa", "sha256:abc", _DDB(), markup_intensity="medium")
+        reviews._create_review_row(
+            "r", "o", "eiaa", "sha256:abc", _DDB(), markup_intensity="medium"
+        )
         self.assertNotIn("markup_intensity", written[-1])
         reviews._create_review_row("r", "o", "eiaa", "sha256:abc", _DDB(), markup_intensity="light")
         self.assertEqual(written[-1].get("markup_intensity"), "light")
@@ -435,9 +435,9 @@ class TestTheOpfPrompt(unittest.TestCase):
         at = control.index(_expected_block("heavy"))
         self.assertLess(control.index(STANDING_INSTRUCTIONS), at)
         self.assertTrue(
-            control[at + len(_expected_block("heavy")) :].lstrip("\n").startswith(
-                "PER-REVIEW GUIDANCE"
-            )
+            control[at + len(_expected_block("heavy")) :]
+            .lstrip("\n")
+            .startswith("PER-REVIEW GUIDANCE")
         )
         self.assertIn(TOASTER_GUIDANCE, control)
 
@@ -575,7 +575,9 @@ class TestTheV1Prompt(unittest.TestCase):
             sent = call["user_prompt"]
             self.assertEqual(sent.count(_expected_block("heavy")), 1)
             # After the shared document prefix (issue #148)...
-            self.assertLess(sent.index("</COUNTERPARTY_DOCUMENT>"), sent.index(pp.MARKUP_INTENSITY_INTRO))
+            self.assertLess(
+                sent.index("</COUNTERPARTY_DOCUMENT>"), sent.index(pp.MARKUP_INTENSITY_INTRO)
+            )
             # ...and the reviewer's words still last: the block precedes the guidance.
             self.assertLess(sent.index(pp.MARKUP_INTENSITY_INTRO), sent.index(TOASTER_GUIDANCE))
             self.assertNotIn(pp.MARKUP_INTENSITY_INTRO, call["system_prompt"])
@@ -660,9 +662,11 @@ class TestItIsThreadedEndToEnd(unittest.TestCase):
         self.assertEqual(spine.count("markup_intensity=markup_intensity"), 4)
         self.assertNotIn(
             "markup_intensity",
-            spine[spine.index("def _assemble_opf_system_blocks(") : spine.index(
-                "def leakage_scan_instruction_blocks("
-            )],
+            spine[
+                spine.index("def _assemble_opf_system_blocks(") : spine.index(
+                    "def leakage_scan_instruction_blocks("
+                )
+            ],
         )
         # Each call body is sliced to its own closing paren at its own
         # indentation (the corpus call sits one level deeper).

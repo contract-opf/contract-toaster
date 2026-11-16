@@ -89,6 +89,7 @@ def llm_section(arch_text: str) -> str:
 
 # ── Check 1: Per-pass manifest heading/label present ─────────────────────────
 
+
 def check_manifest_heading_present() -> list[str]:
     """
     ARCHITECTURE.md LLM section must contain a heading or bold label that
@@ -112,6 +113,7 @@ def check_manifest_heading_present() -> list[str]:
 
 
 # ── Check 2: Primary manifest completeness ───────────────────────────────────
+
 
 def check_primary_manifest_completeness() -> list[str]:
     """
@@ -137,7 +139,9 @@ def check_primary_manifest_completeness() -> list[str]:
 
     required = [
         (
-            re.compile(r"standard.form diff|std.form diff|diff.*anchor|anchor.*diff", re.IGNORECASE),
+            re.compile(
+                r"standard.form diff|std.form diff|diff.*anchor|anchor.*diff", re.IGNORECASE
+            ),
             "standard-form diff",
         ),
         (
@@ -212,6 +216,7 @@ def check_primary_manifest_completeness() -> list[str]:
 
 
 # ── Check 3: Critic manifest — diff + anchored + primary output; no raw doc ──
+
 
 def check_critic_manifest() -> list[str]:
     """
@@ -340,6 +345,7 @@ def check_critic_manifest() -> list[str]:
 
 # ── Check 4: Assembled-size assertion referenced ─────────────────────────────
 
+
 def check_assembled_size_assertion() -> list[str]:
     """
     ARCHITECTURE.md must state that the assembled prompt size is asserted
@@ -367,6 +373,7 @@ def check_assembled_size_assertion() -> list[str]:
 
 
 # ── Check 5: Design-notes rationale for critic input choice ──────────────────
+
 
 def check_design_notes_critic_rationale() -> list[str]:
     """
@@ -410,6 +417,7 @@ def check_design_notes_critic_rationale() -> list[str]:
 
 # ── Check 6: Manifest changes are release-bundle gated ───────────────────────
 
+
 def check_manifest_release_bundle_gated() -> list[str]:
     """
     ARCHITECTURE.md must state that manifest changes are prompt changes
@@ -435,6 +443,7 @@ def check_manifest_release_bundle_gated() -> list[str]:
 
 
 # ── Check 7: Eval harness critic-input manifest gate (AC3) ───────────────────
+
 
 def check_eval_critic_input_gate() -> list[str]:
     """
@@ -523,6 +532,7 @@ def check_eval_critic_input_gate() -> list[str]:
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
+
 
 def main() -> int:
     checks = [

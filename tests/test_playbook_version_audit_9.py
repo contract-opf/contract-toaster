@@ -81,6 +81,7 @@ class PlaybookVersionAuditTrailTestBase(unittest.TestCase):
 
 # -- (1) upload writes an append-only record with uploader identity + timestamp --
 
+
 class TestUploadWritesAuditRecord(PlaybookVersionAuditTrailTestBase):
     def test_upload_records_uploader_and_timestamp(self):
         item = pv.record_playbook_version_upload(
@@ -150,6 +151,7 @@ class TestUploadWritesAuditRecord(PlaybookVersionAuditTrailTestBase):
 
 
 # -- (2) read path returns records in order, de-branded --------------------
+
 
 class TestTrailReadPath(PlaybookVersionAuditTrailTestBase):
     def test_trail_returns_records_in_upload_order(self):

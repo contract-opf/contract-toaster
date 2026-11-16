@@ -53,15 +53,9 @@ import opf_prompt  # noqa: E402
 FIXTURE = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.6.opf.json"
 NO_DIGEST_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "opf" / "synthetic-eiaa.opf.json"
 NDA_EXAMPLE = REPO_ROOT / "tests" / "fixtures" / "opf" / "engine-nda-example.opf.json"
-VECTOR_002 = (
-    opf_load.OPF_CONFORMANCE_VECTORS_DIR / "002-variants-refused-and-exclusions.json"
-)
-VECTOR_003 = (
-    opf_load.OPF_CONFORMANCE_VECTORS_DIR / "003-cap-totals-and-summary.json"
-)
-VECTOR_009 = (
-    opf_load.OPF_CONFORMANCE_VECTORS_DIR / "009-standard-parts-and-owner-label.json"
-)
+VECTOR_002 = opf_load.OPF_CONFORMANCE_VECTORS_DIR / "002-variants-refused-and-exclusions.json"
+VECTOR_003 = opf_load.OPF_CONFORMANCE_VECTORS_DIR / "003-cap-totals-and-summary.json"
+VECTOR_009 = opf_load.OPF_CONFORMANCE_VECTORS_DIR / "009-standard-parts-and-owner-label.json"
 
 
 def _doc(path: Path = FIXTURE) -> dict:
@@ -105,18 +99,27 @@ def check_1_nda_example() -> list[str]:
         failures.append(f"  New York variant lacks 'reached from our standard in 2': {new_york!r}")
     california = _line_containing(governing_law, "State of California")
     if "signed unchanged from the opening text in 2" not in california:
-        failures.append(f"  California variant lacks 'signed unchanged from the opening text in 2': {california!r}")
+        failures.append(
+            f"  California variant lacks 'signed unchanged from the opening text in 2': {california!r}"
+        )
     if "signed as proposed in" in california:
-        failures.append("  the unchanged count still reads 'signed as proposed' (QA #10): that wording implies the other side opened it")
+        failures.append(
+            "  the unchanged count still reads 'signed as proposed' (QA #10): that wording implies the other side opened it"
+        )
     if "reached from our standard" in california:
         failures.append("  California variant claims a concession the digest does not record")
     # Cited by the deal's opaque alias, never its slug (issue #173): the
     # representative's own ref, as the engine's digest records it.
     doc = _doc(NDA_EXAMPLE)
     clause = next(c for c in doc["digest"]["clauses"] if c["id"] == "clause.governing_law")
-    (ref,) = [v["ref"] for v in clause["signed_variants"] if "State of New York" in v.get("text", "")]
+    (ref,) = [
+        v["ref"] for v in clause["signed_variants"] if "State of New York" in v.get("text", "")
+    ]
     alias = deal_aliases.alias_map(doc)[ref["document_id"]]
-    if f"[{alias}@{ref['version']} §{ref['clause_path']}]" not in new_york or ref["document_id"] in new_york:
+    if (
+        f"[{alias}@{ref['version']} §{ref['clause_path']}]" not in new_york
+        or ref["document_id"] in new_york
+    ):
         failures.append("  New York variant lost its citation")
     return failures
 
@@ -127,8 +130,15 @@ def check_2_plain_facts_only() -> list[str]:
         doc = _doc(path)
         block = _digest_block(doc)
         for retired in (
-            "Historical stance", "(n=", "often", "sometimes", "{risk:",
-            "Preferred variations", "concessions", "Unacceptable variations", "evidence library",
+            "Historical stance",
+            "(n=",
+            "often",
+            "sometimes",
+            "{risk:",
+            "Preferred variations",
+            "concessions",
+            "Unacceptable variations",
+            "evidence library",
         ):
             if retired in block:
                 failures.append(f"  {path.name}: digest-2 vocabulary {retired!r} reached the block")
@@ -152,7 +162,9 @@ def check_3_wholesale_retired() -> list[str]:
             failures.append(f"  {path.name}: {len(leaked)} precedent id(s) reached the prompt")
         tokens = len(joined) // 4
         if tokens >= 50_000:
-            failures.append(f"  {path.name}: composed prompt is {tokens} tokens, over the 50K review budget")
+            failures.append(
+                f"  {path.name}: composed prompt is {tokens} tokens, over the 50K review budget"
+            )
     return failures
 
 
@@ -164,12 +176,18 @@ def check_4_labels_are_an_index() -> list[str]:
     alias = deal_aliases.alias_map(_doc())["fixture-college"]  # issue #173
     if not judged.startswith("  - [less protective of us] ") or f"[{alias}@2 §8.1]" not in judged:
         failures.append(f"  judged variant lacks its label or citation: {judged!r}")
-    if "Judged difference: Conditions our indemnity on prompt notice and cooperation." not in indemnification:
+    if (
+        "Judged difference: Conditions our indemnity on prompt notice and cooperation."
+        not in indemnification
+    ):
         failures.append("  judged variant lacks its one-sentence reason")
     unjudged = _line_containing(indemnification, "intellectual property rights")
     if not unjudged.startswith('  - "'):
         failures.append(f"  an unjudged variant carries a label it does not have: {unjudged!r}")
-    if "Positions of the 4 signed deals: 2 our standard, 1 less protective of us, 1 not judged." not in indemnification:
+    if (
+        "Positions of the 4 signed deals: 2 our standard, 1 less protective of us, 1 not judged."
+        not in indemnification
+    ):
         failures.append("  positions line missing or wrong for indemnification")
     confidentiality = _clause_section(block, "clause.confidentiality")
     equivalent = [line for line in confidentiality.splitlines() if "[equivalent wording]" in line]
@@ -179,7 +197,9 @@ def check_4_labels_are_an_index() -> list[str]:
         '1 text, signed in 1 deal, opened on our former form "2022 affiliation form" in 1'
         not in equivalent[0]
     ):
-        failures.append(f"  collapsed equivalent-wording entry not rendered once with its counts: {equivalent!r}")
+        failures.append(
+            f"  collapsed equivalent-wording entry not rendered once with its counts: {equivalent!r}"
+        )
 
     several_parts = _digest_block(_vector_doc(VECTOR_009))
     if "Our standard, in 4 parts:" not in several_parts:
@@ -221,11 +241,15 @@ def check_6_capped_list_says_so() -> list[str]:
 
     # The plural signed-variant wording, from real engine output: conformance
     # vector 003 lists 5 of limitation of liability's 7 signed variants.
-    capped = _clause_section(_digest_block(_vector_doc(VECTOR_003)), "clause.limitation_of_liability")
+    capped = _clause_section(
+        _digest_block(_vector_doc(VECTOR_003)), "clause.limitation_of_liability"
+    )
     expected = "(2 more signed variants on record, not shown here.)"
     if expected not in capped:
-        failures.append(f"  vector 003's capped signed-variant list does not say {expected!r}: "
-                        f"{_line_containing(capped, 'not shown here')!r}")
+        failures.append(
+            f"  vector 003's capped signed-variant list does not say {expected!r}: "
+            f"{_line_containing(capped, 'not shown here')!r}"
+        )
 
     # All three capped lists at once. The engine applies one top_n to
     # signed_variants, refused_asks and changed_openings alike
@@ -235,10 +259,18 @@ def check_6_capped_list_says_so() -> list[str]:
     # digest can produce. The head noun of an opening is "opening", not the
     # phrase's last word.
     for extra_refused, extra_openings, expected in (
-        (3, 2, "(1 more signed variant, 3 more refused asks, "
-               "2 more openings not signed as proposed on record, not shown here.)"),
-        (1, 1, "(1 more signed variant, 1 more refused ask, "
-               "1 more opening not signed as proposed on record, not shown here.)"),
+        (
+            3,
+            2,
+            "(1 more signed variant, 3 more refused asks, "
+            "2 more openings not signed as proposed on record, not shown here.)",
+        ),
+        (
+            1,
+            1,
+            "(1 more signed variant, 1 more refused ask, "
+            "1 more opening not signed as proposed on record, not shown here.)",
+        ),
     ):
         doc = _doc()
         clause = next(c for c in doc["digest"]["clauses"] if c["id"] == "clause.indemnification")
@@ -247,8 +279,10 @@ def check_6_capped_list_says_so() -> list[str]:
         clause["n_changed_openings_total"] = len(clause["changed_openings"]) + extra_openings
         section = _clause_section(_digest_block(doc), "clause.indemnification")
         if expected not in section:
-            failures.append(f"  capped indemnification lists do not say {expected!r}: "
-                            f"{_line_containing(section, 'not shown here')!r}")
+            failures.append(
+                f"  capped indemnification lists do not say {expected!r}: "
+                f"{_line_containing(section, 'not shown here')!r}"
+            )
     return failures
 
 
@@ -256,7 +290,10 @@ def check_7_no_digest_refuses() -> list[str]:
     failures: list[str] = []
     stripped = _doc()
     stripped.pop("digest", None)
-    for label, doc in (("0.6 document with no digest", _doc(NO_DIGEST_FIXTURE)), ("digest removed", stripped)):
+    for label, doc in (
+        ("0.6 document with no digest", _doc(NO_DIGEST_FIXTURE)),
+        ("digest removed", stripped),
+    ):
         try:
             opf_prompt.compose_opf_system_blocks(doc)
             failures.append(
@@ -266,7 +303,9 @@ def check_7_no_digest_refuses() -> list[str]:
         except opf_prompt.PromptCompositionError:
             pass
         except Exception as exc:  # noqa: BLE001
-            failures.append(f"  {label}: raised {type(exc).__name__}, expected PromptCompositionError")
+            failures.append(
+                f"  {label}: raised {type(exc).__name__}, expected PromptCompositionError"
+            )
     return failures
 
 
@@ -299,21 +338,39 @@ def check_9_dates_render() -> list[str]:
     assignment = _clause_section(block, "clause.assignment")
     variant = _line_containing(assignment, "to an affiliate, without consent")
     if "signed in 3 deals, first signed 2025-03, last signed 2025-11," not in variant:
-        failures.append(f"  a dated variant does not say when it was most recently signed: {variant!r}")
+        failures.append(
+            f"  a dated variant does not say when it was most recently signed: {variant!r}"
+        )
     return failures
 
 
 def main() -> int:
     checks = [
         ("1", "the engine's NDA example renders the #129 facts", check_1_nda_example),
-        ("2", "plain facts only: no digest-2 vocabulary, every clause rendered", check_2_plain_facts_only),
-        ("3", "wholesale dump retired: no precedent record text or id, within budget", check_3_wholesale_retired),
-        ("4", "labels, reasons, citations, positions, part maps, owner labels", check_4_labels_are_an_index),
+        (
+            "2",
+            "plain facts only: no digest-2 vocabulary, every clause rendered",
+            check_2_plain_facts_only,
+        ),
+        (
+            "3",
+            "wholesale dump retired: no precedent record text or id, within budget",
+            check_3_wholesale_retired,
+        ),
+        (
+            "4",
+            "labels, reasons, citations, positions, part maps, owner labels",
+            check_4_labels_are_an_index,
+        ),
         ("5", "empty lists render nothing; openings render their counts", check_5_lists),
         ("6", "a capped list says how many more are on record", check_6_capped_list_says_so),
         ("7", "no digest => refuse to compose", check_7_no_digest_refuses),
         ("8", "the intro frames precedent as an index, never instruction", check_8_intro),
-        ("9", "a dated digest states its signed span and each variant's signing months", check_9_dates_render),
+        (
+            "9",
+            "a dated digest states its signed span and each variant's signing months",
+            check_9_dates_render,
+        ),
     ]
     ok = True
     for code, name, fn in checks:

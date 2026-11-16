@@ -16,6 +16,7 @@ small enough for the judge to answer inside 1024.
 These are REQUEST-SHAPE pins: what leaves the client, not what a model does with
 it.
 """
+
 from __future__ import annotations
 
 import sys
@@ -50,7 +51,9 @@ class TestReasoningRequestShape(unittest.TestCase):
         allowance = mc.openrouter_reasoning_max_tokens(PRIMARY)
         with patch.dict("os.environ", {}, clear=True):
             _client(http).invoke(
-                model_id=PRIMARY, system_prompt="s", user_prompt="u",
+                model_id=PRIMARY,
+                system_prompt="s",
+                user_prompt="u",
                 max_output_tokens=1024,
             )
         sent = http.calls[0]["json"]
@@ -65,7 +68,9 @@ class TestReasoningRequestShape(unittest.TestCase):
         http = FakeHttpClient(_choice_response())
         with patch.dict("os.environ", {}, clear=True):
             _client(http).invoke(
-                model_id="anthropic/claude-sonnet-5", system_prompt="s", user_prompt="u",
+                model_id="anthropic/claude-sonnet-5",
+                system_prompt="s",
+                user_prompt="u",
                 max_output_tokens=1024,
             )
         self.assertNotIn("reasoning", http.calls[0]["json"])

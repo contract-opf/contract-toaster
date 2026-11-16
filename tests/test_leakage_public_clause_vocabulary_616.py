@@ -169,24 +169,20 @@ def _digest_texts(doc: dict[str, Any]) -> list[str]:
     texts: list[str] = []
     for clause in doc["digest"]["clauses"]:
         for entry in clause["signed_variants"]:
-            texts.extend([entry["text"]] if "text" in entry else [e["text"] for e in entry["exemplars"]])
+            texts.extend(
+                [entry["text"]] if "text" in entry else [e["text"] for e in entry["exemplars"]]
+            )
         texts.extend(e["text"] for e in clause["refused_asks"])
         texts.extend(e["text"] for e in clause["changed_openings"])
     return texts
 
 
 def _corpus(doc: dict[str, Any], **kwargs: Any) -> leakage_scan.ConfidentialCorpus:
-    return leakage_scan.ConfidentialCorpus.from_opf_document(
-        doc, overrides=None, **kwargs
-    )
+    return leakage_scan.ConfidentialCorpus.from_opf_document(doc, overrides=None, **kwargs)
 
 
-def _scan_summary(
-    corpus: leakage_scan.ConfidentialCorpus, summary: str
-) -> Any:
-    return leakage_scan.scan_model_output(
-        {"verdict_summary": summary, "issues": []}, corpus
-    )
+def _scan_summary(corpus: leakage_scan.ConfidentialCorpus, summary: str) -> Any:
+    return leakage_scan.scan_model_output({"verdict_summary": summary, "issues": []}, corpus)
 
 
 # ---------------------------------------------------------------------------
@@ -222,11 +218,7 @@ class TestProductionAcceptsThisPlaybook(unittest.TestCase):
         the incident shape exist. Pinned so a future schema tightening that
         removes the hazard also turns this file red and invites the guard to
         be re-examined."""
-        schema = json.loads(
-            (opf_load.OPF_SCHEMA_PATH).read_text(
-                encoding="utf-8"
-            )
-        )
+        schema = json.loads((opf_load.OPF_SCHEMA_PATH).read_text(encoding="utf-8"))
         for definition in ("digestVariant", "digestRefusedAsk", "digestChangedOpening", "textRef"):
             with self.subTest(definition=definition):
                 text = schema["$defs"][definition]["properties"]["text"]
@@ -297,9 +289,7 @@ class TestNamingAClauseIsNotLeakage(unittest.TestCase):
         doc["digest"]["clauses"][0]["signed_variants"][0]["text"] = "reciprocal"
         corpus = _corpus(doc)
 
-        outcome = _scan_summary(
-            corpus, "The obligation should be reciprocal rather than one-way."
-        )
+        outcome = _scan_summary(corpus, "The obligation should be reciprocal rather than one-way.")
         self.assertFalse(outcome.blocked, f"{outcome.category} / {outcome.rule_id}")
 
 
@@ -426,9 +416,7 @@ class TestTheGateStillFires(unittest.TestCase):
         ]
 
         self.assertEqual(sorted(corpus.playbook_ngrams), sorted(expected_playbook))
-        self.assertEqual(
-            sorted(corpus.standard_clause_ngrams), sorted(expected_standard)
-        )
+        self.assertEqual(sorted(corpus.standard_clause_ngrams), sorted(expected_standard))
 
 
 # ---------------------------------------------------------------------------
@@ -454,9 +442,7 @@ class TestScopeOfTheNarrowing(unittest.TestCase):
             }
         )
         self.assertIn("no-uncapped-indemnity", corpus.playbook_ngrams)
-        outcome = _scan_summary(
-            corpus, "Flagged under no-uncapped-indemnity in the playbook."
-        )
+        outcome = _scan_summary(corpus, "Flagged under no-uncapped-indemnity in the playbook.")
         self.assertTrue(outcome.blocked)
         self.assertEqual(outcome.category, leakage_scan.CATEGORY_PLAYBOOK)
 
@@ -470,9 +456,7 @@ class TestScopeOfTheNarrowing(unittest.TestCase):
         only length at which a check-1 gram can exist at all.
         """
         long_label = "Indemnification and Third Party Claim Allocation"
-        self.assertGreaterEqual(
-            len(long_label), leakage_scan._MIN_SYSTEM_PROMPT_NGRAM_CHARS
-        )
+        self.assertGreaterEqual(len(long_label), leakage_scan._MIN_SYSTEM_PROMPT_NGRAM_CHARS)
 
         doc = _bare_clause_name_doc()
         doc["taxonomy"]["entries"][0]["label"] = long_label
@@ -487,8 +471,7 @@ class TestScopeOfTheNarrowing(unittest.TestCase):
         self.assertNotIn(
             long_label,
             corpus.system_prompt_ngrams,
-            "A public clause label dropped from check 2 must not reappear as a "
-            "check-1 gram.",
+            "A public clause label dropped from check 2 must not reappear as a check-1 gram.",
         )
         outcome = _scan_summary(corpus, f"1) {long_label} -- as drafted, one-way.")
         self.assertFalse(outcome.blocked, f"{outcome.category} / {outcome.rule_id}")

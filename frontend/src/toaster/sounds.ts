@@ -498,8 +498,7 @@ function play(kind: SoundKind, tier: Tier = SOUND_TIER[kind]): void {
     const gain = ac.createGain();
     // A tick starting while a one-shot is already sounding is born ducked,
     // rather than punching through at full level and ramping down after.
-    gain.gain.value =
-      SOUND_GAIN[kind] * (kind === 'tick' && oneShotPlaying() ? TICK_DUCK : 1);
+    gain.gain.value = SOUND_GAIN[kind] * (kind === 'tick' && oneShotPlaying() ? TICK_DUCK : 1);
     src.connect(gain);
     gain.connect(ac.destination);
     const voice: Voice = { src, gain, tier, kind };
@@ -643,12 +642,7 @@ const STAGE_SOUND: Partial<Record<string, SoundKind>> = {
  * that signal: a review needing manual attention is not a handoff worth a
  * cheerful bell, so the clunk keeps `manual` and the bell stays a spare.
  */
-const PANEL_OWNED_EVENTS: readonly MotionEvent[] = [
-  'submit-accepted',
-  'done',
-  'error',
-  'manual',
-];
+const PANEL_OWNED_EVENTS: readonly MotionEvent[] = ['submit-accepted', 'done', 'error', 'manual'];
 
 /** Everything else the console announces, mapped to a recording. */
 const EVENT_SOUND: Partial<Record<MotionEvent, SoundKind>> = {

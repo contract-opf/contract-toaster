@@ -61,17 +61,13 @@ def global_arg(name: str) -> str:
 
 def service_block(compose: Path, name: str) -> str:
     """The text of one top-level service, up to the next one."""
-    m = re.search(
-        rf"^  {name}:\n(.*?)(?=^  \S|^\S|\Z)", read(compose), re.MULTILINE | re.DOTALL
-    )
+    m = re.search(rf"^  {name}:\n(.*?)(?=^  \S|^\S|\Z)", read(compose), re.MULTILINE | re.DOTALL)
     assert m is not None, f"{compose.name}: no `{name}` service"
     return m.group(1)
 
 
 def job_block(name: str) -> str:
-    m = re.search(
-        rf"^  {name}:\n(.*?)(?=^  \S|\Z)", read(PUBLISH), re.MULTILINE | re.DOTALL
-    )
+    m = re.search(rf"^  {name}:\n(.*?)(?=^  \S|\Z)", read(PUBLISH), re.MULTILINE | re.DOTALL)
     assert m is not None, f"dts-image-publish.yml: no `{name}` job"
     return m.group(1)
 
@@ -85,15 +81,12 @@ class DockerfilePinsOneRelease(unittest.TestCase):
         text = read(DOCKERFILE)
         self.assertIn('test "$(git rev-parse HEAD)" = "${MINIO_COMMIT}"', text)
         self.assertIn("MINIO_RELEASE=RELEASE go run buildscripts/gen-ldflags.go", text)
-        self.assertIn(
-            'grep -qF "minio version ${MINIO_TAG} (commit-id=${MINIO_COMMIT})"', text
-        )
+        self.assertIn('grep -qF "minio version ${MINIO_TAG} (commit-id=${MINIO_COMMIT})"', text)
 
     def test_no_prebuilt_binary_download(self) -> None:
         # dl.min.io binaries can be withdrawn the same way the images were.
         instructions = [
-            line for line in read(DOCKERFILE).splitlines()
-            if not line.lstrip().startswith("#")
+            line for line in read(DOCKERFILE).splitlines() if not line.lstrip().startswith("#")
         ]
         self.assertFalse([line for line in instructions if "dl.min.io" in line])
 
@@ -109,10 +102,7 @@ class ComposeFilesUseThatRelease(unittest.TestCase):
 
     def test_coolify_compose_pulls_the_published_tag(self) -> None:
         block = service_block(COOLIFY_COMPOSE, "minio")
-        want = (
-            "ghcr.io/${GHCR_OWNER}/contract-toaster-dts-minio:"
-            + global_arg("MINIO_TAG")
-        )
+        want = "ghcr.io/${GHCR_OWNER}/contract-toaster-dts-minio:" + global_arg("MINIO_TAG")
         self.assertRegex(block, rf"(?m)^    image: {re.escape(want)}$")
 
     def test_no_discontinued_upstream_image(self) -> None:
@@ -137,9 +127,7 @@ class PublishJobTreatsTheTagAsImmutable(unittest.TestCase):
             pushes, ['"${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}"']
         )
         tags = re.findall(r"(?m)^\s+-t (.+?)(?: \\)?$", job)
-        self.assertEqual(
-            tags, ['"${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}"']
-        )
+        self.assertEqual(tags, ['"${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}"'])
 
     def test_build_and_push_only_when_absent(self) -> None:
         job = job_block("publish-minio")
@@ -186,15 +174,18 @@ class BuiltImage(unittest.TestCase):
         try:
             subprocess.run(  # noqa: S603
                 [DOCKER, "build", "-q", "-t", tag, str(DOCKERFILE.parent)],
-                check=True, capture_output=True, text=True,
+                check=True,
+                capture_output=True,
+                text=True,
             )
             out = subprocess.run(  # noqa: S603
                 [DOCKER, "run", "--rm", tag, "--version"],
-                check=True, capture_output=True, text=True,
+                check=True,
+                capture_output=True,
+                text=True,
             ).stdout
             self.assertIn(
-                f"minio version {global_arg('MINIO_TAG')} "
-                f"(commit-id={global_arg('MINIO_COMMIT')})",
+                f"minio version {global_arg('MINIO_TAG')} (commit-id={global_arg('MINIO_COMMIT')})",
                 out,
             )
         finally:

@@ -166,7 +166,9 @@ _DOC_NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main
 
 
 def _heading_p(text: str, level: int = 1) -> str:
-    return f'<w:p><w:pPr><w:pStyle w:val="Heading{level}"/></w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>'
+    return (
+        f'<w:p><w:pPr><w:pStyle w:val="Heading{level}"/></w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>'
+    )
 
 
 def _body_p(text: str) -> str:
@@ -407,13 +409,10 @@ def test_over_cap_document_fails_loudly_before_any_model_call(failures: list[str
     )
     if result.get("status") != "ERROR":
         failures.append(
-            f"[5a] An over-cap document must terminate ERROR (loudly), "
-            f"got {result.get('status')!r}"
+            f"[5a] An over-cap document must terminate ERROR (loudly), got {result.get('status')!r}"
         )
     if result.get("reason") != "document_too_large":
-        failures.append(
-            f"[5b] Expected reason='document_too_large', got {result.get('reason')!r}"
-        )
+        failures.append(f"[5b] Expected reason='document_too_large', got {result.get('reason')!r}")
     if result.get("max_input_tokens") != EXPECTED_MAX_INPUT_TOKENS:
         failures.append(
             f"[5c] The result must report the cap it was measured against "
@@ -433,7 +432,9 @@ def test_over_cap_document_fails_loudly_before_any_model_call(failures: list[str
             f"got {len(client.calls)}."
         )
     if ledger:
-        failures.append(f"[5g] Nothing was attempted, so nothing may be ledgered; got {len(ledger)} rows.")
+        failures.append(
+            f"[5g] Nothing was attempted, so nothing may be ledgered; got {len(ledger)} rows."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -476,8 +477,10 @@ def test_run_review_end_to_end_reviews_a_large_document_in_full(failures: list[s
             failures.append(f"[6c] Expected a {label} invocation on this run.")
             return
         prompt = call["user_prompt"]
-        text = prompt if isinstance(prompt, str) else " ".join(
-            str(block.get("text", "")) for block in prompt
+        text = (
+            prompt
+            if isinstance(prompt, str)
+            else " ".join(str(block.get("text", "")) for block in prompt)
         )
         if "<SECTION_OUTLINE>" in text:
             failures.append(f"[6d] The {label} prompt must carry no SECTION_OUTLINE block.")

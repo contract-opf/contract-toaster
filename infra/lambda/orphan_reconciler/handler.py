@@ -47,9 +47,7 @@ REVIEW_SUBMISSIONS_TABLE = os.environ.get("REVIEW_SUBMISSIONS_TABLE", "")
 SEMAPHORE_TABLE = os.environ.get("SEMAPHORE_TABLE", "")
 DAILY_SPEND_TABLE = os.environ.get("DAILY_SPEND_TABLE", "")
 STATE_MACHINE_ARN = os.environ.get("STATE_MACHINE_ARN", "")
-STALE_PENDING_THRESHOLD_SECONDS = int(
-    os.environ.get("STALE_PENDING_THRESHOLD_SECONDS", "120")
-)
+STALE_PENDING_THRESHOLD_SECONDS = int(os.environ.get("STALE_PENDING_THRESHOLD_SECONDS", "120"))
 
 # ---------------------------------------------------------------------------
 # Cost-model constants (issue #189 fix) -- MIRROR of backend/src/reviews.py
@@ -137,9 +135,12 @@ def _stored_reservation_cents(submission: dict[str, Any]) -> int | None:
         return None
 
 
-def settle_spend(actual_usd_cents: int, dynamodb_resource: Any,
-                  now_epoch: float | None = None,
-                  reservation_amount_cents: int | None = None) -> None:
+def settle_spend(
+    actual_usd_cents: int,
+    dynamodb_resource: Any,
+    now_epoch: float | None = None,
+    reservation_amount_cents: int | None = None,
+) -> None:
     """MIRROR of backend/src/reviews.py's settle_spend -- reconciles the
     worst-case reservation against ledgered actual spend on today's
     daily_spend row. Reverses the amount stored on the submission row
@@ -163,6 +164,7 @@ def settle_spend(actual_usd_cents: int, dynamodb_resource: Any,
             ":zero": 0,
         },
     )
+
 
 # Step Functions terminal-but-not-successful statuses. A dead execution in
 # any of these statuses without a corresponding terminal `reviews` row means
@@ -300,8 +302,7 @@ def _ensure_execution_started(submission: dict[str, Any]) -> str:
         # Deterministic name collision -- look up the existing execution ARN.
         existing = sfn.describe_execution(
             executionArn=(
-                f"{STATE_MACHINE_ARN.replace(':stateMachine:', ':execution:')}:"
-                f"{execution_name}"
+                f"{STATE_MACHINE_ARN.replace(':stateMachine:', ':execution:')}:{execution_name}"
             )
         )
         arn = existing["executionArn"]

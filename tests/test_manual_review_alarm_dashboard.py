@@ -165,10 +165,7 @@ def main() -> int:
 
     print()
     if all_failures:
-        print(
-            f"FAIL: {len(all_failures)} issue(s) found.  "
-            "See issues #37 and #133."
-        )
+        print(f"FAIL: {len(all_failures)} issue(s) found.  See issues #37 and #133.")
         return 1
     else:
         print("PASS: all failures alarm/dashboard/copy gates satisfied.")

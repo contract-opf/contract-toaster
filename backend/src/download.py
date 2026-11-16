@@ -86,7 +86,8 @@ from fastapi.responses import JSONResponse
 logger = logging.getLogger(__name__)
 
 try:  # production runs `src.main` (backend/ on path); tests put backend/src on path
-    from src import config  # noqa: I001
+    from src import config
+
     # Bound to the module-private name this module and
     # tests/test_download_auth_attack.py have always used. An import binding
     # is not a `def`, so `tests/test_authz_single_source.py` (issue #66)
@@ -177,7 +178,7 @@ def _content_disposition(ascii_name: str, unicode_name: str) -> str:
     anything hostile.
     """
     encoded = quote(unicode_name, safe="")
-    return f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{encoded}'
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded}"
 
 
 def redline_filename_for(original_filename: str | None, review_id: str) -> str:
@@ -220,11 +221,12 @@ def content_disposition_for_input(original_filename: str | None, review_id: str)
         f"{unicode_stem}.docx" if unicode_stem else fallback,
     )
 
+
 # DynamoDB per-user daily limit (enforced via ConditionExpression on UpdateItem).
 # Deliberately no concurrency counter here — see module docstring's
 # "DynamoDB owner check" section for why a download-time increment-only
 # counter is wrong.
-MAX_DAILY_REVIEWS = 20        # max download-URL requests per user per UTC calendar day
+MAX_DAILY_REVIEWS = 20  # max download-URL requests per user per UTC calendar day
 
 # What "daily" means (issue #45, owner decision D8): the UTC calendar day.
 # The limit resets at 00:00:00 UTC for everyone, whatever zone they or the
@@ -373,10 +375,7 @@ def _validate_s3_key_bound_to_review(
     def _reject() -> None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
-                "Download denied: the requested object key is not scoped to "
-                "this review."
-            ),
+            detail=("Download denied: the requested object key is not scoped to this review."),
         )
 
     # The prefix must genuinely name THIS review. A caller that passed a
@@ -633,9 +632,7 @@ def generate_presigned_download_url(
             # transient failure as a permanent deletion would tell a user their
             # document had been purged when it had not.
             err_code = exc.response.get("Error", {}).get("Code", "")
-            http_status = (
-                exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
-            )
+            http_status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
             if err_code in ("404", "NoSuchKey", "NotFound") or http_status == 404:
                 raise HTTPException(
                     status_code=status.HTTP_410_GONE,
@@ -645,9 +642,7 @@ def generate_presigned_download_url(
                     ),
                 ) from exc
             error_id = uuid.uuid4().hex
-            logger.error(
-                "DOWNLOAD_AVAILABILITY_CHECK_FAILED error_id=%s: %r", error_id, exc
-            )
+            logger.error("DOWNLOAD_AVAILABILITY_CHECK_FAILED error_id=%s: %r", error_id, exc)
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Unable to check whether the document is still available.",
@@ -799,9 +794,7 @@ def generate_presigned_playbook_download_url(
                 detail="This playbook version is no longer available in storage.",
             ) from exc
         error_id = uuid.uuid4().hex
-        logger.error(
-            "PLAYBOOK_FILE_AVAILABILITY_CHECK_FAILED error_id=%s: %r", error_id, exc
-        )
+        logger.error("PLAYBOOK_FILE_AVAILABILITY_CHECK_FAILED error_id=%s: %r", error_id, exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Unable to check whether playbook file is available.",
@@ -842,4 +835,3 @@ def generate_presigned_playbook_download_url(
             "Cache-Control": "no-store",
         },
     )
-

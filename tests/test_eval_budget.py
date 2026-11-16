@@ -32,6 +32,7 @@ import eval_budget  # noqa: E402, I001
 
 # ── CI eval budget plumbing fails loudly over the documented caps ───────────
 
+
 def check_budget_fails_loudly_over_per_run_cap() -> list[str]:
     failures = []
     with tempfile.TemporaryDirectory() as tmp:
@@ -99,7 +100,9 @@ def check_budget_succeeds_under_cap_and_is_atomic() -> list[str]:
             run_cost_usd=5.0, ledger_path=ledger_path, now_epoch=now
         )
         if result2.total_after_usd != 15.0:
-            failures.append(f"  expected cumulative total_after_usd == 15.0, got {result2.total_after_usd}")
+            failures.append(
+                f"  expected cumulative total_after_usd == 15.0, got {result2.total_after_usd}"
+            )
 
         if ledger_path.with_suffix(".json.lock").exists():
             failures.append("  lockfile was not released after reservation completed.")
@@ -108,9 +111,21 @@ def check_budget_succeeds_under_cap_and_is_atomic() -> list[str]:
 
 def main() -> int:
     checks = [
-        ("1", "CI eval budget: fails loudly over the per-run cap", check_budget_fails_loudly_over_per_run_cap),
-        ("2", "CI eval budget: fails loudly over the monthly cap", check_budget_fails_loudly_over_monthly_cap),
-        ("3", "CI eval budget: succeeds and accumulates atomically under cap", check_budget_succeeds_under_cap_and_is_atomic),
+        (
+            "1",
+            "CI eval budget: fails loudly over the per-run cap",
+            check_budget_fails_loudly_over_per_run_cap,
+        ),
+        (
+            "2",
+            "CI eval budget: fails loudly over the monthly cap",
+            check_budget_fails_loudly_over_monthly_cap,
+        ),
+        (
+            "3",
+            "CI eval budget: succeeds and accumulates atomically under cap",
+            check_budget_succeeds_under_cap_and_is_atomic,
+        ),
     ]
 
     overall_pass = True

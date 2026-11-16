@@ -110,7 +110,9 @@ def _part_id(text: str) -> str:
     """The producer's `part_id` for a passage: the first eight hex digits of
     the SHA-256 of its lower-cased words joined by single spaces (vector 009's
     README: part ids are hashes)."""
-    return hashlib.sha256(re.sub(r"[^a-z0-9]+", " ", text.lower()).strip().encode("utf-8")).hexdigest()[:8]
+    return hashlib.sha256(
+        re.sub(r"[^a-z0-9]+", " ", text.lower()).strip().encode("utf-8")
+    ).hexdigest()[:8]
 
 
 def _with_2021_passage(passage: str, *, relation: str, token: str, label: str) -> dict[str, Any]:
@@ -121,9 +123,14 @@ def _with_2021_passage(passage: str, *, relation: str, token: str, label: str) -
     other record carries its words."""
     doc = _vector_012()
     clause = doc["evidence"]["clauses"][0]
-    for part in (*clause["our_standard"]["parts"], *(p for f in clause["prior_standards"] for p in f["parts"])):
+    for part in (
+        *clause["our_standard"]["parts"],
+        *(p for f in clause["prior_standards"] for p in f["parts"]),
+    ):
         assert _part_id(part["text"]) == part["part_id"], part
-    assert all(rec.get("opened_with_form") != _FORM for rec in doc["evidence"]["precedent"]), "a deal opened on it"
+    assert all(rec.get("opened_with_form") != _FORM for rec in doc["evidence"]["precedent"]), (
+        "a deal opened on it"
+    )
     part_id = _part_id(passage)
     reason = f"Synthetic fixture reason: an earlier consent passage ({label})."
     prior = next(p for p in clause["prior_standards"] if p["form_label"] == _FORM)
@@ -141,10 +148,17 @@ def _with_2021_passage(passage: str, *, relation: str, token: str, label: str) -
         "basis": "agent",
         "check": None,
     }
-    form = next(f for f in doc["digest"]["clauses"][0]["standard_history"]["forms"] if f["form"] == _FORM)
+    form = next(
+        f for f in doc["digest"]["clauses"][0]["standard_history"]["forms"] if f["form"] == _FORM
+    )
     assert (form["n_opened"], form["unchanged"]) == (0, True), form
     form.update(
-        unchanged=False, label=label, part_map=["=", token], additions=[], reason=reason, settled="unchecked"
+        unchanged=False,
+        label=label,
+        part_map=["=", token],
+        additions=[],
+        reason=reason,
+        settled="unchecked",
     )
     form["parts"][1] = {"part_id": part_id, "text": passage}
     return doc
@@ -155,7 +169,9 @@ def _today(doc: dict[str, Any]) -> tuple[list[str], str]:
     return [part["text"] for part in standard["parts"]], standard["text"]
 
 
-def _scan(doc: dict[str, Any], text: str, field: str, *, replacement: bool = False) -> leakage_scan.ScanResult:
+def _scan(
+    doc: dict[str, Any], text: str, field: str, *, replacement: bool = False
+) -> leakage_scan.ScanResult:
     corpus = leakage_scan.ConfidentialCorpus.from_opf_document(doc, overrides=None)
     return leakage_scan.LeakageScanner(corpus).scan(
         text,
@@ -179,12 +195,18 @@ def _assert_held(doc: dict[str, Any], text: str) -> None:
 
 
 def test_a_prior_form_substring_of_todays_standard_is_neither_span_nor_gram() -> None:
-    doc = _with_2021_passage(_SHORTER, relation="less_protective", token="-", label="less_protective")
+    doc = _with_2021_passage(
+        _SHORTER, relation="less_protective", token="-", label="less_protective"
+    )
     parts, whole = _today(doc)
     assert len(_SHORTER) >= leakage_scan._MIN_PRECEDENT_SPAN_CHARS
     assert _SHORTER in parts[1] and parts[1] != _SHORTER, "the fixture is not a strict substring"
-    prior = next(p for p in doc["evidence"]["clauses"][0]["prior_standards"] if p["form_label"] == _FORM)
-    assert prior["text"] in whole and prior["text"] != whole, "the form's whole text is not inside today's"
+    prior = next(
+        p for p in doc["evidence"]["clauses"][0]["prior_standards"] if p["form_label"] == _FORM
+    )
+    assert prior["text"] in whole and prior["text"] != whole, (
+        "the form's whole text is not inside today's"
+    )
 
     held = leakage_scan._opf_prior_form_texts(doc)
     corpus = leakage_scan.ConfidentialCorpus.from_opf_document(doc, overrides=None)
@@ -205,9 +227,13 @@ def test_a_prior_form_substring_of_todays_standard_is_neither_span_nor_gram() ->
 def test_b_prior_form_not_a_substring_of_todays_standard_is_still_blocked() -> None:
     # The untouched 2019 form, in the same edited document as (a): the
     # containment exclusion of the 2021 passage leaves it held.
-    doc = _with_2021_passage(_SHORTER, relation="less_protective", token="-", label="less_protective")
+    doc = _with_2021_passage(
+        _SHORTER, relation="less_protective", token="-", label="less_protective"
+    )
     form_19 = next(
-        p for p in doc["evidence"]["clauses"][0]["prior_standards"] if p["form_label"] == "2019 form"
+        p
+        for p in doc["evidence"]["clauses"][0]["prior_standards"]
+        if p["form_label"] == "2019 form"
     )
     _, whole = _today(doc)
     assert form_19["text"] not in whole
@@ -220,7 +246,9 @@ def test_b_prior_form_not_a_substring_of_todays_standard_is_still_blocked() -> N
 
 
 def test_c_prior_form_superstring_of_todays_standard_is_not_a_substring_so_still_a_span() -> None:
-    doc = _with_2021_passage(_LONGER, relation="more_protective", token="+", label="more_protective")
+    doc = _with_2021_passage(
+        _LONGER, relation="more_protective", token="+", label="more_protective"
+    )
     parts, whole = _today(doc)
     assert parts[1] in _LONGER and parts[1] != _LONGER, "the fixture is not a strict superstring"
     assert _LONGER not in whole

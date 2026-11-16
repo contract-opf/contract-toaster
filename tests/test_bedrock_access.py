@@ -79,7 +79,9 @@ PROHIBITED_PREFIXES = ("global.", "us.", "eu.", "apac.")
 def read_model_policy() -> dict | None:
     """Load and return the model-policy JSON, or None with an error message printed."""
     if not MODEL_POLICY_PATH.exists():
-        print(f"  FAIL: model-policy artifact not found at {MODEL_POLICY_PATH.relative_to(REPO_ROOT)}")
+        print(
+            f"  FAIL: model-policy artifact not found at {MODEL_POLICY_PATH.relative_to(REPO_ROOT)}"
+        )
         return None
     try:
         with MODEL_POLICY_PATH.open(encoding="utf-8") as fh:
@@ -90,6 +92,7 @@ def read_model_policy() -> dict | None:
 
 
 # ── AC1: Model-policy artifact is complete ─────────────────────────────────
+
 
 def check_ac1_artifact_complete() -> list[str]:
     """
@@ -129,13 +132,11 @@ def check_ac1_artifact_complete() -> list[str]:
         )
     if "top_p" not in rc_primary.get("omit_sampling_params", []):
         failures.append(
-            "  AC1 FAIL: models.primary.request_contract.omit_sampling_params must "
-            "list 'top_p'."
+            "  AC1 FAIL: models.primary.request_contract.omit_sampling_params must list 'top_p'."
         )
     if "top_k" not in rc_primary.get("omit_sampling_params", []):
         failures.append(
-            "  AC1 FAIL: models.primary.request_contract.omit_sampling_params must "
-            "list 'top_k'."
+            "  AC1 FAIL: models.primary.request_contract.omit_sampling_params must list 'top_k'."
         )
     if rc_primary.get("extended_thinking") != "adaptive-only":
         failures.append(
@@ -149,9 +150,7 @@ def check_ac1_artifact_complete() -> list[str]:
             "assumptions are required so release bundles can record them."
         )
     if not primary.get("cost_per_million_output_usd"):
-        failures.append(
-            "  AC1 FAIL: models.primary.cost_per_million_output_usd missing."
-        )
+        failures.append("  AC1 FAIL: models.primary.cost_per_million_output_usd missing.")
 
     # --- critic model ---
     critic = models.get("critic", {})
@@ -190,9 +189,7 @@ def check_ac1_artifact_complete() -> list[str]:
             f"'adaptive-only'.  Got: {rc_critic.get('extended_thinking')!r}"
         )
     if not critic.get("cost_per_million_input_usd"):
-        failures.append(
-            "  AC1 FAIL: models.critic.cost_per_million_input_usd missing."
-        )
+        failures.append("  AC1 FAIL: models.critic.cost_per_million_input_usd missing.")
 
     # --- embedding model ---
     embedding = models.get("embedding", {})
@@ -220,6 +217,7 @@ def check_ac1_artifact_complete() -> list[str]:
 
 # ── AC2: No prefixed inference-profile model IDs ────────────────────────────
 
+
 def check_ac2_no_inference_profile_prefixes() -> list[str]:
     """
     Every model_id in the model-policy artifact must be a single-region native
@@ -230,9 +228,7 @@ def check_ac2_no_inference_profile_prefixes() -> list[str]:
     failures: list[str] = []
     policy = read_model_policy()
     if policy is None:
-        failures.append(
-            "  AC2 FAIL: model-policy artifact missing — cannot check model IDs."
-        )
+        failures.append("  AC2 FAIL: model-policy artifact missing — cannot check model IDs.")
         return failures
 
     models = policy.get("models", {})
@@ -268,6 +264,7 @@ def check_ac2_no_inference_profile_prefixes() -> list[str]:
 
 # ── AC3: ARCHITECTURE.md documents the prohibition and config check ─────────
 
+
 def check_ac3_architecture_documents_prohibition() -> list[str]:
     """
     ARCHITECTURE.md must:
@@ -279,9 +276,7 @@ def check_ac3_architecture_documents_prohibition() -> list[str]:
     failures: list[str] = []
 
     if not ARCHITECTURE_MD.exists():
-        failures.append(
-            "  AC3 FAIL: ARCHITECTURE.md not found — cannot verify documentation."
-        )
+        failures.append("  AC3 FAIL: ARCHITECTURE.md not found — cannot verify documentation.")
         return failures
 
     arch_text = ARCHITECTURE_MD.read_text(encoding="utf-8")
@@ -360,6 +355,7 @@ def check_ac3_architecture_documents_prohibition() -> list[str]:
 
 # ── AC4: Model policy is deterministically hashable ────────────────────────
 
+
 def check_ac4_hashable_artifact() -> list[str]:
     """
     SHA-256 of the canonical JSON of the model-policy artifact must be stable
@@ -369,9 +365,7 @@ def check_ac4_hashable_artifact() -> list[str]:
     failures: list[str] = []
 
     if not MODEL_POLICY_PATH.exists():
-        failures.append(
-            "  AC4 FAIL: model-policy artifact not found — cannot test hashability."
-        )
+        failures.append("  AC4 FAIL: model-policy artifact not found — cannot test hashability.")
         return failures
 
     def canonical_hash(path: Path) -> str:
@@ -397,8 +391,7 @@ def check_ac4_hashable_artifact() -> list[str]:
     # ARCHITECTURE.md must reference model_policy_hash as a release-bundle component
     if not ARCHITECTURE_MD.exists():
         failures.append(
-            "  AC4 FAIL: ARCHITECTURE.md not found — cannot verify model_policy_hash "
-            "is referenced."
+            "  AC4 FAIL: ARCHITECTURE.md not found — cannot verify model_policy_hash is referenced."
         )
         return failures
 
@@ -415,6 +408,7 @@ def check_ac4_hashable_artifact() -> list[str]:
 
 
 # ── AC5: Model-policy artifact records an eval gate (quarterly recertification) ─
+
 
 def check_ac5_eval_gate() -> list[str]:
     """
@@ -433,9 +427,7 @@ def check_ac5_eval_gate() -> list[str]:
     failures: list[str] = []
     policy = read_model_policy()
     if policy is None:
-        failures.append(
-            "  AC5 FAIL: model-policy artifact missing — cannot check eval gate."
-        )
+        failures.append("  AC5 FAIL: model-policy artifact missing — cannot check eval gate.")
         return failures
 
     recertification = policy.get("recertification")
@@ -475,6 +467,7 @@ def check_ac5_eval_gate() -> list[str]:
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
+
 
 def main() -> int:
     checks = [

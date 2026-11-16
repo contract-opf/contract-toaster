@@ -148,10 +148,9 @@ function preflightBody(wordCount: number): Record<string, unknown> {
  * `estimate: null` serves a 404 on the estimate route — the older-backend and
  * network-failure case, which must be indistinguishable from "no line".
  */
-function stubPanelFetch(options: {
-  estimate: EstimateBody | null;
-  words: number;
-}): { estimateCalls: () => string[] } {
+function stubPanelFetch(options: { estimate: EstimateBody | null; words: number }): {
+  estimateCalls: () => string[];
+} {
   const estimateCalls: string[] = [];
   vi.stubGlobal(
     'fetch',

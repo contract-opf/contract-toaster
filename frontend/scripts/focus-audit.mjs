@@ -60,7 +60,13 @@ const CONSOLE_MOTION_PATH = path.join(FRONTEND_SRC, 'orbit-diner/motion.ts');
 // scope). ct-card/ct-chip are shadow leaves with no interactive control;
 // ct-app-shell/ct-toolbar/ct-table/ct-progress/ct-banner lay out or
 // present, they don't own a focusable control themselves.
-const FOCUS_REQUIRED_COMPONENTS = ['ct-button', 'ct-icon-button', 'ct-tab-bar', 'ct-field', 'ct-file-drop'];
+const FOCUS_REQUIRED_COMPONENTS = [
+  'ct-button',
+  'ct-icon-button',
+  'ct-tab-bar',
+  'ct-field',
+  'ct-file-drop',
+];
 
 const failures = [];
 
@@ -85,7 +91,10 @@ function selectorPattern(selector) {
  * declarations — it only needs the ring token to appear somewhere in the
  * same block as the matched :focus-visible occurrence. */
 function focusRingFollows(text, pattern) {
-  const re = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`);
+  const re = new RegExp(
+    pattern.source,
+    pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`,
+  );
   let m;
   while ((m = re.exec(text)) !== null) {
     const idx = m.index;
@@ -113,7 +122,9 @@ for (const name of FOCUS_REQUIRED_COMPONENTS) {
     continue;
   }
   if (!focusRingFollows(text, /:focus-visible/g)) {
-    failures.push(`focus: ${name}.css has :focus-visible but no --ct-focus-ring in that rule's body`);
+    failures.push(
+      `focus: ${name}.css has :focus-visible but no --ct-focus-ring in that rule's body`,
+    );
   }
 }
 
@@ -186,7 +197,9 @@ for (const entry of readdirSync(COMPONENTS_DIR)) {
 /** Every *.css under `dir`, recursively, in a stable order. */
 function cssFilesUnder(dir) {
   const out = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+  for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) =>
+    a.name.localeCompare(b.name),
+  )) {
     if (entry.name === 'node_modules') continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) out.push(...cssFilesUnder(full));
@@ -241,7 +254,10 @@ const FORCED_COLORS_RE = /forced-colors\s*:\s*active/i;
 /** The normalised value if `prop: value` leaves no paintable outline, else
  * null. */
 function outlineSuppression(prop, rawValue) {
-  const value = rawValue.replace(/!\s*important/i, '').trim().toLowerCase();
+  const value = rawValue
+    .replace(/!\s*important/i, '')
+    .trim()
+    .toLowerCase();
   if (!value) return null;
   if (prop === 'outline-style') return value === 'none' ? value : null;
   if (prop === 'outline-width') return ZERO_WIDTH_RE.test(value) ? value : null;
@@ -282,10 +298,18 @@ function forcedColorsOutlineFailures(source, label) {
 }
 
 for (const cssPath of cssFilesUnder(FRONTEND_SRC)) {
-  failures.push(...forcedColorsOutlineFailures(readFileSync(cssPath, 'utf8'), path.relative(FRONTEND_SRC, cssPath)));
+  failures.push(
+    ...forcedColorsOutlineFailures(
+      readFileSync(cssPath, 'utf8'),
+      path.relative(FRONTEND_SRC, cssPath),
+    ),
+  );
 }
 failures.push(
-  ...forcedColorsOutlineFailures(readFileSync(CONSOLE_MOTION_PATH, 'utf8'), 'orbit-diner/motion.ts'),
+  ...forcedColorsOutlineFailures(
+    readFileSync(CONSOLE_MOTION_PATH, 'utf8'),
+    'orbit-diner/motion.ts',
+  ),
 );
 
 // ------------------------------------------- 3b. Self-test (mutation cover)
@@ -298,10 +322,22 @@ failures.push(
 
 const SELF_TEST_CASES = [
   // --- must be flagged -----------------------------------------------
-  { name: 'outline shorthand none', flagged: true, css: '.a:focus-visible { outline: none; box-shadow: var(--ct-focus-ring); }' },
+  {
+    name: 'outline shorthand none',
+    flagged: true,
+    css: '.a:focus-visible { outline: none; box-shadow: var(--ct-focus-ring); }',
+  },
   { name: 'outline shorthand 0', flagged: true, css: '.a:focus-visible { outline: 0; }' },
-  { name: 'outline-style longhand', flagged: true, css: '.b:focus-visible { outline-style: none; box-shadow: var(--ct-focus-ring); }' },
-  { name: 'outline-width longhand', flagged: true, css: '.b:focus-visible { outline-width: 0; box-shadow: var(--ct-focus-ring); }' },
+  {
+    name: 'outline-style longhand',
+    flagged: true,
+    css: '.b:focus-visible { outline-style: none; box-shadow: var(--ct-focus-ring); }',
+  },
+  {
+    name: 'outline-width longhand',
+    flagged: true,
+    css: '.b:focus-visible { outline-width: 0; box-shadow: var(--ct-focus-ring); }',
+  },
   { name: 'bare :focus overriding the fix', flagged: true, css: '.c:focus { outline: none; }' },
   { name: 'universal :focus', flagged: true, css: '*:focus { outline: none; }' },
   { name: ':focus-within', flagged: true, css: '.d:focus-within { outline: none; }' },
@@ -317,17 +353,33 @@ const SELF_TEST_CASES = [
     css: '.e:focus-visible { outline: var(--ct-focus-outline); outline-offset: var(--ct-focus-outline-offset); box-shadow: var(--ct-focus-ring); }',
   },
   { name: 'non-focus rule', flagged: false, css: '.f:hover { outline: none; }' },
-  { name: 'commented-out suppression', flagged: false, css: '/* .g:focus-visible { outline: none; } */' },
-  { name: 'outline-offset is not outline-width', flagged: false, css: '.h:focus-visible { outline-offset: 0; outline: var(--ct-focus-outline); }' },
-  { name: 'plain @media wrapper still scanned but compliant', flagged: false, css: '@media (max-width: 640px) { .i:focus-visible { outline: var(--ct-focus-outline); } }' },
+  {
+    name: 'commented-out suppression',
+    flagged: false,
+    css: '/* .g:focus-visible { outline: none; } */',
+  },
+  {
+    name: 'outline-offset is not outline-width',
+    flagged: false,
+    css: '.h:focus-visible { outline-offset: 0; outline: var(--ct-focus-outline); }',
+  },
+  {
+    name: 'plain @media wrapper still scanned but compliant',
+    flagged: false,
+    css: '@media (max-width: 640px) { .i:focus-visible { outline: var(--ct-focus-outline); } }',
+  },
 ];
 
 for (const testCase of SELF_TEST_CASES) {
   const hits = forcedColorsOutlineFailures(testCase.css, 'self-test');
   if (testCase.flagged && hits.length === 0) {
-    failures.push(`self-test: mutation "${testCase.name}" was NOT detected by the forced-colors check (issue #438)`);
+    failures.push(
+      `self-test: mutation "${testCase.name}" was NOT detected by the forced-colors check (issue #438)`,
+    );
   } else if (!testCase.flagged && hits.length > 0) {
-    failures.push(`self-test: "${testCase.name}" must be exempt from the forced-colors check but was flagged: ${hits[0]}`);
+    failures.push(
+      `self-test: "${testCase.name}" must be exempt from the forced-colors check but was flagged: ${hits[0]}`,
+    );
   }
 }
 

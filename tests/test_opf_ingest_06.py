@@ -114,7 +114,9 @@ def check_1_bare_json_one_format() -> list[str]:
         if doc.get("opf_version") != "0.6" or "digest" in doc:
             failures.append("  the no-digest fixture did not load as a digest-less 0.6 document")
     except Exception as exc:  # noqa: BLE001
-        failures.append(f"  load_opf rejected the no-digest 0.6 fixture: {type(exc).__name__}: {exc}")
+        failures.append(
+            f"  load_opf rejected the no-digest 0.6 fixture: {type(exc).__name__}: {exc}"
+        )
     try:
         doc = opf_load.load_opf(FIXTURE_06_JSON)
         if doc.get("opf_version") != "0.6":
@@ -129,7 +131,9 @@ def check_1_bare_json_one_format() -> list[str]:
             doc = _reseal({**_load_06(), "opf_version": version})
             p = _write_json(Path(td), f"v{version}.opf.json", doc)
             failures += _expect_raises(
-                lambda p=p: opf_load.load_opf(p), opf_load.OpfVersionError, f"OPF {version} document"
+                lambda p=p: opf_load.load_opf(p),
+                opf_load.OpfVersionError,
+                f"OPF {version} document",
             )
     return failures
 
@@ -147,7 +151,9 @@ def check_2_html_bundle_roundtrip() -> list[str]:
         if opf_load.load_opf_document(FIXTURE_06_JSON) != _load_06():
             failures.append("  load_opf_document(.opf.json) != committed doc")
     except Exception as exc:  # noqa: BLE001
-        failures.append(f"  load_opf_document rejected the bare 0.6 json: {type(exc).__name__}: {exc}")
+        failures.append(
+            f"  load_opf_document rejected the bare 0.6 json: {type(exc).__name__}: {exc}"
+        )
     return failures
 
 
@@ -180,7 +186,9 @@ def check_4_identity_stripped_rejected() -> list[str]:
         try:
             opf_load.load_opf(_write_json(tmp, "no-identity.opf.json", doc))
         except Exception as exc:  # noqa: BLE001
-            failures.append(f"  load_opf should tolerate a doc without identity: {type(exc).__name__}")
+            failures.append(
+                f"  load_opf should tolerate a doc without identity: {type(exc).__name__}"
+            )
         return failures
 
 
@@ -209,7 +217,12 @@ def check_6_version_rejected() -> list[str]:
     failures: list[str] = []
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        for label, version in (("missing", None), ("unknown", "0.9"), ("retired 0.3", "0.3"), ("retired 0.4", "0.4")):
+        for label, version in (
+            ("missing", None),
+            ("unknown", "0.9"),
+            ("retired 0.3", "0.3"),
+            ("retired 0.4", "0.4"),
+        ):
             doc = _load_06()
             if version is None:
                 doc.pop("opf_version", None)
@@ -343,15 +356,47 @@ def check_9_script_escaping_roundtrip() -> list[str]:
 
 def main() -> int:
     checks = [
-        ("1", "load_opf accepts bare 0.6 (with and without a digest), refuses 0.2-0.5", check_1_bare_json_one_format),
-        ("2", ".opf.html bundle yields exactly the committed .opf.json", check_2_html_bundle_roundtrip),
-        ("3", "tampered .opf.html rejected (content_hash mismatch)", check_3_tampered_html_rejected),
-        ("4", "identity-stripped upload rejected (no fail-open)", check_4_identity_stripped_rejected),
+        (
+            "1",
+            "load_opf accepts bare 0.6 (with and without a digest), refuses 0.2-0.5",
+            check_1_bare_json_one_format,
+        ),
+        (
+            "2",
+            ".opf.html bundle yields exactly the committed .opf.json",
+            check_2_html_bundle_roundtrip,
+        ),
+        (
+            "3",
+            "tampered .opf.html rejected (content_hash mismatch)",
+            check_3_tampered_html_rejected,
+        ),
+        (
+            "4",
+            "identity-stripped upload rejected (no fail-open)",
+            check_4_identity_stripped_rejected,
+        ),
         ("5", "missing/duplicate canonical block rejected", check_5_extract_failures),
-        ("6", "missing/unknown/retired opf_version rejected (never defaulted)", check_6_version_rejected),
-        ("7", "injection scan fail-closed incl. digest/dossier/manifest-only injection", check_7_injection_fail_closed),
-        ("8", "digest_version checked before schema; digest 2/3/4 rejected legibly", check_8_digest_version_dispatch),
-        ("9", "script escaping round-trips a payload containing </script>", check_9_script_escaping_roundtrip),
+        (
+            "6",
+            "missing/unknown/retired opf_version rejected (never defaulted)",
+            check_6_version_rejected,
+        ),
+        (
+            "7",
+            "injection scan fail-closed incl. digest/dossier/manifest-only injection",
+            check_7_injection_fail_closed,
+        ),
+        (
+            "8",
+            "digest_version checked before schema; digest 2/3/4 rejected legibly",
+            check_8_digest_version_dispatch,
+        ),
+        (
+            "9",
+            "script escaping round-trips a payload containing </script>",
+            check_9_script_escaping_roundtrip,
+        ),
     ]
     ok = True
     for code, name, fn in checks:

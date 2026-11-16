@@ -355,7 +355,11 @@ class TestFailClosedWithoutAResolvableBinding(unittest.TestCase):
     def test_party_neutral_invariant_without_a_note_is_still_judged(self):
         invariant = _party_neutral_invariant()
         client = model_client_module.FakeBedrockClient(
-            {CRITIC_MODEL_ID: [_floor_verdict_response(invariant["id"], violated=True, quote="no law")]}
+            {
+                CRITIC_MODEL_ID: [
+                    _floor_verdict_response(invariant["id"], violated=True, quote="no law")
+                ]
+            }
         )
 
         judgment = floor_judge.judge_floor_invariants(
@@ -455,7 +459,10 @@ class TestSpineWiresThePerspectiveIn(unittest.TestCase):
 
         ledger_records: list = []
         result = review_spine.run_review(
-            _build_docx_bytes(), bundle, client, review_id="opf-679-1",
+            _build_docx_bytes(),
+            bundle,
+            client,
+            review_id="opf-679-1",
             ledger_write=ledger_records.append,
         )
 
@@ -497,17 +504,13 @@ class TestSpineWiresThePerspectiveIn(unittest.TestCase):
             }
         )
 
-        result = review_spine.run_review(
-            _build_docx_bytes(), bundle, client, review_id="opf-679-2"
-        )
+        result = review_spine.run_review(_build_docx_bytes(), bundle, client, review_id="opf-679-2")
 
         self.assertEqual(result["status"], "OK", result)
         # Both model passes said ACCEPT; the floor fire is monotonic.
         self.assertEqual(result["decision"], "REQUEST_CHANGE")
         fires = [
-            f
-            for f in result["findings"]
-            if f.get("provenance") == f"floor:{FIXTURE_INVARIANT_ID}"
+            f for f in result["findings"] if f.get("provenance") == f"floor:{FIXTURE_INVARIANT_ID}"
         ]
         self.assertEqual(len(fires), 1, result["findings"])
 
@@ -530,9 +533,7 @@ class TestSpineWiresThePerspectiveIn(unittest.TestCase):
             }
         )
 
-        result = review_spine.run_review(
-            _build_docx_bytes(), bundle, client, review_id="opf-679-3"
-        )
+        result = review_spine.run_review(_build_docx_bytes(), bundle, client, review_id="opf-679-3")
 
         self.assertEqual(result["status"], "ERROR", result)
         self.assertEqual(result["reason"], "floor_invariant_unjudged")

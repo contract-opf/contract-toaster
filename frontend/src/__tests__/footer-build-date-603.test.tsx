@@ -103,7 +103,10 @@ describe('footer build date (issue #603)', () => {
   });
 
   it('renders a readable build date beside the version', async () => {
-    stubFetch({ '/api/me': ME, '/version': { version: 'cb79b4a-20260820191617', commit: 'cb79b4a1' } });
+    stubFetch({
+      '/api/me': ME,
+      '/version': { version: 'cb79b4a-20260820191617', commit: 'cb79b4a1' },
+    });
     vi.stubEnv('VITE_AUTH_MODE', 'password');
     render(<App />);
 
@@ -112,7 +115,9 @@ describe('footer build date (issue #603)', () => {
 
     // The existing deploy-verification hook is untouched — other tests match
     // its text exactly (stale-signals-592.test.tsx).
-    expect(screen.getByTestId('version-display').textContent).toContain('Version cb79b4a-20260820191617');
+    expect(screen.getByTestId('version-display').textContent).toContain(
+      'Version cb79b4a-20260820191617',
+    );
   });
 
   it('renders no date at all — and no "Invalid Date" — for VERSION=dev', async () => {

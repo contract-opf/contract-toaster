@@ -210,15 +210,13 @@ class CoverNoteRouteTestBase(api84.ReviewApiTestBase):
         super().setUp()
         self.ledger_table = FakeLedgerTable()
         self._routing_ddb = _RoutingDynamoDBResource(self.ddb, self.ledger_table)
-        self.app.dependency_overrides[review_routes.get_dynamodb_resource] = (
-            lambda: self._routing_ddb
+        self.app.dependency_overrides[review_routes.get_dynamodb_resource] = lambda: (
+            self._routing_ddb
         )
         self._set_cover_note_client(None)
 
     def _set_cover_note_client(self, client: Any) -> None:
-        self.app.dependency_overrides[review_routes.get_cover_note_model_client] = (
-            lambda: client
-        )
+        self.app.dependency_overrides[review_routes.get_cover_note_model_client] = lambda: client
 
     def _seed_done_review(
         self,
@@ -271,9 +269,7 @@ class CoverNoteRouteTestBase(api84.ReviewApiTestBase):
             self.s3.put_object(
                 Bucket=os.environ["OUTPUTS_BUCKET"],
                 Key=analysis_key,
-                Body=json.dumps({"findings": issues, "critic_delta": critic_delta}).encode(
-                    "utf-8"
-                ),
+                Body=json.dumps({"findings": issues, "critic_delta": critic_delta}).encode("utf-8"),
                 ContentType="application/json",
             )
             item["analysis_s3_key"] = analysis_key
@@ -284,9 +280,7 @@ class CoverNoteRouteTestBase(api84.ReviewApiTestBase):
             item["cover_note_served_model_id"] = model_client.openrouter_cover_note_model_id()
         self._reviews_table().items[review_id] = item
 
-    def _butter(
-        self, owner_sub: str, review_id: str, *, regenerate: bool | None = None
-    ):
+    def _butter(self, owner_sub: str, review_id: str, *, regenerate: bool | None = None):
         self._authenticate_as(owner_sub)
         body: dict[str, Any] = {}
         if regenerate is not None:
@@ -348,9 +342,7 @@ class TestKnownEditsTraceIntoTheDraft(CoverNoteRouteTestBase):
         # canned response still "passes" the substring checks above.
         self.assertEqual(len(fake_client.invocations), 1)
         invocation = fake_client.invocations[0]
-        self.assertEqual(
-            invocation["model_id"], model_client.openrouter_cover_note_model_id()
-        )
+        self.assertEqual(invocation["model_id"], model_client.openrouter_cover_note_model_id())
         user_prompt = invocation["user_prompt"]
         for issue in KNOWN_ISSUES:
             self.assertIn(issue["counterparty_change_summary"], user_prompt)
@@ -359,9 +351,7 @@ class TestKnownEditsTraceIntoTheDraft(CoverNoteRouteTestBase):
             if issue["internal_precedent_citation"]:
                 self.assertNotIn(issue["internal_precedent_citation"], user_prompt)
 
-        self.assertEqual(
-            body["served_model_id"], model_client.openrouter_cover_note_model_id()
-        )
+        self.assertEqual(body["served_model_id"], model_client.openrouter_cover_note_model_id())
 
         # Cached onto the row.
         row = self._reviews_table().items["review-butter-1"]
@@ -372,15 +362,11 @@ class TestKnownEditsTraceIntoTheDraft(CoverNoteRouteTestBase):
         self.assertEqual(len(self.ledger_table.items), 1)
         ledger_row = self.ledger_table.items[0]
         self.assertEqual(ledger_row["pass_name"], "cover_note")
-        self.assertEqual(
-            ledger_row["model_id"], model_client.openrouter_cover_note_model_id()
-        )
+        self.assertEqual(ledger_row["model_id"], model_client.openrouter_cover_note_model_id())
         self.assertEqual(ledger_row["review_id"], "review-butter-1")
 
         # Daily spend aggregate settled too.
-        self.assertEqual(
-            self._daily_spend_row().get("settled_usd_cents"), body["cost_usd_cents"]
-        )
+        self.assertEqual(self._daily_spend_row().get("settled_usd_cents"), body["cost_usd_cents"])
 
     def test_greeting_signoff_and_legal_promise_language_are_stripped(self):
         """Guardrail proof end to end, not just in the unit-level
@@ -509,9 +495,7 @@ class TestAuthAndStatusGating(CoverNoteRouteTestBase):
         self.assertEqual(resp.status_code, 409)
 
     def test_no_issues_is_409(self):
-        self._seed_done_review(
-            "review-accept", "owner-accept", issues=[], decision="ACCEPT"
-        )
+        self._seed_done_review("review-accept", "owner-accept", issues=[], decision="ACCEPT")
         resp = self._butter("owner-accept", "review-accept")
         self.assertEqual(resp.status_code, 409)
 
@@ -618,9 +602,7 @@ class TestRetentionGating(CoverNoteRouteTestBase):
         self._seed_done_review(
             "review-corrupt-created-at", "owner-corrupt", retention_window_at_creation=90
         )
-        self._reviews_table().items["review-corrupt-created-at"]["created_at"] = (
-            "not-a-number"
-        )
+        self._reviews_table().items["review-corrupt-created-at"]["created_at"] = "not-a-number"
         resp = self._butter("owner-corrupt", "review-corrupt-created-at")
         self.assertEqual(resp.status_code, 409)
 
@@ -717,15 +699,11 @@ class TestFailureDegradesQuietly(CoverNoteRouteTestBase):
             FakeCoverNoteModelClient([RuntimeError("simulated provider outage")])
         )
 
-        resp = self._butter(
-            "owner-keep-cache", "review-keep-cache", regenerate=True
-        )
+        resp = self._butter("owner-keep-cache", "review-keep-cache", regenerate=True)
         self.assertEqual(resp.status_code, 502)
 
         row = self._reviews_table().items["review-keep-cache"]
-        self.assertEqual(
-            row["cover_note_draft"], "A previously generated, perfectly good draft."
-        )
+        self.assertEqual(row["cover_note_draft"], "A previously generated, perfectly good draft.")
         # The failed attempt is never ledgered or billed either -- nothing
         # was actually spent.
         self.assertEqual(len(self.ledger_table.items), 0)
@@ -866,9 +844,9 @@ class TestLeakageScanGatesTheDraft(CoverNoteRouteTestBase):
             playbook_ngrams=[self._PLANTED_RULE_ID],
             counterparty_names=[self._PLANTED_COUNTERPARTY],
         )
-        self.app.dependency_overrides[
-            review_routes.get_cover_note_leakage_corpus_resolver
-        ] = lambda: (lambda playbook_id: planted_corpus)
+        self.app.dependency_overrides[review_routes.get_cover_note_leakage_corpus_resolver] = (
+            lambda: lambda playbook_id: planted_corpus
+        )
 
     def test_a_planted_playbook_rule_id_fails_closed(self):
         self._seed_done_review("review-leak-rule", "owner-leak-rule")
@@ -921,20 +899,14 @@ class TestLeakageScanGatesTheDraft(CoverNoteRouteTestBase):
             cover_note_draft="A previously generated, perfectly good draft.",
         )
         self._set_cover_note_client(
-            FakeCoverNoteModelClient(
-                [f"This references {self._PLANTED_RULE_ID} directly."]
-            )
+            FakeCoverNoteModelClient([f"This references {self._PLANTED_RULE_ID} directly."])
         )
 
-        resp = self._butter(
-            "owner-leak-keep-cache", "review-leak-keep-cache", regenerate=True
-        )
+        resp = self._butter("owner-leak-keep-cache", "review-leak-keep-cache", regenerate=True)
 
         self.assertEqual(resp.status_code, 502)
         row = self._reviews_table().items["review-leak-keep-cache"]
-        self.assertEqual(
-            row["cover_note_draft"], "A previously generated, perfectly good draft."
-        )
+        self.assertEqual(row["cover_note_draft"], "A previously generated, perfectly good draft.")
 
     def test_a_clean_draft_is_unaffected_by_the_scan(self):
         # Sanity check the override does not over-block: a draft that
@@ -966,9 +938,9 @@ class TestLeakageCorpusIsNarrowedByTheDeliveredTexts(CoverNoteRouteTestBase):
         planted_corpus = leakage_scan.ConfidentialCorpus(
             counterparty_names=["beta industries", "delta ventures"],
         )
-        self.app.dependency_overrides[
-            review_routes.get_cover_note_leakage_corpus_resolver
-        ] = lambda: (lambda playbook_id: planted_corpus)
+        self.app.dependency_overrides[review_routes.get_cover_note_leakage_corpus_resolver] = (
+            lambda: lambda playbook_id: planted_corpus
+        )
 
     def _issues(self, **fields: Any) -> list[dict[str, Any]]:
         return [{**KNOWN_ISSUES[0], **fields}]
@@ -1138,9 +1110,7 @@ class TestDailySpendCapRefusesGeneration(CoverNoteRouteTestBase):
         self.assertEqual(len(fake_client.invocations), 0)
 
     def test_cap_not_yet_reached_is_unaffected(self):
-        self._seed_daily_spend(
-            reserved=reviews_module.DAILY_SPEND_CAP_USD_CENTS_DEFAULT - 100
-        )
+        self._seed_daily_spend(reserved=reviews_module.DAILY_SPEND_CAP_USD_CENTS_DEFAULT - 100)
         self._seed_done_review("review-cap-headroom", "owner-cap-headroom")
         self._set_cover_note_client(
             FakeCoverNoteModelClient(
@@ -1181,16 +1151,12 @@ class TestDailySpendCapRefusesGeneration(CoverNoteRouteTestBase):
         fake_client = FakeCoverNoteModelClient([_KNOWN_EDITS_DRAFT])
         self._set_cover_note_client(fake_client)
 
-        resp = self._butter(
-            "owner-cap-regen", "review-cap-regen", regenerate=True
-        )
+        resp = self._butter("owner-cap-regen", "review-cap-regen", regenerate=True)
 
         self.assertEqual(resp.status_code, 429)
         self.assertEqual(len(fake_client.invocations), 0)
         row = self._reviews_table().items["review-cap-regen"]
-        self.assertEqual(
-            row["cover_note_draft"], "A previously generated, perfectly good draft."
-        )
+        self.assertEqual(row["cover_note_draft"], "A previously generated, perfectly good draft.")
 
 
 # -- post-landing review round 4, finding 2: a transient audit failure turns
@@ -1250,11 +1216,11 @@ class TestAuditWriteFailureDoesNotBreakTheResponse(CoverNoteRouteTestBase):
         planted_corpus = leakage_scan.ConfidentialCorpus(
             playbook_ngrams=[self._PLANTED_RULE_ID], counterparty_names=[]
         )
-        self.app.dependency_overrides[
-            review_routes.get_cover_note_leakage_corpus_resolver
-        ] = lambda: (lambda playbook_id: planted_corpus)
-        self.app.dependency_overrides[review_routes.get_dynamodb_resource] = (
-            lambda: _AuditFailingDynamoDBResource(self._routing_ddb)
+        self.app.dependency_overrides[review_routes.get_cover_note_leakage_corpus_resolver] = (
+            lambda: lambda playbook_id: planted_corpus
+        )
+        self.app.dependency_overrides[review_routes.get_dynamodb_resource] = lambda: (
+            _AuditFailingDynamoDBResource(self._routing_ddb)
         )
 
     def test_a_leakage_block_survives_an_audit_write_failure_as_a_quiet_502(self):
@@ -1322,9 +1288,7 @@ class TestCoverNotePassPureFunctions(unittest.TestCase):
         # Still separate lines -- the fix under test is exactly this: no
         # single line holds more than one of the three original sentences
         # glued together with " - ".
-        self.assertEqual(
-            sum(1 for line in lines if line.strip().startswith("-")), 2
-        )
+        self.assertEqual(sum(1 for line in lines if line.strip().startswith("-")), 2)
 
     def test_digest_is_bounded_to_max_issues_and_excludes_internal_fields(self):
         many_issues = [
@@ -1375,9 +1339,7 @@ class TestCoverNotePassPureFunctions(unittest.TestCase):
         digest = cover_note_pass.build_edit_digest(issues)
 
         self.assertEqual(len(digest), 1)
-        self.assertEqual(
-            digest[0]["summary"], real_issue["counterparty_change_summary"]
-        )
+        self.assertEqual(digest[0]["summary"], real_issue["counterparty_change_summary"])
 
         prompt = cover_note_pass.render_cover_note_user_prompt(issues)
         self.assertNotIn("no substantive edits recorded", prompt)
@@ -1402,9 +1364,7 @@ class TestCoverNotePassPureFunctions(unittest.TestCase):
         )
         stripped = cover_note_pass._strip_greeting_and_signoff(raw)
         self.assertIn("We also revised the indemnification clause.", stripped)
-        self.assertIn(
-            "Please let us know if you would like to discuss.", stripped
-        )
+        self.assertIn("Please let us know if you would like to discuss.", stripped)
 
 
 if __name__ == "__main__":

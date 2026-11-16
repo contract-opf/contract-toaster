@@ -81,9 +81,7 @@ for _dir in (BACKEND_ROOT, SCRIPTS_DIR):
         sys.path.insert(0, str(_dir))
 
 os.environ.setdefault("USERS_TABLE", "contract-toaster-users-676-test")
-os.environ.setdefault(
-    "PLAYBOOK_VERSIONS_TABLE", "contract-toaster-playbook-versions-676-test"
-)
+os.environ.setdefault("PLAYBOOK_VERSIONS_TABLE", "contract-toaster-playbook-versions-676-test")
 os.environ.setdefault("PLAYBOOKS_TABLE", "contract-toaster-playbooks-676-test")
 os.environ.setdefault("AUDIT_TABLE", "contract-toaster-audit-676-test")
 os.environ.setdefault("UPLOADS_BUCKET", "contract-toaster-uploads-676-test")
@@ -218,9 +216,7 @@ class TestSchemaPremise(unittest.TestCase):
             with self.subTest(schema=path.name):
                 schema = _load(path)
                 self.assertIn("perspective", schema["properties"])
-                self.assertIn(
-                    "must", schema["properties"]["perspective"]["description"].lower()
-                )
+                self.assertIn("must", schema["properties"]["perspective"]["description"].lower())
                 self.assertNotIn("perspective", schema["required"])
 
     def test_the_minimums_table_is_exactly_the_normative_but_optional_set(self):
@@ -257,13 +253,14 @@ class TestSchemaPremise(unittest.TestCase):
             name
             for name, sub in schema["properties"].items()
             if name not in required
-            and re.search(r"\bmust\b|\brequired\b|\bshall\b", (sub.get("description") or "").lower())
+            and re.search(
+                r"\bmust\b|\brequired\b|\bshall\b", (sub.get("description") or "").lower()
+            )
         }
         self.assertEqual(
             naive - _normative_but_optional(schema),
             {"digest", "manifest", "dossiers", "provenance_index"},
         )
-
 
 
 # ---------------------------------------------------------------------------
@@ -431,9 +428,7 @@ class RouteTestBase(unittest.TestCase):
         _put_user(self.ddb.Table(os.environ["USERS_TABLE"]), ADMIN_SUB, is_admin=True)
 
         self.client = TestClient(backend_main.app)
-        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = (
-            lambda: self.ddb
-        )
+        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = lambda: self.ddb
         backend_main.app.dependency_overrides[backend_main.get_s3_client] = lambda: self.s3
         backend_main.app.dependency_overrides[backend_main.get_current_user] = lambda: {
             "sub": ADMIN_SUB,
@@ -529,9 +524,7 @@ class TestReviewTimeGate(RouteTestBase):
         storage_bytes = opf_canonicalize.canonicalize(doc).encode("utf-8")
         storage_hash_hex = hashlib.sha256(storage_bytes).hexdigest()
         storage_key = playbook_upload.storage_key_for(playbook_id, storage_hash_hex)
-        self.s3.put_object(
-            Bucket=os.environ["UPLOADS_BUCKET"], Key=storage_key, Body=storage_bytes
-        )
+        self.s3.put_object(Bucket=os.environ["UPLOADS_BUCKET"], Key=storage_key, Body=storage_bytes)
 
         content_hash = "sha256:" + hashlib.sha256(raw_bytes).hexdigest()
         playbook_versions.record_playbook_version_upload(

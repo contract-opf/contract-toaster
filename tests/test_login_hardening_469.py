@@ -105,10 +105,14 @@ class LoginHardeningTestBase(unittest.TestCase):
         )
 
         self.users_table = self.ddb.Table(os.environ["USERS_TABLE"])
-        self.users_table.put_item(Item={
-            "cognito_sub": ADMIN_SUB, "email": ADMIN["email"],
-            "status": "active", "is_admin": True,
-        })
+        self.users_table.put_item(
+            Item={
+                "cognito_sub": ADMIN_SUB,
+                "email": ADMIN["email"],
+                "status": "active",
+                "is_admin": True,
+            }
+        )
 
         demo_auth.seed_demo_users(self.ddb)
         demo_auth.set_auth_mode(demo_auth.AUTH_MODE_BOTH, ADMIN, self.ddb)
@@ -120,6 +124,7 @@ class LoginHardeningTestBase(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # (1) Throttle -- pure delay-schedule function, then the full login path.
 # ---------------------------------------------------------------------------
+
 
 class TestThrottleSchedule(unittest.TestCase):
     def test_no_delay_below_soft_threshold(self):
@@ -158,7 +163,9 @@ class TestLoginThrottle(LoginHardeningTestBase):
         seen_statuses = []
         for _ in range(demo_auth._THROTTLE_HARD_LOCKOUT_THRESHOLD):
             try:
-                demo_auth.login_with_password("admin", "not-the-password", self.ddb, client_ip="1.2.3.4")
+                demo_auth.login_with_password(
+                    "admin", "not-the-password", self.ddb, client_ip="1.2.3.4"
+                )
                 seen_statuses.append(200)
             except Exception as exc:  # noqa: BLE001
                 seen_statuses.append(getattr(exc, "status_code", None))
@@ -264,15 +271,18 @@ class TestLoginThrottle(LoginHardeningTestBase):
 # (2) Change password.
 # ---------------------------------------------------------------------------
 
+
 class TestChangeOwnPassword(LoginHardeningTestBase):
     def _admin_row(self) -> dict:
-        return self.users_table.get_item(
-            Key={"cognito_sub": demo_auth.local_user_sub("admin")}
-        )["Item"]
+        return self.users_table.get_item(Key={"cognito_sub": demo_auth.local_user_sub("admin")})[
+            "Item"
+        ]
 
     def test_wrong_current_password_rejected(self):
         with self.assertRaises(Exception) as ctx:
-            demo_auth.change_own_password("not-the-password", "brand-new-pw", self._admin_row(), self.ddb)
+            demo_auth.change_own_password(
+                "not-the-password", "brand-new-pw", self._admin_row(), self.ddb
+            )
         self.assertEqual(getattr(ctx.exception, "status_code", None), 401)
 
     def test_new_password_too_short_rejected(self):
@@ -294,7 +304,9 @@ class TestChangeOwnPassword(LoginHardeningTestBase):
             demo_auth.login_with_password("admin", "admin", self.ddb, client_ip="6.6.6.6")
         self.assertEqual(getattr(ctx.exception, "status_code", None), 401)
 
-        logged_in = demo_auth.login_with_password("admin", "brand-new-pw", self.ddb, client_ip="6.6.6.6")
+        logged_in = demo_auth.login_with_password(
+            "admin", "brand-new-pw", self.ddb, client_ip="6.6.6.6"
+        )
         self.assertEqual(logged_in["username"], "admin")
 
     def test_change_writes_one_audit_row_with_no_plaintext(self):
@@ -317,6 +329,7 @@ class TestChangeOwnPassword(LoginHardeningTestBase):
 # (3) Default-credentials warning.
 # ---------------------------------------------------------------------------
 
+
 class TestDefaultCredentialsWarning(LoginHardeningTestBase):
     def test_login_response_warns_for_unrotated_seed_default(self):
         result = demo_auth.login_with_password("admin", "admin", self.ddb, client_ip="2.2.2.2")
@@ -328,7 +341,9 @@ class TestDefaultCredentialsWarning(LoginHardeningTestBase):
         )["Item"]
         demo_auth.change_own_password("admin", "brand-new-pw", admin_row, self.ddb)
 
-        result = demo_auth.login_with_password("admin", "brand-new-pw", self.ddb, client_ip="2.2.2.2")
+        result = demo_auth.login_with_password(
+            "admin", "brand-new-pw", self.ddb, client_ip="2.2.2.2"
+        )
         self.assertFalse(result["default_credentials_warning"])
 
     def test_admin_added_user_never_warns(self):
@@ -356,6 +371,7 @@ class TestDefaultCredentialsWarning(LoginHardeningTestBase):
         # Field name must not collide with the credential-leak canary in
         # tests/test_users_projection_453.py (SECRET_FIELD_PATTERN).
         import re
+
         secret_pattern = re.compile(r"password|hash|secret|token", re.IGNORECASE)
         offenders = [k for k in seeded_admin if secret_pattern.search(k) and k != "user_type"]
         self.assertEqual(offenders, [])
@@ -364,6 +380,7 @@ class TestDefaultCredentialsWarning(LoginHardeningTestBase):
 # ---------------------------------------------------------------------------
 # (4) Constant-time compare -- locks in AC #4.
 # ---------------------------------------------------------------------------
+
 
 class TestConstantTimeCompare(unittest.TestCase):
     def test_verify_password_uses_hmac_compare_digest(self):
@@ -380,22 +397,23 @@ class TestConstantTimeCompare(unittest.TestCase):
 # Route level (issue #469 AC: "Tests for all of the above at the route level").
 # ---------------------------------------------------------------------------
 
+
 class RoutedTestBase(LoginHardeningTestBase):
     def setUp(self):
         super().setUp()
         self.client = TestClient(backend_main.app)
-        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = (
-            lambda: self.ddb
-        )
+        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = lambda: self.ddb
 
     def tearDown(self):
         backend_main.app.dependency_overrides.clear()
         super().tearDown()
 
     def _sign_in_as(self, cognito_sub: str) -> None:
-        backend_main.app.dependency_overrides[backend_main.get_current_user] = (
-            lambda: {"sub": cognito_sub, "email": "", "token_use": "access"}
-        )
+        backend_main.app.dependency_overrides[backend_main.get_current_user] = lambda: {
+            "sub": cognito_sub,
+            "email": "",
+            "token_use": "access",
+        }
 
 
 class TestLoginRouteThrottle(RoutedTestBase):
@@ -523,13 +541,15 @@ class TestMePasswordRoute(RoutedTestBase):
         self.assertEqual(stale_login.status_code, 401)
 
     def test_sso_caller_cannot_change_password(self):
-        self.users_table.put_item(Item={
-            "cognito_sub": "sso-caller",
-            "email": "sso-caller@example.com",
-            "user_type": "sso",
-            "status": "active",
-            "is_admin": False,
-        })
+        self.users_table.put_item(
+            Item={
+                "cognito_sub": "sso-caller",
+                "email": "sso-caller@example.com",
+                "user_type": "sso",
+                "status": "active",
+                "is_admin": False,
+            }
+        )
         self._sign_in_as("sso-caller")
         response = self.client.post(
             "/api/me/password",

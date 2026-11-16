@@ -251,7 +251,9 @@ async function submitAndSettleFirstPoll(harness: {
   await vi.waitFor(
     async () => {
       await vi.advanceTimersByTimeAsync(0);
-      expect(screen.getByTestId('review-submit-button').getAttribute('aria-disabled')).toBe('false');
+      expect(screen.getByTestId('review-submit-button').getAttribute('aria-disabled')).toBe(
+        'false',
+      );
     },
     { interval: 0, timeout: 12_000 },
   );
@@ -351,7 +353,9 @@ async function submitAndSettleFirstPoll(harness: {
   await vi.waitFor(
     async () => {
       await vi.advanceTimersByTimeAsync(0);
-      expect(harness.polls(), `requests so far: ${JSON.stringify(harness.calls?.() ?? [])}`).toBe(1);
+      expect(harness.polls(), `requests so far: ${JSON.stringify(harness.calls?.() ?? [])}`).toBe(
+        1,
+      );
     },
     { interval: 0, timeout: 12_000 },
   );

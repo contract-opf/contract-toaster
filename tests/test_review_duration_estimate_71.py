@@ -327,7 +327,9 @@ class TestTheWordCountProducer(unittest.TestCase):
         # itself.
         docx = pf491._build_docx(
             [
-                pf491._paragraph("Each party shall hold the other party's information confidential"),
+                pf491._paragraph(
+                    "Each party shall hold the other party's information confidential"
+                ),
                 pf491._paragraph("This Agreement runs for two years"),
             ]
         )
@@ -348,9 +350,7 @@ class TestTheHttpSurface(DurationEstimateTestBase):
 
     def setUp(self) -> None:
         super().setUp()
-        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = (
-            lambda: self.ddb
-        )
+        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = lambda: self.ddb
         self.client = TestClient(backend_main.app)
 
     def tearDown(self) -> None:
@@ -358,9 +358,7 @@ class TestTheHttpSurface(DurationEstimateTestBase):
         super().tearDown()
 
     def _as(self, user_row: dict) -> None:
-        backend_main.app.dependency_overrides[backend_main.get_active_user_row] = (
-            lambda: user_row
-        )
+        backend_main.app.dependency_overrides[backend_main.get_active_user_row] = lambda: user_row
 
     def test_it_answers_an_active_reviewer(self):
         self._as(REVIEWER)
@@ -386,9 +384,7 @@ class TestTheHttpSurface(DurationEstimateTestBase):
         body = self.client.get(
             "/api/review-duration-estimate", params={"playbook_id": PLAYBOOK}
         ).json()
-        self.assertEqual(
-            sorted(body.keys()), sorted(reviews.REVIEW_DURATION_ESTIMATE_FIELDS)
-        )
+        self.assertEqual(sorted(body.keys()), sorted(reviews.REVIEW_DURATION_ESTIMATE_FIELDS))
 
     def test_an_unauthenticated_caller_is_refused(self):
         """No `get_active_user_row` override and no credential: the real
@@ -401,9 +397,7 @@ class TestTheHttpSurface(DurationEstimateTestBase):
 
     def test_a_missing_playbook_id_is_a_malformed_request(self):
         self._as(REVIEWER)
-        self.assertEqual(
-            self.client.get("/api/review-duration-estimate").status_code, 422
-        )
+        self.assertEqual(self.client.get("/api/review-duration-estimate").status_code, 422)
 
     def test_a_negative_word_count_is_a_malformed_request(self):
         self._as(REVIEWER)

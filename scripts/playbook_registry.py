@@ -142,9 +142,7 @@ def default_playbook_id(registry_path: Optional[Path] = None) -> str:  # noqa: U
     registry = load_registry(resolved_path)
     value = registry.get("default_playbook_id")
     if not value:
-        raise PlaybookNotRegisteredError(
-            f'{resolved_path} has no "default_playbook_id" field.'
-        )
+        raise PlaybookNotRegisteredError(f'{resolved_path} has no "default_playbook_id" field.')
     return value
 
 

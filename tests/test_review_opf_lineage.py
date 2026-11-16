@@ -320,7 +320,9 @@ class FakeSfnClient:
         if name in self.started_names:
             raise self.exceptions.ExecutionAlreadyExists()
         self.started_names.add(name)
-        return {"executionArn": f"{stateMachineArn.replace(':stateMachine:', ':execution:')}:{name}"}
+        return {
+            "executionArn": f"{stateMachineArn.replace(':stateMachine:', ':execution:')}:{name}"
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -447,12 +449,8 @@ class TestSubmitReviewThreadsOpfLineage(SyntheticRegistryTestBase):
         self.assertEqual(len(submission_items), 1)
         execution_input = json.loads(submission_items[0]["execution_input"])
         self.assertEqual(execution_input["opf_content_hash"], OPF_CONTENT_HASH)
-        self.assertEqual(
-            execution_input["opf_section_digests_hash"], EXPECTED_SECTION_DIGESTS_HASH
-        )
-        self.assertEqual(
-            execution_input["opf_corpus_snapshot_hash"], CORPUS_SNAPSHOT_MANIFEST_HASH
-        )
+        self.assertEqual(execution_input["opf_section_digests_hash"], EXPECTED_SECTION_DIGESTS_HASH)
+        self.assertEqual(execution_input["opf_corpus_snapshot_hash"], CORPUS_SNAPSHOT_MANIFEST_HASH)
         # Issue #294: no posture override on this bundle -> absent, not null.
         self.assertNotIn("posture_version", review_row)
         self.assertNotIn("posture_version", execution_input)
@@ -479,12 +477,22 @@ class TestSubmitReviewThreadsOpfLineage(SyntheticRegistryTestBase):
         submissions_table = self.ddb.Table(os.environ["REVIEW_SUBMISSIONS_TABLE"])
 
         review_row = reviews_table.get_item(Key={"review_id": review_id})["Item"]
-        for field in ("opf_content_hash", "opf_section_digests_hash", "opf_corpus_snapshot_hash", "posture_version"):
+        for field in (
+            "opf_content_hash",
+            "opf_section_digests_hash",
+            "opf_corpus_snapshot_hash",
+            "posture_version",
+        ):
             self.assertNotIn(field, review_row)
 
         submission_items = list(submissions_table.items.values())
         execution_input = json.loads(submission_items[0]["execution_input"])
-        for field in ("opf_content_hash", "opf_section_digests_hash", "opf_corpus_snapshot_hash", "posture_version"):
+        for field in (
+            "opf_content_hash",
+            "opf_section_digests_hash",
+            "opf_corpus_snapshot_hash",
+            "posture_version",
+        ):
             self.assertNotIn(field, execution_input)
 
         # Every pre-existing field is untouched.

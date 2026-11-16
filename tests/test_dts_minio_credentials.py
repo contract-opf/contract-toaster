@@ -46,10 +46,12 @@ class CoolifyMinioCredentials(unittest.TestCase):
 
     def _pairs(self) -> dict[str, tuple[str, str]]:
         compose = _compose()
-        pairs = {"minio": (
-            compose["services"]["minio"]["environment"]["MINIO_ROOT_USER"],
-            compose["services"]["minio"]["environment"]["MINIO_ROOT_PASSWORD"],
-        )}
+        pairs = {
+            "minio": (
+                compose["services"]["minio"]["environment"]["MINIO_ROOT_USER"],
+                compose["services"]["minio"]["environment"]["MINIO_ROOT_PASSWORD"],
+            )
+        }
         for name in ("backend", "bootstrap"):
             env = compose["services"][name]["environment"]
             pairs[name] = (env["AWS_ACCESS_KEY_ID"], env["AWS_SECRET_ACCESS_KEY"])

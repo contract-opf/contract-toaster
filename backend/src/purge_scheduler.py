@@ -87,9 +87,7 @@ def sweep_interval_seconds() -> int:
     try:
         value = int(raw)
     except ValueError:
-        logger.warning(
-            "PURGE_SWEEP_INTERVAL_SECONDS is not an integer; using the default cadence"
-        )
+        logger.warning("PURGE_SWEEP_INTERVAL_SECONDS is not an integer; using the default cadence")
         return DEFAULT_SWEEP_INTERVAL_SECONDS
     # A zero or negative interval would spin the CPU scanning the reviews
     # table; refusing it is friendlier than honouring it.

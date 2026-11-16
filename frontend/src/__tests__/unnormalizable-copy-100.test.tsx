@@ -126,7 +126,7 @@ describe('a control-character refusal is not explained as a tracked change (issu
   it('names invisible control characters, not a tracked change, when reason_detail says so', async () => {
     const note =
       'Suspicious control characters in extracted text: 1 zero-width or ' +
-      "bidirectional control character(s) detected (first at offset 11) -- " +
+      'bidirectional control character(s) detected (first at offset 11) -- ' +
       "invisible characters in the model's input are a spoofing and " +
       'prompt-injection surface; refusing rather than stripping.';
     await submitAndFail(note, 'suspicious_control_characters');

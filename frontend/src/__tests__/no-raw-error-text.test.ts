@@ -54,7 +54,10 @@ async function ruleMessages(code: string): Promise<Linter.LintMessage[]> {
     ],
     { filename: 'probe.tsx' },
   );
-  expect(messages.filter((m) => m.fatal), `probe failed to parse: ${code}`).toEqual([]);
+  expect(
+    messages.filter((m) => m.fatal),
+    `probe failed to parse: ${code}`,
+  ).toEqual([]);
   return messages.filter((m) => m.ruleId === RULE);
 }
 
@@ -89,18 +92,18 @@ const RAW_SHAPES: Record<string, string> = {
   'the old ternary': `try { f(); } catch (err) { set(err instanceof Error ? err.message : 'x'); }`,
   'a bare .message': `try { f(); } catch (e) { set(e.message); }`,
   'optional-chained': `try { f(); } catch (e) { set((e as Error)?.message); }`,
-  'bracketed': `try { f(); } catch (e) { set(e['message']); }`,
-  'destructured': `try { f(); } catch (e) { const { message } = e as Error; set(message); }`,
+  bracketed: `try { f(); } catch (e) { set(e['message']); }`,
+  destructured: `try { f(); } catch (e) { const { message } = e as Error; set(message); }`,
   'String(err)': `try { f(); } catch (error) { set(String(error)); }`,
   'a template literal': 'try { f(); } catch (error) { set(`Failed: ${error}`); }',
-  'concatenation': `try { f(); } catch (error) { set('Failed: ' + error); }`,
+  concatenation: `try { f(); } catch (error) { set('Failed: ' + error); }`,
   '.toString()': `try { f(); } catch (error) { set(error.toString()); }`,
   'inside a nested callback': `try { f(); } catch (err) { setRows((c) => ({ ...c, x: err.message })); }`,
   'a promise .catch handler': `p.catch((err) => set(err.message));`,
 };
 
 const CLEAN_SHAPES: Record<string, string> = {
-  'toUserMessage': `try { f(); } catch (err) { set(toUserMessage(err, 'x')); }`,
+  toUserMessage: `try { f(); } catch (err) { set(toUserMessage(err, 'x')); }`,
   'logging the error object': `try { f(); } catch (err) { console.error(err); }`,
   'reading err.name': `try { f(); } catch (err) { if ((err as Error).name === 'AbortError') return; }`,
   'a message on something that is not the caught value': `try { f(); } catch { set(load.message); }`,

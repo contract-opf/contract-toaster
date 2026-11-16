@@ -129,7 +129,9 @@ class TestDigestPrecedentBlocks(unittest.TestCase):
 
     def test_the_collapsed_equivalent_exemplar_blocks(self):
         entry = next(
-            e for e in _clause(self.doc, "clause.confidentiality")["signed_variants"] if "exemplars" in e
+            e
+            for e in _clause(self.doc, "clause.confidentiality")["signed_variants"]
+            if "exemplars" in e
         )
         self._assert_blocks(entry["exemplars"][0]["text"])
 
@@ -156,7 +158,9 @@ class TestDigestPrecedentBlocks(unittest.TestCase):
         corpus = _corpus(doc)
         for text in unlisted:
             outcome = _scan(corpus, f"Overall: {text}")
-            self.assertTrue(outcome.blocked, f"the per-deal record must keep {text!r} in the corpus")
+            self.assertTrue(
+                outcome.blocked, f"the per-deal record must keep {text!r} in the corpus"
+            )
             self.assertEqual(outcome.rule_id, "playbook-ngram")
 
 
@@ -164,7 +168,9 @@ class TestOurStandardIsAllowlisted(unittest.TestCase):
     def setUp(self):
         self.doc = _load(FULL)
         self.corpus = _corpus(self.doc)
-        self.standard = _clause(self.doc, "clause.governing-law")["our_standard"]["parts"][0]["text"]
+        self.standard = _clause(self.doc, "clause.governing-law")["our_standard"]["parts"][0][
+            "text"
+        ]
 
     def test_our_standard_is_a_standard_clause_gram_not_a_playbook_gram(self):
         self.assertIn(self.standard, self.corpus.standard_clause_ngrams)
@@ -179,7 +185,9 @@ class TestOurStandardIsAllowlisted(unittest.TestCase):
         records = self.doc["evidence"]["precedent"]
         standard_signed = [r["signed_text"]["text"] for r in records if r["standard"]]
         standard_openings = [
-            r["opening_text"]["text"] for r in records if r["opened_with"] == "standard" and r["opening_text"]
+            r["opening_text"]["text"]
+            for r in records
+            if r["opened_with"] == "standard" and r["opening_text"]
         ]
         self.assertTrue(standard_signed and standard_openings, "fixture must carry both shapes")
         blocked = set(self.corpus.playbook_ngrams)
@@ -214,7 +222,9 @@ def _derived_section_texts(doc: dict[str, Any]) -> list[tuple[str, str, str]]:
         for rule in dossier.get("floor_rules") or []:
             for key in ("statement", "rationale"):
                 if rule.get(key):
-                    texts.append((f"dossiers.floor_rules.{key}", f"{where}.floor_rules.{key}", rule[key]))
+                    texts.append(
+                        (f"dossiers.floor_rules.{key}", f"{where}.floor_rules.{key}", rule[key])
+                    )
         for excerpt in dossier.get("excerpts") or []:
             for key in ("opening", "signed"):
                 if excerpt.get(key):
@@ -237,7 +247,9 @@ class TestDerivedSectionsAreCoveredByDerivation(unittest.TestCase):
         standard = set(corpus.standard_clause_ngrams)
         vocabulary = leakage_scan._opf_public_vocabulary(doc)
         joined_standards = {
-            "\n\n".join(part["text"] for part in (clause.get("our_standard") or {}).get("parts") or [])
+            "\n\n".join(
+                part["text"] for part in (clause.get("our_standard") or {}).get("parts") or []
+            )
             for clause in doc["digest"]["clauses"]
         }
         texts = _derived_section_texts(doc)
@@ -265,7 +277,9 @@ class TestDerivedSectionsAreCoveredByDerivation(unittest.TestCase):
                 self._assert_covered(_vector_doc(path))
 
     def test_vector_008_exercises_every_field(self):
-        fields = {field for field, _pointer, _text in _derived_section_texts(_vector_doc(DOSSIER_VECTOR))}
+        fields = {
+            field for field, _pointer, _text in _derived_section_texts(_vector_doc(DOSSIER_VECTOR))
+        }
         self.assertEqual(
             fields,
             {

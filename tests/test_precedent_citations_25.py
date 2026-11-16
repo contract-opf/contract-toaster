@@ -42,13 +42,20 @@ class CitationCheck(unittest.TestCase):
 
     def test_a_real_alias_at_a_location_never_shown_is_unresolved(self) -> None:
         alias = sorted(self.shown)[0][0]
-        self.assertEqual(pc.check_citation(f"[{alias}@9 §999]", self.shown)[0], pc.STATUS_UNRESOLVED)
+        self.assertEqual(
+            pc.check_citation(f"[{alias}@9 §999]", self.shown)[0], pc.STATUS_UNRESOLVED
+        )
 
     def test_one_bad_token_spoils_the_citation(self) -> None:
-        self.assertEqual(pc.check_citation(f"{self.real} and [deal-99@1 §3]", self.shown)[0], pc.STATUS_UNRESOLVED)
+        self.assertEqual(
+            pc.check_citation(f"{self.real} and [deal-99@1 §3]", self.shown)[0],
+            pc.STATUS_UNRESOLVED,
+        )
 
     def test_text_with_no_citation_in_it_is_unresolved_and_empty_is_none(self) -> None:
-        self.assertEqual(pc.check_citation("we signed this before", self.shown)[0], pc.STATUS_UNRESOLVED)
+        self.assertEqual(
+            pc.check_citation("we signed this before", self.shown)[0], pc.STATUS_UNRESOLVED
+        )
         self.assertEqual(pc.check_citation(None, self.shown)[0], pc.STATUS_NONE)
         self.assertEqual(pc.check_citation("  ", self.shown)[0], pc.STATUS_NONE)
 
@@ -66,7 +73,9 @@ class CitationCheck(unittest.TestCase):
         self.assertIsNone(out[1]["internal_precedent_citation"])
         self.assertNotIn("precedent_basis", out[1])
         self.assertEqual(out[2]["precedent_citation_status"], pc.STATUS_NONE)
-        self.assertEqual(findings[1]["internal_precedent_citation"], "[deal-99@1 §3]")  # input untouched
+        self.assertEqual(
+            findings[1]["internal_precedent_citation"], "[deal-99@1 §3]"
+        )  # input untouched
 
     def test_a_review_without_a_digest_is_left_alone(self) -> None:
         findings = [{"internal_precedent_citation": "[x@1 §1]"}]

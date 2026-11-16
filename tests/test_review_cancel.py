@@ -93,7 +93,9 @@ def _stop_on_call(n: int):
 
 
 def test_primary_pass_stops_before_the_first_call(failures: list[str]) -> None:
-    client = model_client.FakeBedrockClient({_TEST_MODEL_ID: [_fixture("primary_request_change_valid.json")]})
+    client = model_client.FakeBedrockClient(
+        {_TEST_MODEL_ID: [_fixture("primary_request_change_valid.json")]}
+    )
     try:
         pp.run_primary_pass(
             review_id="cancel-1",
@@ -150,7 +152,9 @@ def test_primary_pass_stops_between_attempts(failures: list[str]) -> None:
 def test_no_checkpoint_is_the_unchanged_path(failures: list[str]) -> None:
     """Every existing caller passes nothing. That path must be exactly what
     it was: one attempt, one call, status OK."""
-    client = model_client.FakeBedrockClient({_TEST_MODEL_ID: [_fixture("primary_request_change_valid.json")]})
+    client = model_client.FakeBedrockClient(
+        {_TEST_MODEL_ID: [_fixture("primary_request_change_valid.json")]}
+    )
     result = pp.run_primary_pass(
         review_id="cancel-3",
         retrieved_precedent=[],
@@ -170,7 +174,9 @@ def test_no_checkpoint_is_the_unchanged_path(failures: list[str]) -> None:
 
 
 def test_critic_pass_stops_before_the_first_call(failures: list[str]) -> None:
-    client = model_client.FakeBedrockClient({_TEST_MODEL_ID: [_fixture("critic_drop_i1_accept_valid.json")]})
+    client = model_client.FakeBedrockClient(
+        {_TEST_MODEL_ID: [_fixture("critic_drop_i1_accept_valid.json")]}
+    )
     try:
         cp.run_critic_pass(
             review_id="cancel-4",
@@ -294,9 +300,7 @@ def test_runner_treats_cancellation_separately_from_failure(failures: list[str])
     incident to investigate."""
     import pipeline_runner
 
-    reason = pipeline_runner.classify_failure_reason(
-        pipeline_runner.ReviewCancelled("stopped")
-    )
+    reason = pipeline_runner.classify_failure_reason(pipeline_runner.ReviewCancelled("stopped"))
     if reason != "unhandled_exception":
         failures.append(
             f"[8a] ReviewCancelled must not be given a failure token of its own; got {reason!r}"

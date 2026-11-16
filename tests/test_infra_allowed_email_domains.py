@@ -77,7 +77,9 @@ def _app_runner_env() -> dict[str, object]:
 
 class TestAllowedEmailDomains(unittest.TestCase):
     def test_a_context_value_reaches_app_runner(self) -> None:
-        result = _synth([*_context_without_allowed_domains(), "--context", f"allowedEmailDomains={DOMAINS}"])
+        result = _synth(
+            [*_context_without_allowed_domains(), "--context", f"allowedEmailDomains={DOMAINS}"]
+        )
         self.assertEqual(result.returncode, 0, result.stderr[-1200:])
         self.assertEqual(_app_runner_env().get("ALLOWED_EMAIL_DOMAINS"), DOMAINS)
 
@@ -89,8 +91,12 @@ class TestAllowedEmailDomains(unittest.TestCase):
     def test_c_unusable_values_are_refused(self) -> None:
         for bad in ("*", "example.com,,other.example", " , ", "not a domain", "@example.com"):
             with self.subTest(value=bad):
-                result = _synth([*_context_without_allowed_domains(), "--context", f"allowedEmailDomains={bad}"])
-                self.assertNotEqual(result.returncode, 0, f"synth accepted allowedEmailDomains={bad!r}")
+                result = _synth(
+                    [*_context_without_allowed_domains(), "--context", f"allowedEmailDomains={bad}"]
+                )
+                self.assertNotEqual(
+                    result.returncode, 0, f"synth accepted allowedEmailDomains={bad!r}"
+                )
                 self.assertIn("allowedEmailDomains", result.stdout + result.stderr)
 
     def test_d_no_doc_says_the_stack_does_not_set_it(self) -> None:

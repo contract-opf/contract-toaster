@@ -174,22 +174,24 @@ class PlaybookCreateTestBase(unittest.TestCase):
         _put_user(self.users_table, NON_ADMIN_SUB, is_admin=False)
 
         self.client = TestClient(backend_main.app)
-        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = (
-            lambda: self.ddb
-        )
+        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = lambda: self.ddb
         backend_main.app.dependency_overrides[backend_main.get_s3_client] = lambda: self.s3
-        backend_main.app.dependency_overrides[backend_main.get_current_user] = (
-            lambda: {"sub": ADMIN_SUB, "email": f"{ADMIN_SUB}@example.com", "token_use": "access"}
-        )
+        backend_main.app.dependency_overrides[backend_main.get_current_user] = lambda: {
+            "sub": ADMIN_SUB,
+            "email": f"{ADMIN_SUB}@example.com",
+            "token_use": "access",
+        }
 
     def tearDown(self):
         backend_main.app.dependency_overrides.clear()
         self._mock_aws.stop()
 
     def _authenticate_as(self, sub: str) -> None:
-        backend_main.app.dependency_overrides[backend_main.get_current_user] = (
-            lambda: {"sub": sub, "email": f"{sub}@example.com", "token_use": "access"}
-        )
+        backend_main.app.dependency_overrides[backend_main.get_current_user] = lambda: {
+            "sub": sub,
+            "email": f"{sub}@example.com",
+            "token_use": "access",
+        }
 
     def _create(self, content: bytes, filename: str, version: str = "1.0.0", **form):
         data: dict[str, str] = {"version": version, **form}
@@ -226,9 +228,7 @@ class TestCreateNewOpfPlaybookHappyPath(PlaybookCreateTestBase):
         self.assertEqual(row["uploaded_by"], ADMIN_SUB)
 
     def test_html_bundle_form_is_also_accepted(self):
-        resp = self._create(
-            OPF03_HTML_PATH.read_bytes(), "playbook.opf.html", version="1.0.0"
-        )
+        resp = self._create(OPF03_HTML_PATH.read_bytes(), "playbook.opf.html", version="1.0.0")
         self.assertEqual(resp.status_code, 200, resp.text)
         self.assertEqual(resp.json()["playbook_id"], DERIVED_PLAYBOOK_ID)
         self.assertEqual(resp.json()["artifact_kind"], "opf-0.6")

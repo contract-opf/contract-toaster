@@ -180,11 +180,7 @@ def hard_rejection_rule_ids(
         if isinstance(rule, dict) and isinstance(rule.get("id"), str) and rule["id"]:
             ids.add(rule["id"])
     for invariant in floor_invariants or ():
-        if (
-            isinstance(invariant, dict)
-            and isinstance(invariant.get("id"), str)
-            and invariant["id"]
-        ):
+        if isinstance(invariant, dict) and isinstance(invariant.get("id"), str) and invariant["id"]:
             ids.add(invariant["id"])
     return frozenset(ids)
 
@@ -559,9 +555,7 @@ def reconcile(
         raise ReconciliationRejected(
             _cp.REASON_CRITIC_SCHEMA_INVALID, "schema_invalid: " + "; ".join(problems)
         )
-    ledger_missing, ledger_repeated = _hl.disposition_problems(
-        hard_ledger_rule_ids, critic_result
-    )
+    ledger_missing, ledger_repeated = _hl.disposition_problems(hard_ledger_rule_ids, critic_result)
     if ledger_missing or ledger_repeated:
         problems = []
         if ledger_missing:
@@ -746,9 +740,7 @@ def reconcile(
         if is_floor_fire and fire.get("playbook_topic_id") in seen_topics:
             continue
         if fire_identity not in seen_keys:
-            final_issues.append(
-                _with_response_issue_key(dict(fire), final_issues, reserved_keys)
-            )
+            final_issues.append(_with_response_issue_key(dict(fire), final_issues, reserved_keys))
             seen_keys.add(fire_identity)
             appended_fires += 1
 
@@ -809,9 +801,7 @@ def reconcile(
     # Issue #138: the CRITIC's transcript, forwarded verbatim and only when it
     # carries one. Never the primary's, never a merge of the two.
     block_carriers = {
-        key: critic_result[key]
-        for key in ("block_patches", "block_ops")
-        if critic_result.get(key)
+        key: critic_result[key] for key in ("block_patches", "block_ops") if critic_result.get(key)
     }
 
     return {

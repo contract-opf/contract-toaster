@@ -121,9 +121,7 @@ def test_critic_pass_stamps_critic_added_provenance(failures: list[str]) -> None
         "issues": [],
         "critic_delta": {"added_issues": [_issue_without_provenance()]},
     }
-    is_valid, parsed = pp.validate_model_response(
-        json.dumps(body), issue_provenance="critic-added"
-    )
+    is_valid, parsed = pp.validate_model_response(json.dumps(body), issue_provenance="critic-added")
     if not is_valid:
         failures.append(f"[critic] critic body should validate after stamping, got: {parsed}")
         return

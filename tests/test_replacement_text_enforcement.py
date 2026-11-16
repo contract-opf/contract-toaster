@@ -192,8 +192,7 @@ class TestPerTopicMustNotIntroduce(unittest.TestCase):
         topic = rte.find_topic(self.playbook, "term-length")
         self.assertIsNotNone(topic, "term-length topic not found")
         replacement = (
-            "The parties waive all claims for consequential damages "
-            "arising under this Section 2.1."
+            "The parties waive all claims for consequential damages arising under this Section 2.1."
         )
         result = rte.check_replacement_text(topic, replacement)
         self.assertFalse(result.passed)
@@ -297,7 +296,11 @@ class TestEmptyReplacementTextWiring(unittest.TestCase):
             "topics": [
                 {
                     "id": "flag-only-topic",
-                    "replacement_text": {"mode": "none", "max_chars": 500, "must_not_introduce": []},
+                    "replacement_text": {
+                        "mode": "none",
+                        "max_chars": 500,
+                        "must_not_introduce": [],
+                    },
                 }
             ]
         }
@@ -314,17 +317,14 @@ class TestEmptyReplacementTextWiring(unittest.TestCase):
         issue = {
             "playbook_topic_id": "limitation-of-liability",
             "proposed_replacement_text": (
-                "Each party's aggregate liability under this Agreement "
-                "shall not exceed $150,000."
+                "Each party's aggregate liability under this Agreement shall not exceed $150,000."
             ),
         }
         failures = rte.check_issues_replacement_text([issue], self.playbook)
         self.assertEqual(failures, [])
 
 
-NDA_SAMPLE_PLAYBOOK_PATH = (
-    REPO_ROOT / "playbooks" / "samples" / "synthetic-nda-sample-v1.0.0.json"
-)
+NDA_SAMPLE_PLAYBOOK_PATH = REPO_ROOT / "playbooks" / "samples" / "synthetic-nda-sample-v1.0.0.json"
 
 
 class TestProdObservedFlagOnlyIsLabelled(unittest.TestCase):
@@ -428,8 +428,7 @@ class TestOpfNoneBundleDocstringClaim(unittest.TestCase):
         self.assertEqual(
             failures,
             [],
-            "a bundle=None fallback must not fail the model against a rule "
-            "it was never shown",
+            "a bundle=None fallback must not fail the model against a rule it was never shown",
         )
         self.assertEqual(
             issue.get(rte.REPLACEMENT_TEXT_OUTCOME_FIELD),

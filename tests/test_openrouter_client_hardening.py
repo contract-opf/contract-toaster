@@ -112,12 +112,10 @@ class TestConnectionReuse(unittest.TestCase):
             # Issue #657: the client opens a streamed request, so the owned
             # httpx.Client is driven through `.stream()`, not `.post()`. A
             # fresh context per call -- a streamed body is consumable once.
-            mock_instance.stream.side_effect = lambda *_a, **_kw: (
-                stream_context_for_response(_ok_response("first"))
+            mock_instance.stream.side_effect = lambda *_a, **_kw: stream_context_for_response(
+                _ok_response("first")
             )
-            client = mc.OpenRouterModelClient(
-                api_key="sk-test", max_retries=0, sleep_fn=_no_sleep
-            )
+            client = mc.OpenRouterModelClient(api_key="sk-test", max_retries=0, sleep_fn=_no_sleep)
             with patch.dict("os.environ", {}, clear=True):
                 client.invoke(
                     model_id=PRIMARY_MODEL_ID,
@@ -159,14 +157,15 @@ class TestConnectionReuse(unittest.TestCase):
             )
         client.close()
         self.assertFalse(
-            http.closed, "An injected http_client belongs to the caller -- close() must not touch it."
+            http.closed,
+            "An injected http_client belongs to the caller -- close() must not touch it.",
         )
 
     def test_context_manager_closes_owned_client(self) -> None:
         with patch("httpx.Client") as mock_client_cls:
             mock_instance = mock_client_cls.return_value
-            mock_instance.stream.side_effect = lambda *_a, **_kw: (
-                stream_context_for_response(_ok_response("ok"))
+            mock_instance.stream.side_effect = lambda *_a, **_kw: stream_context_for_response(
+                _ok_response("ok")
             )
             with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
                 with mc.OpenRouterModelClient(
@@ -187,7 +186,9 @@ class TestBoundedJitteredRetries(unittest.TestCase):
     pass-level attempt/ledger accounting."""
 
     def test_429_then_success_retries_and_returns_content(self) -> None:
-        http = ScriptedHttpClient([FakeResponse(429, {"error": "rate limited"}), _ok_response("recovered")])
+        http = ScriptedHttpClient(
+            [FakeResponse(429, {"error": "rate limited"}), _ok_response("recovered")]
+        )
         client = mc.OpenRouterModelClient(
             api_key="sk-test", http_client=http, max_retries=3, sleep_fn=_no_sleep
         )
@@ -199,7 +200,9 @@ class TestBoundedJitteredRetries(unittest.TestCase):
         self.assertEqual(len(http.calls), 2)
 
     def test_503_then_success_retries(self) -> None:
-        http = ScriptedHttpClient([FakeResponse(503, {}), FakeResponse(502, {}), _ok_response("ok")])
+        http = ScriptedHttpClient(
+            [FakeResponse(503, {}), FakeResponse(502, {}), _ok_response("ok")]
+        )
         client = mc.OpenRouterModelClient(
             api_key="sk-test", http_client=http, max_retries=3, sleep_fn=_no_sleep
         )
@@ -230,7 +233,10 @@ class TestBoundedJitteredRetries(unittest.TestCase):
         with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelInvocationError):
                 client.invoke(
-                    model_id=PRIMARY_MODEL_ID, system_prompt="s", user_prompt="u", max_output_tokens=10
+                    model_id=PRIMARY_MODEL_ID,
+                    system_prompt="s",
+                    user_prompt="u",
+                    max_output_tokens=10,
                 )
         # max_retries=2 -> 1 initial attempt + 2 retries = 3 total calls, never more.
         self.assertEqual(len(http.calls), 3)
@@ -243,9 +249,14 @@ class TestBoundedJitteredRetries(unittest.TestCase):
         with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelInvocationError):
                 client.invoke(
-                    model_id=PRIMARY_MODEL_ID, system_prompt="s", user_prompt="u", max_output_tokens=10
+                    model_id=PRIMARY_MODEL_ID,
+                    system_prompt="s",
+                    user_prompt="u",
+                    max_output_tokens=10,
                 )
-        self.assertEqual(len(http.calls), 1, "A non-429 4xx is a deterministic rejection -- must not be retried.")
+        self.assertEqual(
+            len(http.calls), 1, "A non-429 4xx is a deterministic rejection -- must not be retried."
+        )
 
     def test_backoff_is_bounded_and_jittered(self) -> None:
         http = ScriptedHttpClient([FakeResponse(500, {})] * 3 + [_ok_response("ok")])
@@ -274,7 +285,9 @@ class TestBoundedJitteredRetries(unittest.TestCase):
         # A caller (primary_review_pass.py) ledgers exactly ONE pass-level
         # attempt per invoke() call, however many transport-level retries
         # happened underneath -- retries must never duplicate spend settle.
-        http = ScriptedHttpClient([FakeResponse(429, {})] * 2 + [_ok_response(_valid_primary_response_text())])
+        http = ScriptedHttpClient(
+            [FakeResponse(429, {})] * 2 + [_ok_response(_valid_primary_response_text())]
+        )
         client = mc.OpenRouterModelClient(
             api_key="sk-test", http_client=http, max_retries=3, sleep_fn=_no_sleep
         )
@@ -307,14 +320,25 @@ class TestContextLengthFailClosed(unittest.TestCase):
         with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelContextLengthExceededError) as ctx:
                 client.invoke(
-                    model_id=PRIMARY_MODEL_ID, system_prompt="s", user_prompt=SECRET_PROMPT, max_output_tokens=10
+                    model_id=PRIMARY_MODEL_ID,
+                    system_prompt="s",
+                    user_prompt=SECRET_PROMPT,
+                    max_output_tokens=10,
                 )
         self.assertNotIn(SECRET_PROMPT, str(ctx.exception))
-        self.assertEqual(len(http.calls), 1, "A context-length rejection is deterministic -- must not be retried.")
+        self.assertEqual(
+            len(http.calls),
+            1,
+            "A context-length rejection is deterministic -- must not be retried.",
+        )
 
     def test_400_with_context_length_error_code_raises_context_length_error(self) -> None:
         http = ScriptedHttpClient(
-            [FakeResponse(400, {"error": {"code": "context_length_exceeded", "message": SECRET_PROMPT}})]
+            [
+                FakeResponse(
+                    400, {"error": {"code": "context_length_exceeded", "message": SECRET_PROMPT}}
+                )
+            ]
         )
         client = mc.OpenRouterModelClient(
             api_key="sk-test", http_client=http, max_retries=3, sleep_fn=_no_sleep
@@ -322,12 +346,20 @@ class TestContextLengthFailClosed(unittest.TestCase):
         with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelContextLengthExceededError):
                 client.invoke(
-                    model_id=PRIMARY_MODEL_ID, system_prompt="s", user_prompt=SECRET_PROMPT, max_output_tokens=10
+                    model_id=PRIMARY_MODEL_ID,
+                    system_prompt="s",
+                    user_prompt=SECRET_PROMPT,
+                    max_output_tokens=10,
                 )
 
     def test_400_with_context_length_message_raises_context_length_error(self) -> None:
         http = ScriptedHttpClient(
-            [FakeResponse(400, {"error": {"message": "This model's maximum context length is 128000 tokens."}})]
+            [
+                FakeResponse(
+                    400,
+                    {"error": {"message": "This model's maximum context length is 128000 tokens."}},
+                )
+            ]
         )
         client = mc.OpenRouterModelClient(
             api_key="sk-test", http_client=http, max_retries=3, sleep_fn=_no_sleep
@@ -335,18 +367,26 @@ class TestContextLengthFailClosed(unittest.TestCase):
         with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelContextLengthExceededError):
                 client.invoke(
-                    model_id=PRIMARY_MODEL_ID, system_prompt="s", user_prompt="u", max_output_tokens=10
+                    model_id=PRIMARY_MODEL_ID,
+                    system_prompt="s",
+                    user_prompt="u",
+                    max_output_tokens=10,
                 )
 
     def test_ordinary_400_is_not_misclassified_as_context_length(self) -> None:
-        http = ScriptedHttpClient([FakeResponse(400, {"error": {"code": "invalid_request", "message": "bad shape"}})])
+        http = ScriptedHttpClient(
+            [FakeResponse(400, {"error": {"code": "invalid_request", "message": "bad shape"}})]
+        )
         client = mc.OpenRouterModelClient(
             api_key="sk-test", http_client=http, max_retries=3, sleep_fn=_no_sleep
         )
         with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelInvocationError) as ctx:
                 client.invoke(
-                    model_id=PRIMARY_MODEL_ID, system_prompt="s", user_prompt="u", max_output_tokens=10
+                    model_id=PRIMARY_MODEL_ID,
+                    system_prompt="s",
+                    user_prompt="u",
+                    max_output_tokens=10,
                 )
         self.assertNotIsInstance(ctx.exception, mc.ModelContextLengthExceededError)
 
@@ -379,8 +419,16 @@ class TestContextLengthFailClosed(unittest.TestCase):
         )
         self.assertEqual(result.get("status"), "ERROR")
         self.assertEqual(result.get("reason"), "document_too_large")
-        self.assertEqual(client.calls, 1, "A context-length rejection must not be retried at the pass level either.")
-        self.assertEqual(len(ledger), 1, "Exactly one ledger row -- the rejected attempt -- must still be written.")
+        self.assertEqual(
+            client.calls,
+            1,
+            "A context-length rejection must not be retried at the pass level either.",
+        )
+        self.assertEqual(
+            len(ledger),
+            1,
+            "Exactly one ledger row -- the rejected attempt -- must still be written.",
+        )
         self.assertEqual(ledger[0].outcome, "failure")
 
 
@@ -396,7 +444,10 @@ class TestNoSubstanceDiscipline(unittest.TestCase):
         with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelContextLengthExceededError) as ctx:
                 client.invoke(
-                    model_id=PRIMARY_MODEL_ID, system_prompt=SECRET_PROMPT, user_prompt=SECRET_PROMPT, max_output_tokens=10
+                    model_id=PRIMARY_MODEL_ID,
+                    system_prompt=SECRET_PROMPT,
+                    user_prompt=SECRET_PROMPT,
+                    max_output_tokens=10,
                 )
         self.assertNotIn(SECRET_PROMPT, str(ctx.exception))
 
@@ -408,7 +459,10 @@ class TestNoSubstanceDiscipline(unittest.TestCase):
         with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelInvocationError) as ctx:
                 client.invoke(
-                    model_id=PRIMARY_MODEL_ID, system_prompt="s", user_prompt=SECRET_PROMPT, max_output_tokens=10
+                    model_id=PRIMARY_MODEL_ID,
+                    system_prompt="s",
+                    user_prompt=SECRET_PROMPT,
+                    max_output_tokens=10,
                 )
         self.assertNotIn(SECRET_PROMPT, str(ctx.exception))
 

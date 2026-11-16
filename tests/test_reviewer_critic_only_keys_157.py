@@ -135,7 +135,7 @@ def _critic_only_shapes() -> dict[str, Any]:
 
 
 def _non_conforming_critic_only_shapes() -> dict[str, Any]:
-    """"Nothing here" values the NON-strict forced tool (the Sonnet ZDR
+    """ "Nothing here" values the NON-strict forced tool (the Sonnet ZDR
     route: `"strict": True` is set only on `response_format`, never on the
     tool) lets a reviewer emit although the schema rejects them, by name."""
     return {

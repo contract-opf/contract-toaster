@@ -92,7 +92,7 @@ def extract_phase0_issue5_body(text: str) -> str:
     if not m:
         return ""
     start = m.start()
-    nm = re.search(r"^## \d+\.", text[m.end():], re.MULTILINE)
+    nm = re.search(r"^## \d+\.", text[m.end() :], re.MULTILINE)
     end = m.end() + nm.start() if nm else len(text)
     return text[start:end]
 
@@ -120,16 +120,26 @@ def check_arch_jit_admission_path() -> list[str]:
     text = read(ARCHITECTURE)
     auth_body = extract_section_body(text, "### Authentication — Cognito federated to Google")
     if not auth_body:
-        return ["  ARCHITECTURE.md: could not find '### Authentication — Cognito federated to Google' section"]
+        return [
+            "  ARCHITECTURE.md: could not find '### Authentication — Cognito federated to Google' section"
+        ]
 
     # Tight single-sentence / short-span patterns — no DOTALL
     jit_create_patterns = [
         # "JIT-creates" near "users row" or "active row" or "active users row"
-        re.compile(r"JIT.creat\w*[^.]{0,60}(users\s+row|active\s+row|active\s+users\s+row)", re.IGNORECASE),
+        re.compile(
+            r"JIT.creat\w*[^.]{0,60}(users\s+row|active\s+row|active\s+users\s+row)", re.IGNORECASE
+        ),
         # "Lambda" + "creates/JIT-creates" + ("row" or "active row") within a sentence
-        re.compile(r"lambda\b[^.;]{0,200}(JIT.creat\w+|creat\w+)[^.;]{0,80}(active\s+row|users\s+row|active\s+users)", re.IGNORECASE),
+        re.compile(
+            r"lambda\b[^.;]{0,200}(JIT.creat\w+|creat\w+)[^.;]{0,80}(active\s+row|users\s+row|active\s+users)",
+            re.IGNORECASE,
+        ),
         # "pre-token" + "creates" / "JIT-creates" near "active row" or "users row"
-        re.compile(r"pre.token[^.;]{0,200}(creat\w+|JIT.creat\w+)[^.;]{0,80}(active\s+row|users\s+row|active\s+users)", re.IGNORECASE),
+        re.compile(
+            r"pre.token[^.;]{0,200}(creat\w+|JIT.creat\w+)[^.;]{0,80}(active\s+row|users\s+row|active\s+users)",
+            re.IGNORECASE,
+        ),
         # "sign-in" + "creates" + "active" + "row"
         re.compile(r"sign.in[^.;]{0,100}creat\w+[^.;]{0,80}active[^.;]{0,60}row", re.IGNORECASE),
         # "admission path" explicit + Lambda or pre-token
@@ -226,9 +236,7 @@ def check_runbook_onboarding_reviewer() -> list[str]:
     # Must mention sign-in as a step
     sign_in = re.compile(r"sign.in|signs? in", re.IGNORECASE)
     if not sign_in.search(section_body):
-        failures.append(
-            "  RUNBOOK.md 'Onboarding a reviewer': does not mention sign-in as a step."
-        )
+        failures.append("  RUNBOOK.md 'Onboarding a reviewer': does not mention sign-in as a step.")
 
     # Must mention verifying/confirming the active row or reviewer access
     verify_row = re.compile(
@@ -256,9 +264,7 @@ def check_runbook_adding_new_admin_group_step() -> list[str]:
 
     section_body = extract_runbook_section(text, "### Adding a new admin")
     if not section_body:
-        failures.append(
-            "  RUNBOOK.md: missing '### Adding a new admin' section."
-        )
+        failures.append("  RUNBOOK.md: missing '### Adding a new admin' section.")
         return failures
 
     # Must mention adding to the group as a prerequisite
@@ -303,11 +309,19 @@ def check_phase0_issue5_jit_admission() -> list[str]:
     # (a) Tight patterns for JIT-create row in issue #5 AC — no DOTALL
     jit_patterns = [
         # "JIT-creates" near "users row" or "active row" or "active users row"
-        re.compile(r"JIT.creat\w*[^.;]{0,60}(users\s+row|active\s+row|active\s+users\s+row)", re.IGNORECASE),
+        re.compile(
+            r"JIT.creat\w*[^.;]{0,60}(users\s+row|active\s+row|active\s+users\s+row)", re.IGNORECASE
+        ),
         # "Lambda" + "creates/JIT-creates" near "active row" or "users row"
-        re.compile(r"lambda\b[^.;]{0,200}(JIT.creat\w+|creat\w+)[^.;]{0,80}(active\s+row|users\s+row|active\s+users)", re.IGNORECASE),
+        re.compile(
+            r"lambda\b[^.;]{0,200}(JIT.creat\w+|creat\w+)[^.;]{0,80}(active\s+row|users\s+row|active\s+users)",
+            re.IGNORECASE,
+        ),
         # "pre-token" + "creates" / "JIT-creates" near "active row"
-        re.compile(r"pre.token[^.;]{0,200}(creat\w+|JIT.creat\w+)[^.;]{0,80}(active\s+row|users\s+row|active\s+users)", re.IGNORECASE),
+        re.compile(
+            r"pre.token[^.;]{0,200}(creat\w+|JIT.creat\w+)[^.;]{0,80}(active\s+row|users\s+row|active\s+users)",
+            re.IGNORECASE,
+        ),
         # "sign-in" + "creates" + "active" + "row" within a sentence
         re.compile(r"sign.in[^.;]{0,100}creat\w+[^.;]{0,80}active[^.;]{0,60}row", re.IGNORECASE),
         # "admission path" explicit + Lambda or pre-token

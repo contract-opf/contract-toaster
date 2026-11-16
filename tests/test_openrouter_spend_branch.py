@@ -97,6 +97,7 @@ if str(BACKEND_SRC) not in sys.path:
 # same convention as tests/test_spend_reservation_settlement.py.
 # ---------------------------------------------------------------------------
 
+
 def _stub_third_party() -> None:
     if "fastapi" not in sys.modules:
         fastapi_mod = types.ModuleType("fastapi")
@@ -173,12 +174,19 @@ HTTPException = sys.modules["fastapi"].HTTPException
 # file's needs).
 # ---------------------------------------------------------------------------
 
+
 class FakeSpendTable:
     def __init__(self):
         self.items: dict[str, dict] = {}
 
-    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues=None,
-                     ConditionExpression=None, ExpressionAttributeNames=None):
+    def update_item(
+        self,
+        Key,
+        UpdateExpression,
+        ExpressionAttributeValues=None,
+        ConditionExpression=None,
+        ExpressionAttributeNames=None,
+    ):
         key = Key["spend_date"]
         vals = ExpressionAttributeValues or {}
         item = self.items.setdefault(key, dict(Key))
@@ -189,7 +197,9 @@ class FakeSpendTable:
             amount = vals[":amount"]
             if ConditionExpression and current + amount > cap:
                 ClientError = sys.modules["botocore.exceptions"].ClientError
-                raise ClientError({"Error": {"Code": "ConditionalCheckFailedException"}}, "UpdateItem")
+                raise ClientError(
+                    {"Error": {"Code": "ConditionalCheckFailedException"}}, "UpdateItem"
+                )
             item["reserved_usd_cents"] = current + amount
             item.setdefault("daily_cap_usd_cents", vals.get(":cap"))
             return
@@ -221,6 +231,7 @@ def _clear_model_provider() -> None:
 # tests/test_openrouter_model_client.py's FakeHttpClient/FakeResponse,
 # duplicated locally per this repo's self-contained-test-script convention.
 # ---------------------------------------------------------------------------
+
 
 class _FakeHttpResponse:
     def __init__(self, status_code: int, payload: dict):
@@ -261,6 +272,7 @@ def _openrouter_response(content: str, prompt_tokens: int, completion_tokens: in
 # ---------------------------------------------------------------------------
 # (1) Reservation pricing branch: openrouter.json rates vs Bedrock unchanged
 # ---------------------------------------------------------------------------
+
 
 class TestOpenRouterReservationPricingBranch(unittest.TestCase):
     def tearDown(self):
@@ -305,7 +317,8 @@ class TestOpenRouterReservationPricingBranch(unittest.TestCase):
         actual_cents = _reviews_module.compute_worst_case_reservation_usd_cents()
         self.assertEqual(actual_cents, expected_cents)
         self.assertNotEqual(
-            actual_cents, 1106,
+            actual_cents,
+            1106,
             "Must diverge from the Bedrock worst case, not silently reuse it.",
         )
 
@@ -313,6 +326,7 @@ class TestOpenRouterReservationPricingBranch(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # (2) OpenRouterModelClient captures real usage from the API response
 # ---------------------------------------------------------------------------
+
 
 class TestOpenRouterModelClientCapturesUsage(unittest.TestCase):
     def test_invoke_exposes_last_usage_from_response(self):
@@ -333,22 +347,28 @@ class TestOpenRouterModelClientCapturesUsage(unittest.TestCase):
         self.assertEqual(client.last_usage, {"input_tokens": 12345, "output_tokens": 678})
 
     def test_last_usage_updates_per_call(self):
-        http = _FakeHttpClient([
-            _openrouter_response("primary text", 12345, 678),
-            _openrouter_response("critic text", 23456, 901),
-        ])
+        http = _FakeHttpClient(
+            [
+                _openrouter_response("primary text", 12345, 678),
+                _openrouter_response("critic text", 23456, 901),
+            ]
+        )
         client = _model_client_module.OpenRouterModelClient(api_key="sk-test", http_client=http)
 
         # Policy-pinned ids (see note above): a placeholder id like "p"/"c"
         # now trips enforce_openrouter_policy_model_id() (issue #269).
         client.invoke(
             model_id=_model_client_module.openrouter_primary_model_id(),
-            system_prompt="s", user_prompt="u", max_output_tokens=100,
+            system_prompt="s",
+            user_prompt="u",
+            max_output_tokens=100,
         )
         primary_usage = client.last_usage
         client.invoke(
             model_id=_model_client_module.openrouter_critic_model_id(),
-            system_prompt="s", user_prompt="u", max_output_tokens=100,
+            system_prompt="s",
+            user_prompt="u",
+            max_output_tokens=100,
         )
         critic_usage = client.last_usage
 
@@ -360,16 +380,19 @@ class TestOpenRouterModelClientCapturesUsage(unittest.TestCase):
 # (3) Settle from actual usage, not the worst-case estimate
 # ---------------------------------------------------------------------------
 
+
 class TestSettleFromActualProviderUsage(unittest.TestCase):
     def tearDown(self):
         _clear_model_provider()
 
     def test_settle_records_actual_usage_based_cost_not_the_reservation(self):
         os.environ["MODEL_PROVIDER"] = "openrouter"
-        http = _FakeHttpClient([
-            _openrouter_response('{"decision":"ACCEPT"}', 12345, 678),
-            _openrouter_response('{"decision":"ACCEPT"}', 23456, 901),
-        ])
+        http = _FakeHttpClient(
+            [
+                _openrouter_response('{"decision":"ACCEPT"}', 12345, 678),
+                _openrouter_response('{"decision":"ACCEPT"}', 23456, 901),
+            ]
+        )
         client = _model_client_module.OpenRouterModelClient(api_key="sk-test", http_client=http)
 
         # Policy-pinned ids (see note in TestOpenRouterModelClientCapturesUsage
@@ -377,12 +400,16 @@ class TestSettleFromActualProviderUsage(unittest.TestCase):
         # enforce_openrouter_policy_model_id() (issue #269).
         client.invoke(
             model_id=_model_client_module.openrouter_primary_model_id(),
-            system_prompt="s", user_prompt="u", max_output_tokens=100,
+            system_prompt="s",
+            user_prompt="u",
+            max_output_tokens=100,
         )
         primary_usage = client.last_usage
         client.invoke(
             model_id=_model_client_module.openrouter_critic_model_id(),
-            system_prompt="s", user_prompt="u", max_output_tokens=100,
+            system_prompt="s",
+            user_prompt="u",
+            max_output_tokens=100,
         )
         critic_usage = client.last_usage
 
@@ -392,9 +419,13 @@ class TestSettleFromActualProviderUsage(unittest.TestCase):
         critic_rates = policy["models"]["critic"]
         expected_usd = (
             primary_usage["input_tokens"] * primary_rates["cost_per_million_input_usd"] / 1_000_000
-            + primary_usage["output_tokens"] * primary_rates["cost_per_million_output_usd"] / 1_000_000
+            + primary_usage["output_tokens"]
+            * primary_rates["cost_per_million_output_usd"]
+            / 1_000_000
             + critic_usage["input_tokens"] * critic_rates["cost_per_million_input_usd"] / 1_000_000
-            + critic_usage["output_tokens"] * critic_rates["cost_per_million_output_usd"] / 1_000_000
+            + critic_usage["output_tokens"]
+            * critic_rates["cost_per_million_output_usd"]
+            / 1_000_000
         )
         expected_cents = int(round(expected_usd * 100))  # noqa: RUF046
 
@@ -404,7 +435,8 @@ class TestSettleFromActualProviderUsage(unittest.TestCase):
         self.assertEqual(actual_cents, expected_cents)
         reservation_cents = _reviews_module.compute_worst_case_reservation_usd_cents()
         self.assertNotEqual(
-            actual_cents, reservation_cents,
+            actual_cents,
+            reservation_cents,
             "The settled amount must reflect real usage, not equal the "
             "worst-case reservation estimate.",
         )
@@ -451,6 +483,7 @@ class TestSettleFromActualProviderUsage(unittest.TestCase):
 # that catches such a leak.
 # ---------------------------------------------------------------------------
 
+
 class TestReasoningTokensNeverChangeTheSettledCost(unittest.TestCase):
     def tearDown(self):
         _clear_model_provider()
@@ -460,9 +493,7 @@ class TestReasoningTokensNeverChangeTheSettledCost(unittest.TestCase):
         """`last_usage` as produced by the REAL client over the REAL
         streaming transport -- never a hand-built dict."""
         http = _FakeHttpClient([payload])
-        client = _model_client_module.OpenRouterModelClient(
-            api_key="sk-test", http_client=http
-        )
+        client = _model_client_module.OpenRouterModelClient(api_key="sk-test", http_client=http)
         client.invoke(
             model_id=_model_client_module.openrouter_primary_model_id(),
             system_prompt="s",
@@ -490,9 +521,7 @@ class TestReasoningTokensNeverChangeTheSettledCost(unittest.TestCase):
             _reviews_module.compute_actual_usd_cents_from_usage(plain_usage, None),
         )
         self.assertEqual(
-            _reviews_module.compute_actual_usd_cents_from_usage(
-                reasoning_usage, reasoning_usage
-            ),
+            _reviews_module.compute_actual_usd_cents_from_usage(reasoning_usage, reasoning_usage),
             _reviews_module.compute_actual_usd_cents_from_usage(plain_usage, plain_usage),
         )
 
@@ -508,6 +537,7 @@ class TestReasoningTokensNeverChangeTheSettledCost(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # (4) Daily-cap breach behaves identically on both targets
 # ---------------------------------------------------------------------------
+
 
 class TestCapBreachIdenticalOnBothTargets(unittest.TestCase):
     def tearDown(self):

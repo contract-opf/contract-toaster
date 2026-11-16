@@ -119,8 +119,7 @@ _EXCLUSIVITY_BODY = (
 # its own.
 _US_SIGNATURE = "Your Organization, LLC\nBy: ______________________    Date: ____________"
 _THEM_SIGNATURE = (
-    "Fictional Harbor Laboratories, Incorporated\n"
-    "By: ______________________    Date: ____________"
+    "Fictional Harbor Laboratories, Incorporated\nBy: ______________________    Date: ____________"
 )
 
 
@@ -176,7 +175,9 @@ def _block_id(norm: dict, heading: str) -> str:
     for paragraph in norm["paragraphs"]:
         if paragraph["heading"] == heading or paragraph["heading"] == heading.split(". ", 1)[-1]:
             return paragraph["block_id"]
-    raise AssertionError(f"no block headed {heading!r} in {[p['heading'] for p in norm['paragraphs']]!r}")
+    raise AssertionError(
+        f"no block headed {heading!r} in {[p['heading'] for p in norm['paragraphs']]!r}"
+    )
 
 
 def _prove(docx_bytes: bytes, ops: list):
@@ -340,12 +341,9 @@ def test_deleting_the_last_clause_keeps_the_signature_blocks(failures: list) -> 
     rejected = _paragraph_texts(_reject_all(out))
     if rejected != source:
         failures.append(
-            f"[{case}] rejecting the redline gives {rejected!r}, expected the source's "
-            f"{source!r}"
+            f"[{case}] rejecting the redline gives {rejected!r}, expected the source's {source!r}"
         )
-    rejected_blocks = [
-        (p["heading"], p["text"]) for p in _norm(_reject_all(out))["paragraphs"]
-    ]
+    rejected_blocks = [(p["heading"], p["text"]) for p in _norm(_reject_all(out))["paragraphs"]]
     source_blocks = [(p["heading"], p["text"]) for p in norm["paragraphs"]]
     if rejected_blocks != source_blocks:
         failures.append(
@@ -528,7 +526,9 @@ def _refused(case: str, tail_parts: list, reason: str, failures: list) -> None:
             fragment in failure["detail"]
             for fragment in (_EXCLUSIVITY_BODY[:20], "Your Organization", "By:")
         ):
-            failures.append(f"[{case}] the failure detail quotes document text: {failure['detail']!r}")
+            failures.append(
+                f"[{case}] the failure detail quotes document text: {failure['detail']!r}"
+            )
     if not result["docx_bytes"]:
         failures.append(f"[{case}] the sibling delete did not land: no docx_bytes returned")
         return
@@ -661,7 +661,12 @@ _TAIL_TABLE = [
     ),
     (
         "label lines with values",
-        ["Body.", "By: /s/ Jane Q. Public", "Name: Jane Q. Public", "Title: Chief Executive Officer"],
+        [
+            "Body.",
+            "By: /s/ Jane Q. Public",
+            "Name: Jane Q. Public",
+            "Title: Chief Executive Officer",
+        ],
         1,
         None,
     ),
@@ -679,20 +684,63 @@ _TAIL_TABLE = [
         1,
         None,
     ),
-    ("lead-in alone is not a signature block", ["Body.", "In witness whereof, the parties agree."], 2, None),
+    (
+        "lead-in alone is not a signature block",
+        ["Body.", "In witness whereof, the parties agree."],
+        2,
+        None,
+    ),
     ("a lone party caption is not a signature block", ["Body.", "Acme Corp."], 2, None),
-    ("bracketed signature page marker", ["Body.", "[Signature page follows]", "By: ________"], 1, None),
+    (
+        "bracketed signature page marker",
+        ["Body.", "[Signature page follows]", "By: ________"],
+        1,
+        None,
+    ),
     # --- lookalikes: never retained -------------------------------------
-    ("contact labels are not signature labels", ["Body.", "Attn: General Counsel", "Email: a@example.com"], 3, None),
-    ("a blank-field line that does not start with a label", ["Body.", "Fee: $________ per month"], 2, None),
+    (
+        "contact labels are not signature labels",
+        ["Body.", "Attn: General Counsel", "Email: a@example.com"],
+        3,
+        None,
+    ),
+    (
+        "a blank-field line that does not start with a label",
+        ["Body.", "Fee: $________ per month"],
+        2,
+        None,
+    ),
     ("a short sentence is not a caption", ["Body.", "Neither party shall assign."], 2, None),
     ("a colon-ended lead-in to a list", ["Body.", "The following are excluded:"], 2, None),
     # --- ambiguity: refuse ------------------------------------------------
-    ("prose + signature line in one paragraph", ["Body.", "Company pays all costs.\nBy: ________"], 2, 1),
-    ("label line with a long prose value", ["Body.", "Date: the later of the dates on which the parties each sign this Agreement below."], 2, 1),
-    ("mixed paragraph above a clean tail", ["Body.", "Company pays.\nBy: ____", "By: ________"], 3, 1),
+    (
+        "prose + signature line in one paragraph",
+        ["Body.", "Company pays all costs.\nBy: ________"],
+        2,
+        1,
+    ),
+    (
+        "label line with a long prose value",
+        [
+            "Body.",
+            "Date: the later of the dates on which the parties each sign this Agreement below.",
+        ],
+        2,
+        1,
+    ),
+    (
+        "mixed paragraph above a clean tail",
+        ["Body.", "Company pays.\nBy: ____", "By: ________"],
+        3,
+        1,
+    ),
     # --- signature evidence that is not a clean tail ----------------------
-    ("signature line then unrecognised text", ["Body.", "__________", "Jane Q. Public, speaking for the Company"], 3, None),
+    (
+        "signature line then unrecognised text",
+        ["Body.", "__________", "Jane Q. Public, speaking for the Company"],
+        3,
+        None,
+    ),
 ]
 
 
@@ -711,7 +759,9 @@ def test_the_signature_tail_heuristic_table(failures: list) -> None:
         if ambiguous:
             continue
         if tail.start != want_start:
-            failures.append(f"[{name}] tail starts at {tail.start}, expected {want_start} ({tail!r})")
+            failures.append(
+                f"[{name}] tail starts at {tail.start}, expected {want_start} ({tail!r})"
+            )
 
 
 # ---------------------------------------------------------------------------

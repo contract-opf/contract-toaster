@@ -208,12 +208,21 @@ def check_ac3_throttle_vs_error_alarm() -> list[str]:
 
 def main() -> int:
     checks = [
-        ("AC1", "Quotas recorded in model-policy artifact; throughput ceiling documented",
-         check_ac1_quota_artifact),
-        ("AC2", "Eval harness rate-limiting documented in evaluation.md",
-         check_ac2_eval_rate_limiting),
-        ("AC3", "Throttle vs error alarm classification specified",
-         check_ac3_throttle_vs_error_alarm),
+        (
+            "AC1",
+            "Quotas recorded in model-policy artifact; throughput ceiling documented",
+            check_ac1_quota_artifact,
+        ),
+        (
+            "AC2",
+            "Eval harness rate-limiting documented in evaluation.md",
+            check_ac2_eval_rate_limiting,
+        ),
+        (
+            "AC3",
+            "Throttle vs error alarm classification specified",
+            check_ac3_throttle_vs_error_alarm,
+        ),
     ]
 
     overall_pass = True

@@ -83,8 +83,10 @@ def main() -> int:
         # review ownership in the repo that HAS owners; where the file is
         # absent by design there is nothing to gate, so skip rather than fail
         # and turn the published mirror's CI red.
-        print(f"SKIP: {CODEOWNERS_PATH} does not exist "
-              "(excluded from the public cut — nothing to gate here).")
+        print(
+            f"SKIP: {CODEOWNERS_PATH} does not exist "
+            "(excluded from the public cut — nothing to gate here)."
+        )
         return 0
 
     codeowners_text = CODEOWNERS_PATH.read_text()
@@ -97,9 +99,7 @@ def main() -> int:
         # Also accept a blanket /docs/ rule that covers all docs files
         # and a blanket rule that explicitly lists the path.
         # We also accept a wildcard blanket docs rule like /docs/ or docs/**
-        docs_blanket = any(
-            re.match(r"^/?docs(/\*\*?)?$", p) for p in gc_patterns
-        )
+        docs_blanket = any(re.match(r"^/?docs(/\*\*?)?$", p) for p in gc_patterns)
 
         matched = any(rx.match(p) for p in gc_patterns)
 
@@ -116,8 +116,7 @@ def main() -> int:
 
     if failures:
         print(
-            "FAIL: the following legal-behavior paths are NOT gated by "
-            f"{GC_TEAM} in CODEOWNERS.\n"
+            f"FAIL: the following legal-behavior paths are NOT gated by {GC_TEAM} in CODEOWNERS.\n"
         )
         for msg in failures:
             print(msg)

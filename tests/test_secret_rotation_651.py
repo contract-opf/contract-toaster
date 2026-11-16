@@ -164,9 +164,7 @@ class SecretRotationTestBase(unittest.TestCase):
             BillingMode="PAY_PER_REQUEST",
         )
 
-        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = (
-            lambda: self.ddb
-        )
+        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = lambda: self.ddb
         # `raise_server_exceptions=False` on purpose: some admin read routes
         # need tables this file does not provision and will answer 500. The
         # sweep wants their RESPONSE (and their traceback in the captured
@@ -179,9 +177,7 @@ class SecretRotationTestBase(unittest.TestCase):
         self._mock_aws.stop()
 
     def _as(self, user_row):
-        backend_main.app.dependency_overrides[backend_main.get_active_user_row] = (
-            lambda: user_row
-        )
+        backend_main.app.dependency_overrides[backend_main.get_active_user_row] = lambda: user_row
 
     def _audit_rows(self):
         return self.ddb.Table(os.environ["AUDIT_TABLE"]).scan().get("Items", [])
@@ -236,18 +232,14 @@ class TestNoSettingsSurfaceReturnsTheSecret(SecretRotationTestBase):
         # miss it.
         with self.assertLogs(level=log_level) as captured:
             transcript.append(
-                self.client.post(
-                    "/api/admin/model-key", json={"api_key": SENTINEL_KEY}
-                ).text
+                self.client.post("/api/admin/model-key", json={"api_key": SENTINEL_KEY}).text
             )
             for path in SWEPT_ADMIN_GET_ROUTES + SWEPT_OTHER_GET_ROUTES:
                 transcript.append(self.client.get(path).text)
             # The write routes answer with the settings shape too, so they are
             # part of the surface, not just the way the sentinel got in.
             transcript.append(
-                self.client.post(
-                    "/api/admin/model-selection", json={"primary_model_id": None}
-                ).text
+                self.client.post("/api/admin/model-selection", json={"primary_model_id": None}).text
             )
             transcript.append(self.client.delete("/api/admin/model-key").text)
 
@@ -310,9 +302,7 @@ class TestNoSettingsSurfaceReturnsTheSecret(SecretRotationTestBase):
         self.client.post("/api/admin/model-key", json={"api_key": SENTINEL_KEY})
         body = self.client.get("/api/admin/model-key").json()
 
-        self.assertEqual(
-            body["key_fingerprint"], model_settings.secret_fingerprint(SENTINEL_KEY)
-        )
+        self.assertEqual(body["key_fingerprint"], model_settings.secret_fingerprint(SENTINEL_KEY))
         self.assertEqual(leaked_windows(body["key_fingerprint"], SENTINEL_BODY), [])
         # And it changes when the key changes -- the whole point of showing it.
         self.client.post("/api/admin/model-key", json={"api_key": ROTATED_KEY})
@@ -366,21 +356,15 @@ class AuthenticatingOpenRouterTransport:
         bearer = (headers or {}).get("Authorization", "")
         self.bearers_seen.append(bearer)
         if bearer != f"Bearer {self._accepted}":
-            payload = {
-                "error": {"message": "No auth credentials found", "code": 401}
-            }
+            payload = {"error": {"message": "No auth credentials found", "code": 401}}
             return SseStreamContext(SseStreamResponse(401, [], payload))
         payload = {
             "id": "gen-test",
             "model": _model_id(),
-            "choices": [
-                {"message": {"content": self._content}, "finish_reason": "stop"}
-            ],
+            "choices": [{"message": {"content": self._content}, "finish_reason": "stop"}],
             "usage": {"prompt_tokens": 11, "completion_tokens": 3},
         }
-        return SseStreamContext(
-            SseStreamResponse(200, sse_lines_for_body(payload), payload)
-        )
+        return SseStreamContext(SseStreamResponse(200, sse_lines_for_body(payload), payload))
 
     def close(self):
         pass
@@ -497,9 +481,7 @@ class TestAuditTrail(SecretRotationTestBase):
 class TestNonAdminCannotWriteASecret(SecretRotationTestBase):
     def test_post_is_refused_and_stores_nothing(self):
         self._as(NON_ADMIN)
-        response = self.client.post(
-            "/api/admin/model-key", json={"api_key": SENTINEL_KEY}
-        )
+        response = self.client.post("/api/admin/model-key", json={"api_key": SENTINEL_KEY})
         self.assertEqual(response.status_code, 403)
         # The refusal is not cosmetic: nothing reached the store.
         self.assertEqual(model_settings.resolve_openrouter_api_key(self.ddb), "")
@@ -512,15 +494,11 @@ class TestNonAdminCannotWriteASecret(SecretRotationTestBase):
         self._as(NON_ADMIN)
         self.assertEqual(self.client.delete("/api/admin/model-key").status_code, 403)
 
-        self.assertEqual(
-            model_settings.resolve_openrouter_api_key(self.ddb), SENTINEL_KEY
-        )
+        self.assertEqual(model_settings.resolve_openrouter_api_key(self.ddb), SENTINEL_KEY)
 
     def test_the_refusal_body_carries_no_run_of_the_submitted_key(self):
         self._as(NON_ADMIN)
-        response = self.client.post(
-            "/api/admin/model-key", json={"api_key": SENTINEL_KEY}
-        )
+        response = self.client.post("/api/admin/model-key", json={"api_key": SENTINEL_KEY})
         self.assertEqual(leaked_windows(response.text, SENTINEL_BODY), [])
 
 

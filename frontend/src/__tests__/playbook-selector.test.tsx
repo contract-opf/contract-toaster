@@ -281,8 +281,9 @@ describe('the console catalog dialog', () => {
 
     const dialog = await openPlaybookCatalog();
     for (const entry of CATALOG) {
-      expect(within(dialog).getByTestId(`review-playbook-option-${entry.playbook_id}`))
-        .toBeInTheDocument();
+      expect(
+        within(dialog).getByTestId(`review-playbook-option-${entry.playbook_id}`),
+      ).toBeInTheDocument();
     }
     expect(screen.getByTestId('review-playbook-option-nda')).toBeDisabled();
   });

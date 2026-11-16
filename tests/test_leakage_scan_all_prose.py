@@ -234,6 +234,7 @@ def _normalize(text: str) -> str:
     """Case-fold and collapse whitespace for normalized matching."""
     return _normalize_ws.sub(" ", text.lower()).strip()
 
+
 _normalize_ws = _NORMALIZE_WS
 
 
@@ -396,6 +397,7 @@ def run_scanner_unit_tests() -> list[str]:
 # Gate functions
 # ---------------------------------------------------------------------------
 
+
 def gate1_output_contract_scope(text: str) -> list[str]:
     """Gate 1: output-contract.md must state scan covers all human-surfaced prose."""
     failures = []
@@ -530,6 +532,7 @@ def gate4_fixtures_documented(arch_text: str, threat_text: str) -> list[str]:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> int:
     print("Leakage scan — all human-surfaced prose gate (issue #26)\n")

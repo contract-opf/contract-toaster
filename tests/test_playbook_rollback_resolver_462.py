@@ -161,18 +161,18 @@ class RollbackResolverTestBase(unittest.TestCase):
         _put_user(self.users_table, NON_ADMIN_SUB, is_admin=False)
 
         self.client = TestClient(backend_main.app)
-        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = (
-            lambda: self.ddb
-        )
+        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = lambda: self.ddb
 
     def tearDown(self):
         backend_main.app.dependency_overrides.clear()
         self._mock_aws.stop()
 
     def _authenticate_as(self, sub: str) -> None:
-        backend_main.app.dependency_overrides[backend_main.get_current_user] = (
-            lambda: {"sub": sub, "email": f"{sub}@example.com", "token_use": "access"}
-        )
+        backend_main.app.dependency_overrides[backend_main.get_current_user] = lambda: {
+            "sub": sub,
+            "email": f"{sub}@example.com",
+            "token_use": "access",
+        }
 
     def _row(self, version: str):
         return self.versions_table.get_item(
@@ -217,9 +217,7 @@ class RollbackResolverTestBase(unittest.TestCase):
         self.versions_table.update_item(
             Key={"playbook_id": PLAYBOOK_ID, "version": "1.1.0"},
             UpdateExpression="SET legal_approval = :la",
-            ExpressionAttributeValues={
-                ":la": {"content_hash": "sha256:" + "b" * 64}
-            },
+            ExpressionAttributeValues={":la": {"content_hash": "sha256:" + "b" * 64}},
         )
         pv.activate_release_bundle(
             playbook_id=PLAYBOOK_ID,
@@ -343,10 +341,7 @@ class TestTrailExposesActivatedAt(RollbackResolverTestBase):
         )  # uploaded, never activated
 
         self._authenticate_as(ADMIN_SUB)
-        trail = {
-            v["version"]: v
-            for v in self.client.get(VERSIONS_PATH).json()["versions"]
-        }
+        trail = {v["version"]: v for v in self.client.get(VERSIONS_PATH).json()["versions"]}
         self.assertIn("activated_at", trail["1.0.0"])
         self.assertIn("activated_at", trail["1.1.0"])
         self.assertNotIn("activated_at", trail["1.2.0"])

@@ -220,6 +220,7 @@ ADMIN_XSS_FILENAME_PATTERN = re.compile(
 # Gate functions
 # ---------------------------------------------------------------------------
 
+
 def gate_a_input_part_allowlist(arch_text: str, threat_text: str) -> list[str]:
     """Input: OOXML part allowlist must be documented."""
     failures = []
@@ -227,9 +228,8 @@ def gate_a_input_part_allowlist(arch_text: str, threat_text: str) -> list[str]:
 
     # Check A-all: presence of explicit allowlist / exclusion of auxiliary parts
     # We accept a combined pattern over both files.
-    has_allowlist = (
-        ARCH_ALLOWLIST_PATTERN.search(combined)
-        or COMBINED_ALLOWLIST_PATTERN.search(combined)
+    has_allowlist = ARCH_ALLOWLIST_PATTERN.search(combined) or COMBINED_ALLOWLIST_PATTERN.search(
+        combined
     )
     if not has_allowlist:
         failures.append(
@@ -297,10 +297,9 @@ def gate_b_output_rescan(output_contract_text: str, threat_text: str) -> list[st
     combined = output_contract_text + "\n\n" + threat_text
 
     # Check B1: literal-runs-only insertion
-    has_literal_runs = (
-        OUTPUT_LITERAL_RUNS_PATTERN.search(combined)
-        or OUTPUT_NO_FIELD_CODES_PATTERN.search(combined)
-    )
+    has_literal_runs = OUTPUT_LITERAL_RUNS_PATTERN.search(
+        combined
+    ) or OUTPUT_NO_FIELD_CODES_PATTERN.search(combined)
     if not has_literal_runs:
         failures.append(
             "  Gate B1: docs/output-contract.md / docs/threat-model.md does not specify\n"
@@ -313,9 +312,8 @@ def gate_b_output_rescan(output_contract_text: str, threat_text: str) -> list[st
         )
 
     # Check B2: output docx is rescanned before writing to outputs
-    has_rescan = (
-        OUTPUT_RESCAN_PATTERN.search(combined)
-        or OUTPUT_SCAN_STATEMENT_PATTERN.search(combined)
+    has_rescan = OUTPUT_RESCAN_PATTERN.search(combined) or OUTPUT_SCAN_STATEMENT_PATTERN.search(
+        combined
     )
     if not has_rescan:
         failures.append(

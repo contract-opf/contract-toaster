@@ -26,11 +26,7 @@ import {
   type ReceiptLine,
   type ReceiptSource,
 } from './receipt';
-import {
-  RECEIPT_IMAGE_COLUMNS,
-  drawReceiptRows,
-  saveReceiptImage,
-} from './receiptImage';
+import { RECEIPT_IMAGE_COLUMNS, drawReceiptRows, saveReceiptImage } from './receiptImage';
 
 export interface ReceiptProps {
   review: ReceiptSource;
@@ -123,10 +119,20 @@ export function ToastReceipt({ review, playbookName }: ReceiptProps): React.Reac
       </div>
 
       <div className="ct-actions toaster-receipt__actions">
-        <CtButton type="button" variant="secondary" data-testid="review-receipt-copy" onClick={handleCopy}>
+        <CtButton
+          type="button"
+          variant="secondary"
+          data-testid="review-receipt-copy"
+          onClick={handleCopy}
+        >
           {copied ? 'Copied' : 'Copy as text'}
         </CtButton>
-        <CtButton type="button" variant="secondary" data-testid="review-receipt-save" onClick={handleSave}>
+        <CtButton
+          type="button"
+          variant="secondary"
+          data-testid="review-receipt-save"
+          onClick={handleSave}
+        >
           Save receipt
         </CtButton>
       </div>

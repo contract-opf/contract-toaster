@@ -151,9 +151,7 @@ describe('A9 — a failed review vs DONE, as rendered', () => {
     // Differentiator 1 — the hero. These two are mutually exclusive states of
     // the same illustration, so the completed-review picture cannot appear on
     // a review that was NOT completed.
-    expect(
-      screen.getByTestId(stateBadge('sober', 'ERROR')),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId(stateBadge('sober', 'ERROR'))).toBeInTheDocument();
     expect(screen.queryByTestId(stateBadge('done'))).toBeNull();
   });
 

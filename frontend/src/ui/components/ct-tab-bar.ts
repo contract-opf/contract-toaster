@@ -163,7 +163,9 @@ export class CtTabBar extends LitElement {
   }
 
   private _activate(id: string, moveFocus: boolean): void {
-    this.dispatchEvent(new CustomEvent('ct-select', { detail: { id }, bubbles: true, composed: true }));
+    this.dispatchEvent(
+      new CustomEvent('ct-select', { detail: { id }, bubbles: true, composed: true }),
+    );
     if (moveFocus) {
       const target = Array.from(this.querySelectorAll<HTMLButtonElement>('[data-tab-id]')).find(
         (btn) => btn.dataset.tabId === id,

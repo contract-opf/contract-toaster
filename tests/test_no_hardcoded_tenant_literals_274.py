@@ -75,7 +75,9 @@ def check_a_no_literals_in_src_trees() -> list[str]:
                 if literal in text:
                     for lineno, line in enumerate(text.splitlines(), start=1):
                         if literal in line:
-                            hits.append(f"{path.relative_to(REPO_ROOT)}:{lineno}: {literal!r} in {line.strip()!r}")
+                            hits.append(
+                                f"{path.relative_to(REPO_ROOT)}:{lineno}: {literal!r} in {line.strip()!r}"
+                            )
 
     failures += _assert(
         not hits,

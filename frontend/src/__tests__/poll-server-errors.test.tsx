@@ -137,7 +137,9 @@ describe('a run of server errors on the status poll (2026-10-28 production repor
     await vi.waitFor(
       async () => {
         await vi.advanceTimersByTimeAsync(0);
-        expect(screen.getByTestId('review-submit-button').getAttribute('aria-disabled')).toBe('false');
+        expect(screen.getByTestId('review-submit-button').getAttribute('aria-disabled')).toBe(
+          'false',
+        );
       },
       { interval: 0, timeout: 12_000 },
     );

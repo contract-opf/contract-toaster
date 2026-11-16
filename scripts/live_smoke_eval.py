@@ -563,19 +563,13 @@ def aggregate_rows(rows: list[dict[str, Any]], modes: tuple[str, ...]) -> dict[s
         mode_rows = [r for r in rows if r["structured_output"] == mode]
         n = len(mode_rows)
         valid = sum(1 for r in mode_rows if r["status"] == "OK")
-        retried = sum(
-            1 for r in mode_rows if r["primary_attempts"] > 1 or r["critic_attempts"] > 1
-        )
+        retried = sum(1 for r in mode_rows if r["primary_attempts"] > 1 or r["critic_attempts"] > 1)
         aggregate[mode] = {
             "runs": n,
             "validity_rate": (valid / n) if n else 0.0,
             "retry_rate": (retried / n) if n else 0.0,
-            "decision_counts": dict(
-                Counter((r["decision"] or r["status"]) for r in mode_rows)
-            ),
-            "validation_outcome_counts": dict(
-                Counter(r["validation_outcome"] for r in mode_rows)
-            ),
+            "decision_counts": dict(Counter((r["decision"] or r["status"]) for r in mode_rows)),
+            "validation_outcome_counts": dict(Counter(r["validation_outcome"] for r in mode_rows)),
             # Issue #157: "{pass}:{retry_reason}" -> how many attempts of
             # this mode retried for that reason, across every run.
             "retry_reason_counts": dict(
@@ -720,8 +714,7 @@ def main(
     docs = resolve_docs(docs_dir)
     if not docs:
         print(
-            f"ERROR: no .docx files found in {docs_dir} "
-            f"(directory missing or empty).",
+            f"ERROR: no .docx files found in {docs_dir} (directory missing or empty).",
             file=sys.stderr,
         )
         return 1
@@ -796,9 +789,7 @@ def main(
                         # (status/decision/findings/summary/etc.) is exactly the
                         # substance --dump-dir exists to capture, so drop only
                         # this one key rather than narrowing to an allowlist.
-                        dump_payload = {
-                            k: v for k, v in result.items() if k != "redline_bytes"
-                        }
+                        dump_payload = {k: v for k, v in result.items() if k != "redline_bytes"}
                         # Issue #573 fix round 1 (Slice A): per-attempt
                         # outcome + tokenized error for EVERY ledgered
                         # attempt of THIS run -- not just the terminal
@@ -843,8 +834,7 @@ def main(
                         # `pass_name="floor"` records emit no diagnostics at
                         # all, so they simply never match.
                         diagnostic_by_attempt = {
-                            (d.get("pass_name"), d.get("attempt_number")): d
-                            for d in diagnostics
+                            (d.get("pass_name"), d.get("attempt_number")): d for d in diagnostics
                         }
                         attempt_entries: list[dict[str, Any]] = []
                         for record in records:

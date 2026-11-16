@@ -197,11 +197,11 @@ class NullLastAuthTestBase(unittest.TestCase):
 # every other assertion in this file would be vacuous.
 # ---------------------------------------------------------------------------
 
+
 class TestSeededRowsReallyCarryNone(NullLastAuthTestBase):
     def test_seed_demo_users_writes_at_least_two_null_last_auth_rows(self):
         nulls = [
-            sub for sub in self.never_signed_in_subs()
-            if self.raw_row(sub)["last_auth_at"] is None
+            sub for sub in self.never_signed_in_subs() if self.raw_row(sub)["last_auth_at"] is None
         ]
         self.assertGreaterEqual(
             len(nulls),
@@ -221,6 +221,7 @@ class TestSeededRowsReallyCarryNone(NullLastAuthTestBase):
 # ---------------------------------------------------------------------------
 # The defect and the ordering contract.
 # ---------------------------------------------------------------------------
+
 
 class TestNeverSignedInRowsDoNotBreakTheSort(NullLastAuthTestBase):
     def listed(self) -> list[dict]:
@@ -255,9 +256,7 @@ class TestNeverSignedInRowsDoNotBreakTheSort(NullLastAuthTestBase):
     def test_signed_in_rows_keep_their_most_recent_first_order(self):
         """Acceptance: existing most-recent-first ordering is unchanged."""
         never = self.never_signed_in_subs()
-        stamps = [
-            u["last_auth_at"] for u in self.listed() if u["cognito_sub"] not in never
-        ]
+        stamps = [u["last_auth_at"] for u in self.listed() if u["cognito_sub"] not in never]
         self.assertEqual(stamps, sorted(stamps, reverse=True), f"not descending: {stamps}")
         self.assertEqual(stamps, [9_000, ADMIN_LAST_AUTH, 3_000, 1_000])
 
@@ -290,18 +289,19 @@ class TestNeverSignedInRowsDoNotBreakTheSort(NullLastAuthTestBase):
 # The route: what actually 500'd in production.
 # ---------------------------------------------------------------------------
 
+
 class TestGetUsersRouteWithNeverSignedInRows(NullLastAuthTestBase):
     def setUp(self):
         super().setUp()
         # raise_server_exceptions=False so an unhandled TypeError surfaces as
         # the 500 the browser actually saw, rather than blowing up the runner.
         self.client = TestClient(backend_main.app, raise_server_exceptions=False)
-        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = (
-            lambda: self.ddb
-        )
-        backend_main.app.dependency_overrides[backend_main.get_current_user] = (
-            lambda: {"sub": ADMIN_SUB, "email": f"{ADMIN_SUB}@example.com", "token_use": "access"}
-        )
+        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = lambda: self.ddb
+        backend_main.app.dependency_overrides[backend_main.get_current_user] = lambda: {
+            "sub": ADMIN_SUB,
+            "email": f"{ADMIN_SUB}@example.com",
+            "token_use": "access",
+        }
 
     def test_route_returns_200_not_500(self):
         response = self.client.get("/api/users")

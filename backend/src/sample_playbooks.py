@@ -183,9 +183,7 @@ def seed_shipped_playbook(
     try:
         entry = playbook_registry.resolve_playbook(playbook_id)
     except playbook_registry.PlaybookNotRegisteredError as exc:
-        raise SampleNotAvailableError(
-            f"playbook_id {playbook_id!r} is not registered."
-        ) from exc
+        raise SampleNotAvailableError(f"playbook_id {playbook_id!r} is not registered.") from exc
 
     if entry.test_only:
         raise SampleNotAvailableError(

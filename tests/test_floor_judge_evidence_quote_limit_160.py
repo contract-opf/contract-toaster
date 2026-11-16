@@ -48,7 +48,11 @@ import floor_judge  # noqa: E402
 import primary_review_pass as pp  # noqa: E402
 
 INV = "inv-synthetic-1"
-INVARIANT = {"id": INV, "statement": "The agreement must not waive liability for gross negligence.", "rationale": "r"}
+INVARIANT = {
+    "id": INV,
+    "statement": "The agreement must not waive liability for gross negligence.",
+    "rationale": "r",
+}
 CONTEXT = "Synthetic agreement text. " * 40
 
 
@@ -70,7 +74,9 @@ class _ScriptedClient:
         self.prompts: list[str] = []
         self.last_usage = None
 
-    def invoke(self, *, model_id: str, system_prompt: str, user_prompt: str, max_output_tokens: int) -> str:
+    def invoke(
+        self, *, model_id: str, system_prompt: str, user_prompt: str, max_output_tokens: int
+    ) -> str:
         self.prompts.append(user_prompt)
         return self.responses.pop(0)
 
@@ -93,7 +99,10 @@ def main() -> int:
     failures: list[str] = []
 
     # [1]
-    if floor_judge._EVIDENCE_QUOTE_MAX_CHARS != 500 or floor_judge._EVIDENCE_QUOTE_TARGET_CHARS != 200:
+    if (
+        floor_judge._EVIDENCE_QUOTE_MAX_CHARS != 500
+        or floor_judge._EVIDENCE_QUOTE_TARGET_CHARS != 200
+    ):
         failures.append("[1] expected target 200 / bound 500 (#160 owner decision)")
     prompt = floor_judge._SYSTEM_PROMPT
     if "about 200 characters" not in prompt or "past 500 characters" not in prompt:
@@ -101,9 +110,13 @@ def main() -> int:
 
     # [2]
     for length, expect in ((264, True), (500, True), (501, False)):
-        verdict, error = floor_judge._check_judge_response(_verdict(_quote(length)), expected_invariant_id=INV)
+        verdict, error = floor_judge._check_judge_response(
+            _verdict(_quote(length)), expected_invariant_id=INV
+        )
         if (verdict is not None) is not expect:
-            failures.append(f"[2] {length}-char quote: expected accepted={expect}, got {verdict is not None}")
+            failures.append(
+                f"[2] {length}-char quote: expected accepted={expect}, got {verdict is not None}"
+            )
         elif verdict is not None and verdict["evidence_quote"] != _quote(length):
             failures.append(f"[2] {length}-char quote was altered")
         if length == 501:
@@ -126,20 +139,30 @@ def main() -> int:
         first, retry = client.prompts
         if floor_judge._RETRY_CORRECTION_HEADING in first:
             failures.append("[3] attempt 1 carried a correction")
-        for part in (floor_judge._RETRY_CORRECTION_HEADING, "620 characters", "the maximum is 500", "120 over", "aim for about 200"):
+        for part in (
+            floor_judge._RETRY_CORRECTION_HEADING,
+            "620 characters",
+            "the maximum is 500",
+            "120 over",
+            "aim for about 200",
+        ):
             if part not in retry:
                 failures.append(f"[3] the retry prompt does not state {part!r}")
         if long_quote in retry:
             failures.append("[3] the correction echoed the rejected quote back")
         if not retry.startswith(first):
-            failures.append("[3] the retry did not keep attempt 1's prompt and append the correction")
+            failures.append(
+                "[3] the retry did not keep attempt 1's prompt and append the correction"
+            )
 
     # [5] ledger, on the [3] run
     if [r.outcome for r in rows] != ["retry", "success"]:
         failures.append(f"[5] outcomes {[r.outcome for r in rows]}, expected retry, success")
     else:
         if (rows[0].error_token, rows[0].retry_reason) != ("evidence_quote_too_long",) * 2:
-            failures.append(f"[5] retried row ledgered {rows[0].error_token!r}/{rows[0].retry_reason!r}")
+            failures.append(
+                f"[5] retried row ledgered {rows[0].error_token!r}/{rows[0].retry_reason!r}"
+            )
         if (rows[1].error_token, rows[1].retry_reason) != ("", ""):
             failures.append("[5] the success row carries an error token")
         if rows[1].input_tokens_est <= rows[0].input_tokens_est:
@@ -153,7 +176,9 @@ def main() -> int:
         ("retry", "evidence_quote_too_long", "evidence_quote_too_long"),
         ("failure", "evidence_quote_too_long", ""),
     ]:
-        failures.append(f"[5] terminal ledger rows wrong: {[(r.outcome, r.error_token, r.retry_reason) for r in rows]}")
+        failures.append(
+            f"[5] terminal ledger rows wrong: {[(r.outcome, r.error_token, r.retry_reason) for r in rows]}"
+        )
 
     # [6]
     judgment, client, rows = _judge([_verdict("", invariant_id="someone-else"), _verdict("")])
@@ -161,14 +186,20 @@ def main() -> int:
         failures.append("[6] a corrected attempt 2 was not accepted")
     if rows and rows[0].error_token != "wrong_invariant_id":
         failures.append(f"[6] token {rows[0].error_token!r}, expected wrong_invariant_id")
-    if len(client.prompts) == 2 and "did not match the required response shape" not in client.prompts[1]:
+    if (
+        len(client.prompts) == 2
+        and "did not match the required response shape" not in client.prompts[1]
+    ):
         failures.append("[6] a non-length fault did not get the shape correction")
 
     # [7]
     largest = json.loads(floor_judge._LARGEST_ACCEPTABLE_VERDICT)
     if len(largest["evidence_quote"]) != floor_judge._EVIDENCE_QUOTE_MAX_CHARS:
         failures.append("[7] _LARGEST_ACCEPTABLE_VERDICT no longer derives from the bound")
-    if pp.estimate_tokens(floor_judge._LARGEST_ACCEPTABLE_VERDICT) > floor_judge._VERDICT_CONTENT_TOKENS:
+    if (
+        pp.estimate_tokens(floor_judge._LARGEST_ACCEPTABLE_VERDICT)
+        > floor_judge._VERDICT_CONTENT_TOKENS
+    ):
         failures.append("[7] the content budget does not cover the largest acceptable verdict")
 
     if failures:

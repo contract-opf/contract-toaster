@@ -245,7 +245,9 @@ def test_split_paragraphs_survives(failures: list) -> None:
     # `spans_physical_paragraph` failure -- never a silent drop, and never a
     # half-written paragraph.
     paragraphs = norm["paragraphs"]
-    definitions_para = next((p for p in paragraphs if "Confidential Information means" in p["text"]), None)
+    definitions_para = next(
+        (p for p in paragraphs if "Confidential Information means" in p["text"]), None
+    )
     if definitions_para is None:
         failures.append(f"[{name}] could not find the split Definitions paragraph")
         return
@@ -273,12 +275,20 @@ def test_split_paragraphs_survives(failures: list) -> None:
     confined = _prove(
         paragraphs,
         block_id,
-        [seg for seg in (
-            {"op": "keep", "text": head} if head else None,
-            {"op": "delete", "text": first_sentence, "issue_key": "I1"},
-            {"op": "insert", "text": "Confidential Information means nothing.", "issue_key": "I1"},
-            {"op": "keep", "text": tail} if tail else None,
-        ) if seg is not None],
+        [
+            seg
+            for seg in (
+                {"op": "keep", "text": head} if head else None,
+                {"op": "delete", "text": first_sentence, "issue_key": "I1"},
+                {
+                    "op": "insert",
+                    "text": "Confidential Information means nothing.",
+                    "issue_key": "I1",
+                },
+                {"op": "keep", "text": tail} if tail else None,
+            )
+            if seg is not None
+        ],
     )
     if confined["status"] != "proven":
         failures.append(
@@ -465,7 +475,9 @@ def test_pending_change_inside_field_code_survives(failures: list) -> None:
         failures.append(f"[{name}] could not find the Term and Termination paragraph")
         return
     if "this Section 5" not in term_para["text"]:
-        failures.append(f"[{name}] the field's pending edit was not accepted-all: {term_para['text']!r}")
+        failures.append(
+            f"[{name}] the field's pending edit was not accepted-all: {term_para['text']!r}"
+        )
     if "this Section 4" in term_para["text"]:
         failures.append(
             f"[{name}] the field's pre-edit text must not remain once accept-all "
@@ -473,7 +485,9 @@ def test_pending_change_inside_field_code_survives(failures: list) -> None:
         )
     notes = norm.get("normalization_notes", "")
     if "field" not in notes.lower() or "this Section 5" not in notes:
-        failures.append(f"[{name}] expected a field-code disclosure naming the resolved text, got: {notes!r}")
+        failures.append(
+            f"[{name}] expected a field-code disclosure naming the resolved text, got: {notes!r}"
+        )
 
 
 def test_content_control_wrapped_text_survives(failures: list) -> None:
@@ -515,7 +529,9 @@ def test_content_control_wrapped_text_survives(failures: list) -> None:
     # only for the untouched anchor clause).
     found = _block_carrying(paragraphs, cd.INDEMNIFICATION_BODY)
     if found is None:
-        failures.append(f"[{name}] the block-level-content-control-wrapped Indemnification clause is not addressable")
+        failures.append(
+            f"[{name}] the block-level-content-control-wrapped Indemnification clause is not addressable"
+        )
         return
     block_id, block = found
     if block["text"] != cd.INDEMNIFICATION_BODY:
@@ -537,7 +553,9 @@ def test_content_control_wrapped_text_survives(failures: list) -> None:
             f"{[f.get('reason') for f in proven['failures']]}"
         )
         return
-    result = rba.apply_block_transcript(docx_bytes, proven, author=_APPLY_AUTHOR, timestamp_iso=_APPLY_TIMESTAMP)
+    result = rba.apply_block_transcript(
+        docx_bytes, proven, author=_APPLY_AUTHOR, timestamp_iso=_APPLY_TIMESTAMP
+    )
     if result["docx_bytes"] is None or len(result["applied"]) != 1 or result["failures"]:
         failures.append(
             f"[{name}] an edit against the block-level-content-control clause did not "
@@ -593,7 +611,9 @@ def test_mixed_run_children_survives(failures: list) -> None:
         )
 
 
-def _compile_whole_block_edit(name: str, docx_bytes: bytes, paragraphs: list, needle: str, failures: list) -> None:
+def _compile_whole_block_edit(
+    name: str, docx_bytes: bytes, paragraphs: list, needle: str, failures: list
+) -> None:
     """Prove and compile a whole-block keep+insert against the block whose
     text carries `needle` -- the writer half of extractor/writer parity."""
     found = _block_carrying(paragraphs, needle)
@@ -612,7 +632,9 @@ def _compile_whole_block_edit(name: str, docx_bytes: bytes, paragraphs: list, ne
     if proven["status"] != "proven":
         failures.append(f"[{name}] {needle[:30]!r} did not prove: {proven['failures']}")
         return
-    result = rba.apply_block_transcript(docx_bytes, proven, author=_APPLY_AUTHOR, timestamp_iso=_APPLY_TIMESTAMP)
+    result = rba.apply_block_transcript(
+        docx_bytes, proven, author=_APPLY_AUTHOR, timestamp_iso=_APPLY_TIMESTAMP
+    )
     if result["docx_bytes"] is None or len(result["applied"]) != 1 or result["failures"]:
         failures.append(
             f"[{name}] an edit against {needle[:30]!r} did not compile: "
@@ -631,11 +653,15 @@ def test_bidi_and_custom_xml_wrappers_survives(failures: list) -> None:
     if norm is None:
         return
     if "extraction_status" in norm:
-        failures.append(f"[{name}] recognised wrappers must not degrade extraction: {norm['extraction_status']!r}")
+        failures.append(
+            f"[{name}] recognised wrappers must not degrade extraction: {norm['extraction_status']!r}"
+        )
     paragraphs = norm["paragraphs"]
     texts = [p["text"] for p in paragraphs]
     if not any(t == cd.CONFIDENTIALITY_BODY for t in texts):
-        failures.append(f"[{name}] the Confidentiality clause lost words inside a wrapper: {texts!r}")
+        failures.append(
+            f"[{name}] the Confidentiality clause lost words inside a wrapper: {texts!r}"
+        )
     if not any(t == cd.INDEMNIFICATION_BODY for t in texts):
         failures.append(f"[{name}] the block-level customXml clause is missing: {texts!r}")
     # The wrapped row's cells: "Provider" stays body text, while its street
@@ -664,7 +690,10 @@ def test_tab_led_sub_clause_run_splits_survives(failures: list) -> None:
         return
     _, block = found
     expected = "\n".join(
-        [cd.INDEMNIFICATION_BODY, *(f"({letter})\t{sentence}" for letter, sentence, _ in cd.TAB_LED_SUB_CLAUSES)]
+        [
+            cd.INDEMNIFICATION_BODY,
+            *(f"({letter})\t{sentence}" for letter, sentence, _ in cd.TAB_LED_SUB_CLAUSES),
+        ]
     )
     if block["text"] != expected:
         failures.append(f"[{name}] expected {expected!r}, got {block['text']!r}")
@@ -719,7 +748,9 @@ def test_table_of_contents_survives(failures: list) -> None:
     # sentence names the field code rather than any dropped line's text.
     notes = norm.get("normalization_notes", "")
     if "TOC field result" not in notes or f"{len(cd._STANDARD_CLAUSES)} paragraph(s)" not in notes:
-        failures.append(f"[{name}] expected a TOC-omission disclosure naming the count, got: {notes!r}")
+        failures.append(
+            f"[{name}] expected a TOC-omission disclosure naming the count, got: {notes!r}"
+        )
 
     # The disclosure rides a notes-only group, which (unlike a
     # `leading_deleted` one) survives into the MATERIALIZED read the
@@ -758,7 +789,9 @@ def test_baseline_flavors_also_normalize(failures: list) -> None:
     docx_bytes = _baseline_fixture(SHAPE_BASE_FLAVOR)
     norm = ens.extract_and_normalize(docx_bytes)
     if norm.get("status") != "normalized":
-        failures.append(f"[baseline:{SHAPE_BASE_FLAVOR}] did not normalize: status={norm.get('status')!r}")
+        failures.append(
+            f"[baseline:{SHAPE_BASE_FLAVOR}] did not normalize: status={norm.get('status')!r}"
+        )
 
 
 def test_every_transform_has_a_shape_test(failures: list) -> None:
@@ -836,7 +869,9 @@ def test_the_smoke_tool_never_echoes_a_sentinel_party_name(failures: list) -> No
     result = dss.scan_document(sentinel_docx)
     blob = repr(result)
     if sentinel in blob:
-        failures.append(f"document_spine_smoke.scan_document() echoed the sentinel party name: {blob!r}")
+        failures.append(
+            f"document_spine_smoke.scan_document() echoed the sentinel party name: {blob!r}"
+        )
 
     # Same check for the unnormalizable-input path: a paragraph carrying an
     # unrecognized revision type fails closed, and its analysis_report's
@@ -854,7 +889,9 @@ def test_the_smoke_tool_never_echoes_a_sentinel_party_name(failures: list) -> No
     }
     reason = dss.classify_unnormalizable_reason(unnormalizable_result["analysis_report"])
     if sentinel in reason:
-        failures.append(f"classify_unnormalizable_reason() echoed the sentinel party name: {reason!r}")
+        failures.append(
+            f"classify_unnormalizable_reason() echoed the sentinel party name: {reason!r}"
+        )
     if reason != "unrecognized_revision_type":
         failures.append(f"expected reason=unrecognized_revision_type, got {reason!r}")
 

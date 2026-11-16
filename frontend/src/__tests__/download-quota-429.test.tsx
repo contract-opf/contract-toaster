@@ -115,7 +115,9 @@ describe('download 429 — the daily limit is named, not a storage fault', () =>
 
     await submitAndReachResult();
     // The auto-save is uncharged and has succeeded; only the click is refused.
-    await waitFor(() => expect(outputCalls(fetchMock).some((u) => u.searchParams.has('autosave'))).toBe(true));
+    await waitFor(() =>
+      expect(outputCalls(fetchMock).some((u) => u.searchParams.has('autosave'))).toBe(true),
+    );
 
     fireEvent.click(await screen.findByTestId('review-download-button'));
 
@@ -147,8 +149,11 @@ describe('download 429 — the daily limit is named, not a storage fault', () =>
 });
 
 describe('completion-time auto-save — the uncharged path (issue #102)', () => {
-  it('asks for the uncharged path on completion and not on the reviewer\'s own click', async () => {
-    const fetchMock = stubFetch(() => ({ status: 200, body: { url: PRESIGNED_URL, expires_in: 60 } }));
+  it("asks for the uncharged path on completion and not on the reviewer's own click", async () => {
+    const fetchMock = stubFetch(() => ({
+      status: 200,
+      body: { url: PRESIGNED_URL, expires_in: 60 },
+    }));
 
     await submitAndReachResult();
     await waitFor(() => expect(outputCalls(fetchMock)).toHaveLength(1));
@@ -174,8 +179,8 @@ describe('completion-time auto-save — the uncharged path (issue #102)', () => 
     // short-circuits, and the resulting state update) run and commit. This
     // waits on awaited state, not on a count of flushes, so a slow runner
     // cannot make it pass vacuously.
-    const autosaveIndex = fetchMock.mock.calls.findIndex(([input]) =>
-      new URL(String(input), 'http://localhost').searchParams.get('autosave') === '1',
+    const autosaveIndex = fetchMock.mock.calls.findIndex(
+      ([input]) => new URL(String(input), 'http://localhost').searchParams.get('autosave') === '1',
     );
     await fetchMock.mock.results[autosaveIndex].value;
     await act(async () => {

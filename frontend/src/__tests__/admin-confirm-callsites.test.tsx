@@ -93,11 +93,7 @@ async function settle(): Promise<void> {
 }
 
 /** How many calls went out for a given method + path. */
-function callsFor(
-  fetchMock: ReturnType<typeof vi.fn>,
-  method: string,
-  pathname: string,
-): number {
+function callsFor(fetchMock: ReturnType<typeof vi.fn>, method: string, pathname: string): number {
   return fetchMock.mock.calls.filter(([input, init]) => {
     const url = typeof input === 'string' ? input : String(input);
     const actualMethod = ((init as RequestInit | undefined)?.method ?? 'GET').toUpperCase();

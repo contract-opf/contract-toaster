@@ -205,9 +205,7 @@ def check_on_insert_rule_fires(
     fires: list[dict] = []
     for text in surfaces:
         exempt_spans = [
-            span
-            for exempt in exempt_terms
-            for span in find_spans(text, exempt, match_type)
+            span for exempt in exempt_terms for span in find_spans(text, exempt, match_type)
         ]
         for term, term_match_type in terms_with_mode:
             trigger_spans = find_spans(text, term, term_match_type)

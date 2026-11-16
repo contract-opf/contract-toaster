@@ -83,7 +83,11 @@ ALLOWLIST = {
 
 def _tracked_files() -> list[str]:
     out = subprocess.run(
-        ["git", "ls-files"], cwd=REPO_ROOT, capture_output=True, text=True, check=True  # noqa: S607
+        ["git", "ls-files"],  # noqa: S607
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return [line for line in out.stdout.splitlines() if line.strip()]
 

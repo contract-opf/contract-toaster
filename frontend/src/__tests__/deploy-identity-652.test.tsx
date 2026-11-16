@@ -437,10 +437,7 @@ describe('the deployed-version table explains rather than dumps hex (#652)', () 
     const rows = deployFactRows(frontend(), backend());
     expect(rowById(rows, 'built-at').server).toBe('1 Sep 2026, 14:22 UTC');
 
-    const unstamped = deployFactRows(
-      frontend({ version: 'dev' }),
-      backend({ version: 'dev' }),
-    );
+    const unstamped = deployFactRows(frontend({ version: 'dev' }), backend({ version: 'dev' }));
     expect(rowById(unstamped, 'built-at').server).toBe('');
     expect(rowById(unstamped, 'built-at').bundle).toBe('');
   });
@@ -465,7 +462,9 @@ describe('the deployed-version table explains rather than dumps hex (#652)', () 
   it('tones the verdict by outcome: agreement is not a warning, and disagreement is not fine', () => {
     expect(agreementVariant(deployAgreement(frontend(), backend()))).toBe('ok');
     expect(
-      agreementVariant(deployAgreement(frontend(), backend({ version: OLD_VERSION, commit: OLD_SHA }))),
+      agreementVariant(
+        deployAgreement(frontend(), backend({ version: OLD_VERSION, commit: OLD_SHA })),
+      ),
     ).toBe('warn');
     expect(
       agreementVariant(deployAgreement(frontend({ commit: '' }), backend({ commit: '' }))),

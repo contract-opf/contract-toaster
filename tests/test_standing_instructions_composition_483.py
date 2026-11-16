@@ -106,9 +106,13 @@ def test_standing_instructions_block_absent_when_empty(failures: list[str]) -> N
     if pp.render_standing_instructions_block("") is not None:
         failures.append("[1a] render_standing_instructions_block('') must return None.")
     if pp.render_standing_instructions_block("   ") is not None:
-        failures.append("[1b] render_standing_instructions_block must treat whitespace-only text as empty.")
+        failures.append(
+            "[1b] render_standing_instructions_block must treat whitespace-only text as empty."
+        )
     if pp.render_standing_instructions_block(None) is not None:  # type: ignore[arg-type]
-        failures.append("[1c] render_standing_instructions_block(None) must return None, not raise.")
+        failures.append(
+            "[1c] render_standing_instructions_block(None) must return None, not raise."
+        )
 
     playbook = _sample_playbook()
     blocks_default_arg = pp.assemble_system_blocks(playbook)
@@ -118,7 +122,9 @@ def test_standing_instructions_block_absent_when_empty(failures: list[str]) -> N
             "instructions_text='' must be byte-identical."
         )
     if any("STANDING_INSTRUCTIONS" in b["text"] for b in blocks_default_arg):
-        failures.append("[1e] The system blocks may never mention STANDING_INSTRUCTIONS (issue #148).")
+        failures.append(
+            "[1e] The system blocks may never mention STANDING_INSTRUCTIONS (issue #148)."
+        )
 
 
 def test_standing_instructions_block_present_and_states_precedence(failures: list[str]) -> None:
@@ -138,10 +144,14 @@ def test_standing_instructions_block_present_and_states_precedence(failures: lis
         failures.append("[2b] Expected the instructions_text verbatim, once, in the control layer.")
         return
     if control != pp.render_standing_instructions_block(instructions_text):
-        failures.append("[2b] With only instructions supplied, the control layer is that block alone.")
+        failures.append(
+            "[2b] With only instructions supplied, the control layer is that block alone."
+        )
 
     if "<STANDING_INSTRUCTIONS>" not in control or "</STANDING_INSTRUCTIONS>" not in control:
-        failures.append("[2c] Standing-instructions block must wrap the text in <STANDING_INSTRUCTIONS> tags.")
+        failures.append(
+            "[2c] Standing-instructions block must wrap the text in <STANDING_INSTRUCTIONS> tags."
+        )
 
     if blocks[0]["text"] != pp.REVIEW_GUIDANCE_BLOCK:
         failures.append("[2d] Block 0 must remain the fixed review-guidance block.")
@@ -240,7 +250,9 @@ def test_run_primary_pass_threads_instructions_text_into_system_prompt(failures:
         or instructions_text not in user
         or user.index(instructions_text) < user.index("</COUNTERPARTY_DOCUMENT>")
     ):
-        failures.append("[5b] run_primary_pass must send instructions_text to the model, after the document (issue #148).")
+        failures.append(
+            "[5b] run_primary_pass must send instructions_text to the model, after the document (issue #148)."
+        )
 
 
 def test_run_critic_pass_threads_instructions_text_into_system_prompt(failures: list[str]) -> None:
@@ -272,7 +284,9 @@ def test_run_critic_pass_threads_instructions_text_into_system_prompt(failures: 
         or instructions_text not in user
         or user.index(instructions_text) < user.index("</COUNTERPARTY_DOCUMENT>")
     ):
-        failures.append("[6b] run_critic_pass must send instructions_text too, after the document -- the critic self-check must see the same standing instructions the primary pass saw.")
+        failures.append(
+            "[6b] run_critic_pass must send instructions_text too, after the document -- the critic self-check must see the same standing instructions the primary pass saw."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -305,15 +319,23 @@ def test_run_review_threads_instructions_text_into_both_passes(failures: list[st
         return
 
     if len(client.calls) != 2:
-        failures.append(f"[7b] Expected exactly 2 model invocations (primary + critic); got {len(client.calls)}")
+        failures.append(
+            f"[7b] Expected exactly 2 model invocations (primary + critic); got {len(client.calls)}"
+        )
         return
     for call in client.calls:
         if instructions_text not in call["user_prompt"]:
-            failures.append(f"[7c] Expected instructions_text verbatim in the {call['model_id']} prompt; not found.")
+            failures.append(
+                f"[7c] Expected instructions_text verbatim in the {call['model_id']} prompt; not found."
+            )
         if pp.STANDING_INSTRUCTIONS_INTRO not in call["user_prompt"]:
-            failures.append(f"[7d] Expected the standing-instructions precedence copy in the {call['model_id']} prompt.")
+            failures.append(
+                f"[7d] Expected the standing-instructions precedence copy in the {call['model_id']} prompt."
+            )
         if "STANDING_INSTRUCTIONS" in call["system_prompt"]:
-            failures.append(f"[7c] The {call['model_id']} system prompt must not carry them (issue #148).")
+            failures.append(
+                f"[7c] The {call['model_id']} system prompt must not carry them (issue #148)."
+            )
 
     # Default (no instructions_text) run over the SAME document must never
     # mention STANDING_INSTRUCTIONS at all -- byte-identical-in-spirit to
@@ -324,7 +346,9 @@ def test_run_review_threads_instructions_text_into_both_passes(failures: list[st
     review_spine.run_review(docx_bytes, bundle, baseline_client, review_id="spine-483-baseline")
     for call in baseline_client.calls:
         if "STANDING_INSTRUCTIONS" in call["system_prompt"] + str(call["user_prompt"]):
-            failures.append(f"[7e] The no-instructions baseline run's {call['model_id']} prompt must not mention STANDING_INSTRUCTIONS at all.")
+            failures.append(
+                f"[7e] The no-instructions baseline run's {call['model_id']} prompt must not mention STANDING_INSTRUCTIONS at all."
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -357,7 +381,9 @@ from test_dts_pipeline_runner_real_review import pr  # noqa: E402
 E2E_PLAYBOOK_ID = "synthetic-generic"
 
 
-def test_e2e_v2_instructions_recorded_in_lineage_and_reach_the_model_prompt(failures: list[str]) -> None:
+def test_e2e_v2_instructions_recorded_in_lineage_and_reach_the_model_prompt(
+    failures: list[str],
+) -> None:
     ddb = FakeDynamoDBResource()
     seed_active_bundle.seed_active_bundle(E2E_PLAYBOOK_ID, ddb)
     sfn = FakeSfnClient()
@@ -386,16 +412,24 @@ def test_e2e_v2_instructions_recorded_in_lineage_and_reach_the_model_prompt(fail
     reviews_table = ddb.Table(os.environ["REVIEWS_TABLE"])
     row = reviews_table.get_item(Key={"review_id": review_id})["Item"]
     if row.get("instructions_version") != 2:
-        failures.append(f"[8a] Expected the reviews row to be stamped instructions_version=2; got {row.get('instructions_version')!r}")
+        failures.append(
+            f"[8a] Expected the reviews row to be stamped instructions_version=2; got {row.get('instructions_version')!r}"
+        )
     if row.get("instructions_content_hash") != v2["text_hash"]:
-        failures.append("[8b] Expected the reviews row's instructions_content_hash to match v2's text_hash.")
+        failures.append(
+            "[8b] Expected the reviews row's instructions_content_hash to match v2's text_hash."
+        )
 
     execution_name = f"review-{review_id}"
     payload = json.loads(sfn.started_inputs[execution_name])
     if payload.get("instructions_version") != 2:
-        failures.append(f"[8c] Expected the execution-input payload to carry instructions_version=2; got {payload.get('instructions_version')!r}")
+        failures.append(
+            f"[8c] Expected the execution-input payload to carry instructions_version=2; got {payload.get('instructions_version')!r}"
+        )
     if payload.get("instructions_text") != v2["text"]:
-        failures.append("[8d] Expected the execution-input payload's instructions_text to equal v2's exact saved text.")
+        failures.append(
+            "[8d] Expected the execution-input payload's instructions_text to equal v2's exact saved text."
+        )
 
     # Prompt half (issue #483's own contract): drive the REAL pipeline body
     # with that EXACT payload (mirroring InProcessStepFunctionsClient's
@@ -423,13 +457,19 @@ def test_e2e_v2_instructions_recorded_in_lineage_and_reach_the_model_prompt(fail
     )
 
     if len(client.calls) != 2:
-        failures.append(f"[8e] Expected exactly 2 model invocations (primary + critic); got {len(client.calls)}")
+        failures.append(
+            f"[8e] Expected exactly 2 model invocations (primary + critic); got {len(client.calls)}"
+        )
         return
     for call in client.calls:
         if v2["text"] not in call["user_prompt"]:
-            failures.append(f"[8f] Expected v2's exact standing-instructions text in the {call['model_id']} prompt; not found.")
+            failures.append(
+                f"[8f] Expected v2's exact standing-instructions text in the {call['model_id']} prompt; not found."
+            )
         if pp.STANDING_INSTRUCTIONS_INTRO not in call["user_prompt"]:
-            failures.append(f"[8g] Expected the standing-instructions precedence copy in the {call['model_id']} prompt.")
+            failures.append(
+                f"[8g] Expected the standing-instructions precedence copy in the {call['model_id']} prompt."
+            )
 
 
 # ---------------------------------------------------------------------------

@@ -21,11 +21,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import App from '../App';
 import ReviewSubmission from '../ReviewSubmission';
-import {
-  expectNoReviewAttached,
-  findReviewResult,
-  openReceipt,
-} from './support/consoleSurface';
+import { expectNoReviewAttached, findReviewResult, openReceipt } from './support/consoleSurface';
 
 vi.mock('aws-amplify/auth', () => ({
   // eslint-disable-next-line @typescript-eslint/require-await
@@ -186,10 +182,7 @@ describe('hash-based tab routing (issue #489, item 1)', () => {
 
     await screen.findByTestId('version-display');
     await waitFor(() =>
-      expect(screen.getByRole('tab', { name: 'History' })).toHaveAttribute(
-        'aria-selected',
-        'true',
-      ),
+      expect(screen.getByRole('tab', { name: 'History' })).toHaveAttribute('aria-selected', 'true'),
     );
     expect(screen.getByRole('tab', { name: 'Review' })).toHaveAttribute('aria-selected', 'false');
   });
@@ -224,10 +217,9 @@ describe('hash-based tab routing (issue #489, item 1)', () => {
     // must not survive either.
     expect(screen.queryByRole('tab', { name: 'Users' })).toBeNull();
     expect(screen.getAllByRole('tablist')).toHaveLength(1);
-    await waitFor(() => expect(screen.getByRole('tab', { name: 'Review' })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    ));
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: 'Review' })).toHaveAttribute('aria-selected', 'true'),
+    );
     await waitFor(() => expect(window.location.hash).toBe('#/review'));
   });
 
@@ -250,10 +242,7 @@ describe('hash-based tab routing (issue #489, item 1)', () => {
 
     // The gate must bounce back to Review...
     await waitFor(() =>
-      expect(screen.getByRole('tab', { name: 'Review' })).toHaveAttribute(
-        'aria-selected',
-        'true',
-      ),
+      expect(screen.getByRole('tab', { name: 'Review' })).toHaveAttribute('aria-selected', 'true'),
     );
     await waitFor(() => expect(window.location.hash).toBe('#/review'));
 
@@ -290,10 +279,7 @@ describe('hash-based tab routing (issue #489, item 1)', () => {
     fireEvent(window, new HashChangeEvent('hashchange'));
 
     await waitFor(() =>
-      expect(screen.getByRole('tab', { name: 'Review' })).toHaveAttribute(
-        'aria-selected',
-        'true',
-      ),
+      expect(screen.getByRole('tab', { name: 'Review' })).toHaveAttribute('aria-selected', 'true'),
     );
   });
 });
@@ -361,8 +347,12 @@ describe('reattach to a running review after reload (issue #489, item 2)', () =>
         return { ok: true, status: 200, json: async () => ({ playbooks: [] }) } as Response;
       }
       if (pathname === '/api/reviews' && method === 'GET') {
-        // eslint-disable-next-line @typescript-eslint/require-await
-        return { ok: true, status: 200, json: async () => ({ reviews: [RUNNING_ROW] }) } as Response;
+        return {
+          ok: true,
+          status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
+          json: async () => ({ reviews: [RUNNING_ROW] }),
+        } as Response;
       }
       if (pathname === '/api/reviews/rev-resumed') {
         pollCalls += 1;
@@ -408,8 +398,7 @@ describe('reattach to a running review after reload (issue #489, item 2)', () =>
     await waitFor(
       // Issue #733: the console's lamp reports the machine's state ("Review
       // complete"); the OUTCOME is the result panel's headline on both.
-      async () =>
-        expect((await findReviewResult()).textContent).toContain('Accepted'),
+      async () => expect((await findReviewResult()).textContent).toContain('Accepted'),
       { timeout: 8000 },
     );
 

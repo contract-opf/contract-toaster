@@ -246,10 +246,7 @@ def save_instructions(
     current = get_current_instructions(playbook_id, dynamodb_resource)
     current_version = int(current["version"]) if current else 0
 
-    if (
-        expected_current_version is not None
-        and int(expected_current_version) != current_version
-    ):
+    if expected_current_version is not None and int(expected_current_version) != current_version:
         raise PlaybookInstructionsConflictError(current_version=current_version)
 
     now = now_epoch_value if now_epoch_value is not None else now_epoch()

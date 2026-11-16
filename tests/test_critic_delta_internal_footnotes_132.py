@@ -240,13 +240,13 @@ def _issue(issue_key: str, section: str, external: str, topic: str | None = None
 def _term_segments(term: str) -> list:
     """Section 1's edit, in one of three shapes:
 
-      - `"replace"`: an ordinary replacement that compiles;
-      - `"delete"`: a pure deletion -- it lands, but inserts nothing, so it
-        has no `<w:ins>` a footnote could hang on;
-      - `"sabotage"`: proves (the ops still tile the block's real text) but
-        cannot compile -- the delete crosses the newline join between the
-        block's two physical paragraphs (`spans_physical_paragraph`), and it
-        is I1's ONLY edit, so nothing of I1 lands.
+    - `"replace"`: an ordinary replacement that compiles;
+    - `"delete"`: a pure deletion -- it lands, but inserts nothing, so it
+      has no `<w:ins>` a footnote could hang on;
+    - `"sabotage"`: proves (the ops still tile the block's real text) but
+      cannot compile -- the delete crosses the newline join between the
+      block's two physical paragraphs (`spans_physical_paragraph`), and it
+      is I1's ONLY edit, so nothing of I1 lands.
     """
     if term == "replace":
         return [
@@ -314,7 +314,10 @@ def _primary_response(
             {
                 "block_id": law_block,
                 "segments": [
-                    {"op": "keep", "text": "This Agreement is governed by the laws of the State of "},
+                    {
+                        "op": "keep",
+                        "text": "This Agreement is governed by the laws of the State of ",
+                    },
                     {"op": "delete", "text": "Delaware", "issue_key": "I4"},
                     {"op": "insert", "text": DROPPED_REVIEWER_TEXT, "issue_key": "I4"},
                     {"op": "keep", "text": "."},
@@ -483,9 +486,7 @@ def _validated(response: dict) -> dict:
 
 
 def _reconciled(block_ids: list, **kwargs) -> dict:
-    critic = {
-        key: kwargs.pop(key) for key in ("added_internal", "critic_edit") if key in kwargs
-    }
+    critic = {key: kwargs.pop(key) for key in ("added_internal", "critic_edit") if key in kwargs}
     primary = _validated(_primary_response(block_ids, **kwargs))
     return reconciliation.reconcile(
         primary_result=primary,
@@ -535,9 +536,7 @@ def _other_parts_text(docx_bytes: bytes) -> str:
 
 def _package_text(docx_bytes: bytes) -> str:
     with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zf:
-        return "\n".join(
-            zf.read(name).decode("utf-8", errors="replace") for name in zf.namelist()
-        )
+        return "\n".join(zf.read(name).decode("utf-8", errors="replace") for name in zf.namelist())
 
 
 def _internal_segments(footnote_text: str) -> list:
@@ -670,9 +669,7 @@ def part_1_both_mode_explains_every_override(failures: list) -> None:
         if needle not in sec1_note:
             failures.append(f"[1h] {needle!r} is not on the first footnote: {footnotes}")
     if len(_internal_segments(sec1_note)) != 5 or len(_internal_segments(sec2_note)) != 1:
-        failures.append(
-            f"[1i] expected one [INTERNAL NOTE: ...] per override (5 + 1): {footnotes}"
-        )
+        failures.append(f"[1i] expected one [INTERNAL NOTE: ...] per override (5 + 1): {footnotes}")
 
     # 1j: the deprecated contest arrays, and the disposition reasons the
     # stated reasons outrank, are rendered nowhere.
@@ -823,49 +820,93 @@ def _insert_of(issue_key: str):
 # issue's rationales are a final issue AND the computed `critic_issue` --
 # the walk that runs first reports it, so either name is the same block.
 _RENDERED_SOURCES = (
-    ("I1 stated primary_value", "critic",
-     _append_to(_critic_override("I1", "rationale"), "primary_value", SYSTEM_PROMPT_GRAM),
-     {"critic_delta.overrides.primary_value"}),
-    ("I1 stated critic_value", "critic",
-     _append_to(_critic_override("I1", "rationale"), "critic_value", SYSTEM_PROMPT_GRAM),
-     {"critic_delta.overrides.critic_value"}),
-    ("I1 stated reason", "critic",
-     _append_to(_critic_override("I1", "rationale"), "reason", SYSTEM_PROMPT_GRAM),
-     {"critic_delta.overrides.reason"}),
-    ("I1 section_ref (stamped)", "critic",
-     _append_to(_issue_by_key("I1"), "section_ref", SYSTEM_PROMPT_GRAM),
-     {"critic_delta.overrides.section_ref"}),
-    ("I2 stated reason", "critic",
-     _append_to(_critic_override("I2", "replacement_text"), "reason", SYSTEM_PROMPT_GRAM),
-     {"critic_delta.overrides.reason"}),
-    ("I2 reviewer's inserted text", "primary",
-     _append_to(_insert_of("I2"), "text", SYSTEM_PROMPT_GRAM),
-     {"critic_delta.overrides.primary_value"}),
-    ("I2 critic's inserted text", "critic",
-     _append_to(_insert_of("I2"), "text", SYSTEM_PROMPT_GRAM),
-     {leakage_scan.BLOCK_SEGMENT_INSERT_FIELD, "critic_delta.overrides.critic_value"}),
-    ("I3 drop reason (retained)", "critic",
-     _append_to(_disposition("I3"), "reason", SYSTEM_PROMPT_GRAM),
-     {"critic_delta.dispositions.reason"}),
-    ("I4 drop reason", "critic",
-     _append_to(_disposition("I4"), "reason", SYSTEM_PROMPT_GRAM),
-     {"critic_delta.dispositions.reason"}),
-    ("I4 reviewer's inserted text", "primary",
-     _append_to(_insert_of("I4"), "text", SYSTEM_PROMPT_GRAM),
-     {"critic_delta.overrides.primary_edits"}),
-    ("I4 section_ref", "primary",
-     _append_to(_issue_by_key("I4"), "section_ref", SYSTEM_PROMPT_GRAM),
-     {"critic_delta.overrides.section_ref"}),
-    ("added issue external rationale", "critic",
-     _append_to(_issue_by_key("I3"), "external_rationale_for_footnote", SYSTEM_PROMPT_GRAM),
-     {"external_rationale_for_footnote",
-      "critic_delta.overrides.critic_issue.external_rationale_for_footnote"}),
-    ("added issue section_ref", "critic",
-     _append_to(_issue_by_key("I3"), "section_ref", SYSTEM_PROMPT_GRAM),
-     {"critic_delta.overrides.section_ref"}),
-    ("stray override reason", "critic",
-     _append_to(_critic_override("I9", "rationale"), "reason", SYSTEM_PROMPT_GRAM),
-     {"critic_delta.overrides.reason"}),
+    (
+        "I1 stated primary_value",
+        "critic",
+        _append_to(_critic_override("I1", "rationale"), "primary_value", SYSTEM_PROMPT_GRAM),
+        {"critic_delta.overrides.primary_value"},
+    ),
+    (
+        "I1 stated critic_value",
+        "critic",
+        _append_to(_critic_override("I1", "rationale"), "critic_value", SYSTEM_PROMPT_GRAM),
+        {"critic_delta.overrides.critic_value"},
+    ),
+    (
+        "I1 stated reason",
+        "critic",
+        _append_to(_critic_override("I1", "rationale"), "reason", SYSTEM_PROMPT_GRAM),
+        {"critic_delta.overrides.reason"},
+    ),
+    (
+        "I1 section_ref (stamped)",
+        "critic",
+        _append_to(_issue_by_key("I1"), "section_ref", SYSTEM_PROMPT_GRAM),
+        {"critic_delta.overrides.section_ref"},
+    ),
+    (
+        "I2 stated reason",
+        "critic",
+        _append_to(_critic_override("I2", "replacement_text"), "reason", SYSTEM_PROMPT_GRAM),
+        {"critic_delta.overrides.reason"},
+    ),
+    (
+        "I2 reviewer's inserted text",
+        "primary",
+        _append_to(_insert_of("I2"), "text", SYSTEM_PROMPT_GRAM),
+        {"critic_delta.overrides.primary_value"},
+    ),
+    (
+        "I2 critic's inserted text",
+        "critic",
+        _append_to(_insert_of("I2"), "text", SYSTEM_PROMPT_GRAM),
+        {leakage_scan.BLOCK_SEGMENT_INSERT_FIELD, "critic_delta.overrides.critic_value"},
+    ),
+    (
+        "I3 drop reason (retained)",
+        "critic",
+        _append_to(_disposition("I3"), "reason", SYSTEM_PROMPT_GRAM),
+        {"critic_delta.dispositions.reason"},
+    ),
+    (
+        "I4 drop reason",
+        "critic",
+        _append_to(_disposition("I4"), "reason", SYSTEM_PROMPT_GRAM),
+        {"critic_delta.dispositions.reason"},
+    ),
+    (
+        "I4 reviewer's inserted text",
+        "primary",
+        _append_to(_insert_of("I4"), "text", SYSTEM_PROMPT_GRAM),
+        {"critic_delta.overrides.primary_edits"},
+    ),
+    (
+        "I4 section_ref",
+        "primary",
+        _append_to(_issue_by_key("I4"), "section_ref", SYSTEM_PROMPT_GRAM),
+        {"critic_delta.overrides.section_ref"},
+    ),
+    (
+        "added issue external rationale",
+        "critic",
+        _append_to(_issue_by_key("I3"), "external_rationale_for_footnote", SYSTEM_PROMPT_GRAM),
+        {
+            "external_rationale_for_footnote",
+            "critic_delta.overrides.critic_issue.external_rationale_for_footnote",
+        },
+    ),
+    (
+        "added issue section_ref",
+        "critic",
+        _append_to(_issue_by_key("I3"), "section_ref", SYSTEM_PROMPT_GRAM),
+        {"critic_delta.overrides.section_ref"},
+    ),
+    (
+        "stray override reason",
+        "critic",
+        _append_to(_critic_override("I9", "rationale"), "reason", SYSTEM_PROMPT_GRAM),
+        {"critic_delta.overrides.reason"},
+    ),
 )
 
 
@@ -1000,9 +1041,7 @@ def part_9_added_issue_internal_rationale(failures: list) -> None:
     docx_bytes = _delivered(_run("both", added_internal=internal_reason), "9", failures)
     if docx_bytes is None:
         return
-    segments = [
-        seg for text in _footnote_texts(docx_bytes) for seg in _internal_segments(text)
-    ]
+    segments = [seg for text in _footnote_texts(docx_bytes) for seg in _internal_segments(text)]
     added = next((seg for seg in segments if ADDED_RATIONALE in seg), "")
     in_order = internal_reason in added and added.index(ADDED_RATIONALE) < added.index(
         internal_reason

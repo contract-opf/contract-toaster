@@ -29,12 +29,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import ReviewSubmission from '../ReviewSubmission';
-import {
-  DEFAULT_PLAYBOOKS,
-  findReviewResult,
-  pressSubmit,
-
-} from './support/consoleSurface';
+import { DEFAULT_PLAYBOOKS, findReviewResult, pressSubmit } from './support/consoleSurface';
 import { resolveStyle } from './support/orbitCss';
 import AdminUsers from '../AdminUsers';
 import App from '../App';
@@ -232,9 +227,7 @@ describe('polling resilience — ReviewSubmission.tsx', () => {
     expect(result.textContent).not.toContain('MANUAL_REVIEW_REQUIRED');
     expect(screen.getByTestId('review-outcome').textContent).toBe('Failed');
     // Whatever the lamp says, it never says the raw enum.
-    expect(screen.getByTestId('review-status').textContent).not.toContain(
-      'MANUAL_REVIEW_REQUIRED',
-    );
+    expect(screen.getByTestId('review-status').textContent).not.toContain('MANUAL_REVIEW_REQUIRED');
   });
 });
 
@@ -378,8 +371,12 @@ describe('friendly errors — no raw technical strings', () => {
         } as Response;
       }
       if (pathname === '/api/reviews/rev-cfg/output') {
-        // eslint-disable-next-line @typescript-eslint/require-await
-        return { ok: false, status: 503, json: async () => ({ detail: CONFIG_DETAIL }) } as Response;
+        return {
+          ok: false,
+          status: 503,
+          // eslint-disable-next-line @typescript-eslint/require-await
+          json: async () => ({ detail: CONFIG_DETAIL }),
+        } as Response;
       }
       // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
@@ -632,9 +629,7 @@ describe('download — non-navigating', () => {
       value: { ...realLocation, assign: assignSpy },
     });
 
-    const clickSpy = vi
-      .spyOn(HTMLAnchorElement.prototype, 'click')
-      .mockImplementation(() => {});
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
 
     const presignedUrl = 'https://s3.example.test/outputs/rev-anchor/out.docx?sig=abc';
     // eslint-disable-next-line @typescript-eslint/require-await
@@ -755,9 +750,7 @@ function borderWidthPx(el: Element, forcedColours: boolean): number {
   return /(^|\s)0(\s|$)/.test(value) ? 0 : Number.NaN;
 }
 
-const ORBIT_PLAYBOOKS: Playbook[] = [
-  { playbook_id: 'nda', display_name: 'NDA', status: 'active' },
-];
+const ORBIT_PLAYBOOKS: Playbook[] = [{ playbook_id: 'nda', display_name: 'NDA', status: 'active' }];
 
 function orbitState(over: Partial<ReviewProjectionState> = {}): ReviewProjectionState {
   return {

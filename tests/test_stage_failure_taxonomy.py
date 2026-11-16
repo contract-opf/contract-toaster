@@ -61,6 +61,7 @@ REVIEW_ID = "00000000-0000-4000-a000-000000000258"
 # expressions).
 # ---------------------------------------------------------------------------
 
+
 class FakeTable:
     def __init__(self):
         self.items: dict[str, dict] = {}
@@ -72,15 +73,21 @@ class FakeTable:
         item = self.items.get(Key["review_id"])
         return {"Item": item} if item else {}
 
-    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues=None,
-                     ExpressionAttributeNames=None, ConditionExpression=None):
+    def update_item(
+        self,
+        Key,
+        UpdateExpression,
+        ExpressionAttributeValues=None,
+        ExpressionAttributeNames=None,
+        ConditionExpression=None,
+    ):
         review_id = Key["review_id"]
         item = self.items.setdefault(review_id, {"review_id": review_id})
         vals = ExpressionAttributeValues or {}
         names = ExpressionAttributeNames or {}
 
         assert UpdateExpression.startswith("SET "), UpdateExpression
-        clauses = UpdateExpression[len("SET "):].split(",")
+        clauses = UpdateExpression[len("SET ") :].split(",")
         for clause in clauses:
             field, _, value_token = clause.strip().partition("=")
             field = field.strip()
@@ -111,9 +118,7 @@ class TestRecordStageFailure(unittest.TestCase):
         )
 
     def test_records_the_real_stage_name_not_pipeline(self) -> None:
-        reviews.record_stage_failure(
-            REVIEW_ID, "primary_review_pass", "model_timeout", self.ddb
-        )
+        reviews.record_stage_failure(REVIEW_ID, "primary_review_pass", "model_timeout", self.ddb)
         item = self.ddb.Table(os.environ["REVIEWS_TABLE"]).items[REVIEW_ID]
         self.assertEqual(item["failing_stage"], "primary_review_pass")
         self.assertNotEqual(item["failing_stage"], "pipeline")
@@ -183,9 +188,7 @@ class TestGetReviewDetailSurfacesStageFailure(unittest.TestCase):
                 "status": "RUNNING",
             }
         )
-        reviews.record_stage_failure(
-            REVIEW_ID, "critic_review_pass", "document_too_large", ddb
-        )
+        reviews.record_stage_failure(REVIEW_ID, "critic_review_pass", "document_too_large", ddb)
         detail = reviews.get_review_detail(
             REVIEW_ID, {"cognito_sub": "user-1", "is_admin": False}, ddb
         )

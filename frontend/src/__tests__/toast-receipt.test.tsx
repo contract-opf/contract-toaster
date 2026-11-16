@@ -255,10 +255,15 @@ describe('the receipt prints only what the review actually recorded', () => {
   });
 
   it('drops the retry-outcome line when nothing was attempted', () => {
-    const nothingAttempted = { ...SPARSE, requote: { attempted: 0, recovered: 0, still_failed: 0 } };
+    const nothingAttempted = {
+      ...SPARSE,
+      requote: { attempted: 0, recovered: 0, still_failed: 0 },
+    };
     render(<ToastReceipt review={nothingAttempted} />);
     expect(
-      screen.getByTestId('review-receipt-paper').querySelector('[data-receipt-line="retry-outcome"]'),
+      screen
+        .getByTestId('review-receipt-paper')
+        .querySelector('[data-receipt-line="retry-outcome"]'),
     ).toBeNull();
   });
 
@@ -348,7 +353,9 @@ describe('all three renderings say the same thing', () => {
     // the word-wrap happens to break.
     const longSentence =
       '3 pending edits from 2 authors accepted before review (see your original to compare).';
-    const lines: ReceiptLine[] = [{ id: 'accepted-changes', label: '', value: longSentence, wrap: true }];
+    const lines: ReceiptLine[] = [
+      { id: 'accepted-changes', label: '', value: longSentence, wrap: true },
+    ];
     const rows = receiptText(lines, 40).split('\n');
 
     // Wrapped onto more than one physical row, not silently cut off at 40
@@ -601,7 +608,6 @@ describe('History prints the same receipt for a past review', () => {
   });
 });
 
-
 // ---------------------------------------------------------------------------
 // Issue #721: ONE receipt owner. `toaster/receiptImage.ts` is the only canvas
 // drawing left in the app -- this component's "Save receipt" and the Orbit
@@ -790,9 +796,7 @@ describe('issue #740 — the Review route prints the receipt', () => {
     expect(sheet).not.toContain('Playbook version');
     expect(sheet).not.toContain('Reviewer');
     expect(sheet).not.toContain('Critic');
-    expect(sheet.split('\n').length).toBeLessThan(
-      printedRows(FULL, 'Synthetic NDA Sample').length,
-    );
+    expect(sheet.split('\n').length).toBeLessThan(printedRows(FULL, 'Synthetic NDA Sample').length);
   });
 
   it('explains itself on paper when there is no receipt, rather than printing blank', () => {
@@ -844,7 +848,9 @@ describe('issue #740 — the Review route prints the receipt', () => {
     // The sheet itself carries no appliance imagery and no control — it is a
     // block of text, and nothing else can ride along inside it.
     expect(
-      sheet.querySelector('img, svg, canvas, video, input, select, textarea, button, details, form'),
+      sheet.querySelector(
+        'img, svg, canvas, video, input, select, textarea, button, details, form',
+      ),
     ).toBeNull();
 
     // The generic "print whichever dialog happens to be open" rule this

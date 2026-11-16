@@ -81,10 +81,7 @@ export async function pressSubmit(): Promise<HTMLElement> {
  */
 export function submitArmed(): boolean {
   const button = screen.getByTestId('review-submit-button');
-  return (
-    !(button as HTMLButtonElement).disabled &&
-    button.getAttribute('aria-disabled') !== 'true'
-  );
+  return !(button as HTMLButtonElement).disabled && button.getAttribute('aria-disabled') !== 'true';
 }
 
 /**
@@ -97,9 +94,7 @@ export function submitArmed(): boolean {
  * the page yields it while the record or receipt overlay is open, so there is
  * never more than one of it.
  */
-export async function findReviewResult(
-  options?: { timeout?: number }
-): Promise<HTMLElement> {
+export async function findReviewResult(options?: { timeout?: number }): Promise<HTMLElement> {
   return waitFor(() => {
     // Singular, deliberately: the finished result has exactly one render site
     // at a time — on the page for an ERROR or manual-review outcome, and
@@ -228,17 +223,13 @@ export function expectNoReviewAttached(): void {
  * every way a review can end badly, and the console distinguishes them.
  * `-progress` and `-done` survive as themselves.
  */
-export function stateBadge(
-  kind: 'progress' | 'done' | 'sober',
-  status = 'ERROR'
-): string {
+export function stateBadge(kind: 'progress' | 'done' | 'sober', status = 'ERROR'): string {
   if (kind !== 'sober') return `toaster-state-${kind}`;
   return `toaster-state-${status.toLowerCase()}`;
 }
 
 /** "Nothing is active, and here is who fixes it" (issue #733). */
-export const NO_PLAYBOOKS_COPY =
-  /no playbook is active\. an admin needs to activate one/i;
+export const NO_PLAYBOOKS_COPY = /no playbook is active\. an admin needs to activate one/i;
 
 /** One entry of the playbook control, however the surface expresses it. */
 export interface PlaybookStop {

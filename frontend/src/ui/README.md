@@ -78,7 +78,7 @@ Component CSS references `--ct-*` custom properties exclusively
   **React wrappers** (`ui/react.ts`) — that's how the app consumes them.
 - `render()` (RTL) does not wait for a custom element's own
   microtask-scheduled first update. Locate the host, `await
-  (host as unknown as LitElement).updateComplete`, then query — see any
+(host as unknown as LitElement).updateComplete`, then query — see any
   existing `ui-*.test.tsx` file's `settled()`/`settleHost()` helper.
 - `css: false`: never assert computed styles. Assert structure, attributes,
   ARIA roles, and testids instead.

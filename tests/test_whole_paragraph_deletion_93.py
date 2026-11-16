@@ -67,12 +67,9 @@ import review_spine  # noqa: E402
 # record. Issue #93 must not change it -- `tools/document_spine_smoke.py`'s
 # `classify_unnormalizable_reason` matches these literals to produce its
 # symbolic reason codes without ever printing the note.
-_PENDING_MALFORMED = (
-    "pending tracked change has no resulting_text -- malformed revision record"
-)
+_PENDING_MALFORMED = "pending tracked change has no resulting_text -- malformed revision record"
 _ACCEPTED_MALFORMED = (
-    "tracked change marked 'accepted' but has no resulting_text -- "
-    "malformed revision record."
+    "tracked change marked 'accepted' but has no resulting_text -- malformed revision record."
 )
 
 # `frontend/src/toaster/receipt.ts`'s `acceptedChangesSummary`, mirrored. The
@@ -138,10 +135,7 @@ def _build_docx_bytes(body_xml: str) -> bytes:
 
 
 def _heading_p(text: str) -> str:
-    return (
-        '<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr>'
-        f"<w:r><w:t>{text}</w:t></w:r></w:p>"
-    )
+    return f'<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>'
 
 
 def _body_p(text: str) -> str:
@@ -303,11 +297,7 @@ def test_accepted_absent_resulting_text_still_fails_closed(failures: list[str]) 
     for label, rev in (
         (
             "missing key",
-            {
-                k: v
-                for k, v in _pending(status="accepted").items()
-                if k != "resulting_text"
-            },
+            {k: v for k, v in _pending(status="accepted").items() if k != "resulting_text"},
         ),
         ("explicit None", _pending(status="accepted", resulting_text=None)),
         ("non-string", _pending(status="accepted", resulting_text=0)),
@@ -384,8 +374,7 @@ def test_note_keeps_the_receipt_sentence_shape(failures: list[str]) -> None:
             )
         if "struck paragraph is omitted" not in note:
             failures.append(
-                f"[N3/{label}] The note must say the struck paragraph is omitted. "
-                f"Got: {note!r}"
+                f"[N3/{label}] The note must say the struck paragraph is omitted. Got: {note!r}"
             )
 
 
@@ -404,13 +393,15 @@ def test_field_code_deletion_note_does_not_report_an_empty_field_result(
     a whole-paragraph deletion that would read "The field now resolves to
     ''", which describes a parse failure rather than what happened."""
     note = (
-        normalize_input._normalize_paragraph(
-            _paragraph([_pending(inside_field_code=True)])
-        ).get("note")
+        normalize_input._normalize_paragraph(_paragraph([_pending(inside_field_code=True)])).get(
+            "note"
+        )
         or ""
     )
     if "resolves to ''" in note:
-        failures.append(f"[N5] A deleted paragraph must not be reported as an empty field: {note!r}")
+        failures.append(
+            f"[N5] A deleted paragraph must not be reported as an empty field: {note!r}"
+        )
     if "struck paragraph is omitted" not in note:
         failures.append(f"[N6] The deletion must still be named. Got: {note!r}")
 
@@ -439,9 +430,7 @@ def test_clean_body_omits_the_deleted_paragraph(failures: list[str]) -> None:
     if f"Fees: {_SURVIVOR}" not in body:
         failures.append(f"[B3] A surviving clause must be unaffected. Got: {body!r}")
     if "struck paragraph is omitted" not in (result.get("normalization_notes") or ""):
-        failures.append(
-            f"[B4] The omission must be disclosed, never silent. Got: {result!r}"
-        )
+        failures.append(f"[B4] The omission must be disclosed, never silent. Got: {result!r}")
 
 
 def test_an_always_empty_paragraph_is_not_reported_as_deleted(failures: list[str]) -> None:
@@ -452,9 +441,7 @@ def test_an_always_empty_paragraph_is_not_reported_as_deleted(failures: list[str
         {"heading": "Schedule", "text": "", "revisions": []}
     )
     if result.get("deleted_in_full") or result.get("note"):
-        failures.append(
-            f"[B5] An ordinarily empty paragraph is not a deleted one. Got: {result!r}"
-        )
+        failures.append(f"[B5] An ordinarily empty paragraph is not a deleted one. Got: {result!r}")
 
 
 def test_control_character_screen_still_runs_on_the_resolved_text(
@@ -529,13 +516,14 @@ def test_end_to_end_two_author_deletion_normalizes(failures: list[str]) -> None:
     )
     result = stage.extract_and_normalize(docx_bytes)
     if result.get("status") != "normalized":
-        failures.append(f"[E5] A two-author whole-paragraph deletion must normalize. Got: {result!r}")
+        failures.append(
+            f"[E5] A two-author whole-paragraph deletion must normalize. Got: {result!r}"
+        )
         return
     notes = result.get("normalization_notes") or ""
     if "2 author(s)" not in notes or "struck paragraph is omitted" not in notes:
         failures.append(
-            f"[E6] The note must name the cluster/author counts AND the deletion. "
-            f"Got: {notes!r}"
+            f"[E6] The note must name the cluster/author counts AND the deletion. Got: {notes!r}"
         )
 
 
@@ -564,8 +552,7 @@ def test_end_to_end_run_stage_does_not_fail_closed(failures: list[str]) -> None:
     payload = stored.get(output.get("normalized_s3_key", ""), {})
     if "struck paragraph is omitted" not in (payload.get("normalization_notes") or ""):
         failures.append(
-            f"[E9] The stored normalized artifact must carry the disposition note. "
-            f"Got: {payload!r}"
+            f"[E9] The stored normalized artifact must carry the disposition note. Got: {payload!r}"
         )
 
 
@@ -756,7 +743,9 @@ def test_multi_physical_paragraph_clause_keeps_its_surviving_sibling(
 
     notes = result.get("normalization_notes") or ""
     if "struck paragraph is omitted" not in notes:
-        failures.append(f"[G4] The struck sibling's deletion must still be disclosed. Got: {notes!r}")
+        failures.append(
+            f"[G4] The struck sibling's deletion must still be disclosed. Got: {notes!r}"
+        )
     lowered = notes.lower()
     if "the clause" in lowered or "clause was removed" in lowered or "clause is omitted" in lowered:
         failures.append(
@@ -811,8 +800,7 @@ def _assert_leading_struck_paragraph_agrees(
     materialized = stage.extract_and_normalize(stage.materialize_accept_all(docx_bytes))
     if materialized.get("status") != "normalized":
         failures.append(
-            f"[H2/{label}] The materialized document must normalize too. "
-            f"Got: {materialized!r}"
+            f"[H2/{label}] The materialized document must normalize too. Got: {materialized!r}"
         )
         return
 
@@ -827,8 +815,7 @@ def _assert_leading_struck_paragraph_agrees(
         )
     if len(raw_map) != expected_blocks:
         failures.append(
-            f"[H4/{label}] Expected {expected_blocks} block(s) after the deletion. "
-            f"Got: {raw_map!r}"
+            f"[H4/{label}] Expected {expected_blocks} block(s) after the deletion. Got: {raw_map!r}"
         )
     for block_id, block in raw_map.items():
         if _STRUCK_PREAMBLE in block["heading"] or _STRUCK_PREAMBLE in block["text"]:

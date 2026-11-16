@@ -238,9 +238,7 @@ describe('the money helpers (#653)', () => {
     } as SpendCapSetting;
     expect(capSourceNote({ ...base, daily_cap_source: 'admin' })).toContain('Set here');
     expect(capSourceNote({ ...base, daily_cap_source: 'admin' })).toContain('$20.00');
-    expect(capSourceNote({ ...base, daily_cap_source: 'env' })).toContain(
-      'deployment environment',
-    );
+    expect(capSourceNote({ ...base, daily_cap_source: 'env' })).toContain('deployment environment');
     expect(capSourceNote({ ...base, daily_cap_source: 'default' })).toContain('built-in default');
   });
 

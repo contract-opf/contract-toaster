@@ -102,7 +102,9 @@ def _bootstrap_audit_entry() -> tuple:
 
 def _ci_promotion_step() -> str:
     text = CI_PIPELINE.read_text(encoding="utf-8")
-    m = re.search(r"(?ms)^      - name: Write promotion audit row \(STEP I\)\n(.*?)(?=^      - )", text)
+    m = re.search(
+        r"(?ms)^      - name: Write promotion audit row \(STEP I\)\n(.*?)(?=^      - )", text
+    )
     if not m:
         raise AssertionError("ci-pipeline.yml has no 'Write promotion audit row (STEP I)' step")
     return m.group(1)
@@ -150,13 +152,19 @@ class TestAuditTableKey(unittest.TestCase):
             with self.subTest(writer=label):
                 self.assertIn("attribute_not_exists(partition)", body)
                 self.assertNotRegex(body, r"\bpk\b", f"{label} still writes a `pk` attribute")
-                self.assertRegex(body, r"partition\\*\"\s*:\s*\{\\*\"S\\*\"\s*:\s*\\*\"\$\{?AUDIT_PARTITION")
+                self.assertRegex(
+                    body, r"partition\\*\"\s*:\s*\{\\*\"S\\*\"\s*:\s*\\*\"\$\{?AUDIT_PARTITION"
+                )
                 self.assertRegex(body, r"AUDIT_PARTITION=\$\(date -u \+%Y-%m\)")
                 # Sort key in the backend's "{epoch}#{event_id}" format, which
                 # audit_queries parses back into recorded_at.
                 self.assertRegex(body, r"AUDIT_EPOCH=\$\(date -u \+%s\)")
-                self.assertRegex(body, r"timestamp\\*\"\s*:\s*\{\\*\"S\\*\"\s*:\s*\\*\"\$\{?AUDIT_EPOCH\}?#")
-                self.assertRegex(body, r"\\*\"action\\*\"\s*:\s*\{\\*\"S\\*\"\s*:\s*\\*\"image-promoted")
+                self.assertRegex(
+                    body, r"timestamp\\*\"\s*:\s*\{\\*\"S\\*\"\s*:\s*\\*\"\$\{?AUDIT_EPOCH\}?#"
+                )
+                self.assertRegex(
+                    body, r"\\*\"action\\*\"\s*:\s*\{\\*\"S\\*\"\s*:\s*\\*\"image-promoted"
+                )
 
 
 def _run_tests() -> int:

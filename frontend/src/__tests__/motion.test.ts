@@ -271,7 +271,7 @@ describe('issue #723 — the console controller has one WAAPI call site', () => 
   });
 });
 
-describe('issue #723 — the console controller\'s three suppression rails', () => {
+describe("issue #723 — the console controller's three suppression rails", () => {
   it('reduced motion cancels what is running and starts nothing new', () => {
     const root = consoleRoot();
     const controller = createMotion(root);

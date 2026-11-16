@@ -106,7 +106,9 @@ class _RegistryPatch:
         playbook_registry.REGISTRY_PATH = self._orig
 
 
-def _build_synthetic_registry(root: Path, *, default_playbook_id: str | None = "synthetic-default") -> Path:
+def _build_synthetic_registry(
+    root: Path, *, default_playbook_id: str | None = "synthetic-default"
+) -> Path:
     """A self-contained temp-dir registry with ONE playbook, id
     "synthetic-default" -- deliberately NOT "eiaa" -- so a test that
     resolves the registry's default and gets back "synthetic-default"
@@ -114,10 +116,13 @@ def _build_synthetic_registry(root: Path, *, default_playbook_id: str | None = "
     "eiaa" fallback. `default_playbook_id=None` omits the field entirely
     (exercises the missing-field AC)."""
     playbook_path = "playbooks/synthetic-default-v1.0.0.json"
-    _write_json(root / playbook_path, {
-        "playbook": {"id": "synthetic-default", "version": "1.0.0"},
-        "topics": [],
-    })
+    _write_json(
+        root / playbook_path,
+        {
+            "playbook": {"id": "synthetic-default", "version": "1.0.0"},
+            "topics": [],
+        },
+    )
     fixtures_dir = "tests/gold-fixtures-synthetic-default"
     (root / fixtures_dir).mkdir(parents=True, exist_ok=True)
 
@@ -154,7 +159,9 @@ class TestRegistryOwnedDefault(unittest.TestCase):
             "scripts/playbook_registry.py has no default_playbook_id() function.",
         )
         with tempfile.TemporaryDirectory() as tmp:
-            registry_path = _build_synthetic_registry(Path(tmp), default_playbook_id="synthetic-default")
+            registry_path = _build_synthetic_registry(
+                Path(tmp), default_playbook_id="synthetic-default"
+            )
             with _RegistryPatch(registry_path):
                 self.assertEqual(playbook_registry.default_playbook_id(), "synthetic-default")
 
@@ -196,14 +203,18 @@ class TestCorpusResolvesDefaultViaRegistry(unittest.TestCase):
 
     def test_load_playbook_follows_a_synthetic_registrys_default(self):
         with tempfile.TemporaryDirectory() as tmp:
-            registry_path = _build_synthetic_registry(Path(tmp), default_playbook_id="synthetic-default")
+            registry_path = _build_synthetic_registry(
+                Path(tmp), default_playbook_id="synthetic-default"
+            )
             with _RegistryPatch(registry_path):
                 loaded = corpus._load_playbook()
         self.assertEqual(loaded["playbook"]["id"], "synthetic-default")
 
     def test_build_clause_record_default_playbook_id_follows_registry(self):
         with tempfile.TemporaryDirectory() as tmp:
-            registry_path = _build_synthetic_registry(Path(tmp), default_playbook_id="synthetic-default")
+            registry_path = _build_synthetic_registry(
+                Path(tmp), default_playbook_id="synthetic-default"
+            )
             with _RegistryPatch(registry_path):
                 record = corpus.build_clause_record(
                     source_document_id="doc-1",
@@ -348,7 +359,9 @@ class TestMockPipelineIsRegistryDriven(unittest.TestCase):
             "playbooks/registry.json's synthetic-generic entry must carry "
             "mock_output_key (issue #289 spot 4).",
         )
-        self.s3.put_object(Bucket=OUTPUTS_BUCKET, Key=entry.mock_output_key, Body=b"pre-baked bytes")
+        self.s3.put_object(
+            Bucket=OUTPUTS_BUCKET, Key=entry.mock_output_key, Body=b"pre-baked bytes"
+        )
 
         pr.run_mock_pipeline(
             self.REVIEW_ID,
@@ -393,7 +406,9 @@ class TestReviewRoutesDefaultPlaybookIdFromRegistry(unittest.TestCase):
             "loader (issue #289 spot 5).",
         )
         with tempfile.TemporaryDirectory() as tmp:
-            registry_path = _build_synthetic_registry(Path(tmp), default_playbook_id="synthetic-default")
+            registry_path = _build_synthetic_registry(
+                Path(tmp), default_playbook_id="synthetic-default"
+            )
             self.assertEqual(
                 review_routes._load_default_playbook_id(registry_path),
                 "synthetic-default",

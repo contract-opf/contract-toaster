@@ -92,13 +92,23 @@ class TestAppendOnly(unittest.TestCase):
             ddb = boto3.resource("dynamodb", region_name="us-east-1")
             table = _create_audit_table(ddb)
             audit_log.write_audit_entry(
-                ddb, actor="admin-1", action="first", target="t", target_type="x",
-                now=FIXED_NOW, event_id=FIXED_EVENT,
+                ddb,
+                actor="admin-1",
+                action="first",
+                target="t",
+                target_type="x",
+                now=FIXED_NOW,
+                event_id=FIXED_EVENT,
             )
             with self.assertRaises(ClientError) as ctx:
                 audit_log.write_audit_entry(
-                    ddb, actor="attacker", action="overwrite", target="t", target_type="x",
-                    now=FIXED_NOW, event_id=FIXED_EVENT,
+                    ddb,
+                    actor="attacker",
+                    action="overwrite",
+                    target="t",
+                    target_type="x",
+                    now=FIXED_NOW,
+                    event_id=FIXED_EVENT,
                 )
             self.assertEqual(
                 ctx.exception.response["Error"]["Code"], "ConditionalCheckFailedException"
@@ -113,10 +123,18 @@ class TestAppendOnly(unittest.TestCase):
             ddb = boto3.resource("dynamodb", region_name="us-east-1")
             table = _create_audit_table(ddb)
             audit_log.write_audit_entry(
-                ddb, actor="a", action="first", now=FIXED_NOW, event_id=FIXED_EVENT,
+                ddb,
+                actor="a",
+                action="first",
+                now=FIXED_NOW,
+                event_id=FIXED_EVENT,
             )
             result = audit_log.write_audit_entry(
-                ddb, actor="b", action="second", now=FIXED_NOW, event_id=FIXED_EVENT,
+                ddb,
+                actor="b",
+                action="second",
+                now=FIXED_NOW,
+                event_id=FIXED_EVENT,
                 best_effort=True,
             )
             self.assertIsNone(result)
@@ -135,9 +153,16 @@ class TestAppendOnly(unittest.TestCase):
 
     def test_detail_cannot_move_the_key(self) -> None:
         item = audit_log.build_audit_item(
-            actor="a", action="x", now=FIXED_NOW, event_id=FIXED_EVENT,
-            detail={"partition": "1999-01", "timestamp": "0#forged", "event_id": "forged",
-                    "outcome": "rejected"},
+            actor="a",
+            action="x",
+            now=FIXED_NOW,
+            event_id=FIXED_EVENT,
+            detail={
+                "partition": "1999-01",
+                "timestamp": "0#forged",
+                "event_id": "forged",
+                "outcome": "rejected",
+            },
         )
         self.assertEqual(item["partition"], "2026-09")
         self.assertEqual(item["timestamp"], f"1790000000#{FIXED_EVENT}")
@@ -148,7 +173,9 @@ class TestAppendOnly(unittest.TestCase):
     def test_review_scoped_rows_are_stamped_for_the_review_id_index(self) -> None:
         item = audit_log.build_audit_item(actor="a", action="x", target="r-1", target_type="review")
         self.assertEqual(item["review_id"], "r-1")
-        other = audit_log.build_audit_item(actor="a", action="x", target="u-1", target_type="upload")
+        other = audit_log.build_audit_item(
+            actor="a", action="x", target="u-1", target_type="upload"
+        )
         self.assertNotIn("review_id", other)
 
 
@@ -182,9 +209,7 @@ def _audit_put_items(tree: ast.AST) -> list[int]:
             ):
                 receiver = node.func.value
                 text = ast.unparse(receiver)
-                names_in_receiver = {
-                    n.id for n in ast.walk(receiver) if isinstance(n, ast.Name)
-                }
+                names_in_receiver = {n.id for n in ast.walk(receiver) if isinstance(n, ast.Name)}
                 if _AUDIT_RE.search(text) or names_in_receiver & audit_names:
                     hits.append(node.lineno)
     return sorted(set(hits))
@@ -236,27 +261,30 @@ class TestLambdaParity(unittest.TestCase):
 
     def test_the_lambda_builds_the_same_row(self) -> None:
         cases = [
-            {"actor": "system:retention-purge-worker", "action": "retention_purge_sweep",
-                 "target": "sweep-1", "target_type": "retention_sweep",
-                 "detail": {"deleted_count": 3, "purged_review_ids": ["a", "b"]}},
-            {"actor": "a", "action": "x", "target": "r-1", "target_type": "review",
-                 "detail": {"outcome": "rejected", "partition": "forged"}},
+            {
+                "actor": "system:retention-purge-worker",
+                "action": "retention_purge_sweep",
+                "target": "sweep-1",
+                "target_type": "retention_sweep",
+                "detail": {"deleted_count": 3, "purged_review_ids": ["a", "b"]},
+            },
+            {
+                "actor": "a",
+                "action": "x",
+                "target": "r-1",
+                "target_type": "review",
+                "detail": {"outcome": "rejected", "partition": "forged"},
+            },
             {"actor": "a", "action": "x"},
         ]
         for kwargs in cases:
             with self.subTest(kwargs=kwargs):
-                backend = audit_log.build_audit_item(
-                    now=FIXED_NOW, event_id=FIXED_EVENT, **kwargs
-                )
-                lam = self.worker._build_audit_item(
-                    now=FIXED_NOW, event_id=FIXED_EVENT, **kwargs
-                )
+                backend = audit_log.build_audit_item(now=FIXED_NOW, event_id=FIXED_EVENT, **kwargs)
+                lam = self.worker._build_audit_item(now=FIXED_NOW, event_id=FIXED_EVENT, **kwargs)
                 self.assertEqual(backend, lam)
 
     def test_the_lambda_carries_the_same_append_only_condition(self) -> None:
-        built = ConditionExpressionBuilder().build_expression(
-            audit_log.append_only_condition()
-        )
+        built = ConditionExpressionBuilder().build_expression(audit_log.append_only_condition())
         backend = built.condition_expression
         for placeholder, name in built.attribute_name_placeholders.items():
             backend = backend.replace(placeholder, name)

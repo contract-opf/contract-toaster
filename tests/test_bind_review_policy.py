@@ -148,7 +148,9 @@ def check_3_policy_recorded() -> list[str]:
         if rp.get("hash") != expected_hash:
             failures.append("  review_policy.hash != policy_content_hash of the bound policy")
         if rp.get("approval_status") != "draft":
-            failures.append(f"  review_policy.approval_status == {rp.get('approval_status')!r}, expected 'draft'")
+            failures.append(
+                f"  review_policy.approval_status == {rp.get('approval_status')!r}, expected 'draft'"
+            )
         if not rp.get("path"):
             failures.append("  review_policy.path is empty")
         # model_policy is a DIFFERENT thing and must not be conflated.
@@ -191,7 +193,9 @@ def check_6_schema() -> list[str]:
         try:
             jsonschema.validate(instance=bundle, schema=schema)
         except jsonschema.ValidationError as exc:
-            failures.append(f"  bundle {label} failed bundle.schema-v2: {exc.validator} at {list(exc.absolute_path)}")
+            failures.append(
+                f"  bundle {label} failed bundle.schema-v2: {exc.validator} at {list(exc.absolute_path)}"
+            )
     # A malformed review_policy must be rejected by the schema.
     bad = copy.deepcopy(with_policy)
     bad["review_policy"]["approval_status"] = "rubber-stamped"
@@ -365,7 +369,9 @@ def check_7_lineage() -> list[str]:
     with _synthetic_registry(bundle):
         lineage = reviews._resolve_opf_lineage(PLAYBOOK_ID)
         if lineage.get("policy_version") != 2:
-            failures.append(f"  lineage.policy_version == {lineage.get('policy_version')!r}, expected 2")
+            failures.append(
+                f"  lineage.policy_version == {lineage.get('policy_version')!r}, expected 2"
+            )
         if lineage.get("policy_hash") != bundle["review_policy"]["hash"]:
             failures.append("  lineage.policy_hash != the bundle's review_policy.hash")
         if lineage.get("policy_approval_status") != bundle["review_policy"]["approval_status"]:
@@ -438,7 +444,9 @@ def check_9_no_bundle_no_policy_fields() -> list[str]:
     for carrier, label in ((row, "review row"), (execution_input, "execution input")):
         for key in POLICY_FIELDS:
             if key in carrier:
-                failures.append(f"  {label} carries {key}={carrier[key]!r} (should be absent, not null)")
+                failures.append(
+                    f"  {label} carries {key}={carrier[key]!r} (should be absent, not null)"
+                )
     # The row is otherwise exactly what it always was.
     if row.get("status") != "PENDING" or row.get("playbook_id") != NO_BUNDLE_PLAYBOOK_ID:
         failures.append("  a v1-playbook review row lost a pre-existing field")
@@ -447,15 +455,47 @@ def check_9_no_bundle_no_policy_fields() -> list[str]:
 
 def main() -> int:
     checks = [
-        ("1", "bind refuses an OPF whose content_hash does not verify", check_1_refuses_unverified_opf),
-        ("2", ".opf.html binds, and yields the same bundle as its .opf.json", check_2_html_is_bindable),
-        ("3", "bound bundle records review_policy {path,version,hash,approval_status}", check_3_policy_recorded),
-        ("4", "bind refuses a policy belonging to another playbook_id", check_4_refuses_wrong_playbook_policy),
+        (
+            "1",
+            "bind refuses an OPF whose content_hash does not verify",
+            check_1_refuses_unverified_opf,
+        ),
+        (
+            "2",
+            ".opf.html binds, and yields the same bundle as its .opf.json",
+            check_2_html_is_bindable,
+        ),
+        (
+            "3",
+            "bound bundle records review_policy {path,version,hash,approval_status}",
+            check_3_policy_recorded,
+        ),
+        (
+            "4",
+            "bind refuses a policy belonging to another playbook_id",
+            check_4_refuses_wrong_playbook_policy,
+        ),
         ("5", "no policy -> review_policy key ABSENT, not empty", check_5_no_policy_absent_key),
-        ("6", "bundles validate against bundle.schema-v2 (and bad status rejected)", check_6_schema),
-        ("7", "_resolve_opf_lineage surfaces policy_version + hash + approval_status", check_7_lineage),
-        ("8", "the PERSISTED review row + execution input record the policy", check_8_row_records_policy),
-        ("9", "no bundle_path -> policy fields ABSENT from the row, not null", check_9_no_bundle_no_policy_fields),
+        (
+            "6",
+            "bundles validate against bundle.schema-v2 (and bad status rejected)",
+            check_6_schema,
+        ),
+        (
+            "7",
+            "_resolve_opf_lineage surfaces policy_version + hash + approval_status",
+            check_7_lineage,
+        ),
+        (
+            "8",
+            "the PERSISTED review row + execution input record the policy",
+            check_8_row_records_policy,
+        ),
+        (
+            "9",
+            "no bundle_path -> policy fields ABSENT from the row, not null",
+            check_9_no_bundle_no_policy_fields,
+        ),
     ]
     ok = True
     for code, name, fn in checks:

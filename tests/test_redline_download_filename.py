@@ -70,7 +70,7 @@ class TestItCannotInjectAHeader(unittest.TestCase):
 
     def test_crlf_cannot_append_a_header(self):
         header = download.content_disposition_for(
-            'a.docx\r\nX-Evil: yes\r\nContent-Type: text/html', REVIEW_ID
+            "a.docx\r\nX-Evil: yes\r\nContent-Type: text/html", REVIEW_ID
         )
         self.assertNotIn("\r", header)
         self.assertNotIn("\n", header)
@@ -82,7 +82,11 @@ class TestItCannotInjectAHeader(unittest.TestCase):
         self.assertEqual(header.count('"'), 2)
 
     def test_path_separators_and_traversal_are_stripped(self):
-        for hostile in ("../../etc/passwd.docx", "..\\..\\windows\\system32.docx", "/abs/path.docx"):
+        for hostile in (
+            "../../etc/passwd.docx",
+            "..\\..\\windows\\system32.docx",
+            "/abs/path.docx",
+        ):
             header = download.content_disposition_for(hostile, REVIEW_ID)
             self.assertNotIn("/", header.split("filename=")[1])
             self.assertNotIn("\\", header.split("filename=")[1])

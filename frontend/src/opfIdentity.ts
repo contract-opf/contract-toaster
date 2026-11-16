@@ -123,8 +123,7 @@ export function readOpfIdentity(text: string): OpfIdentity | null {
   }
   const record = identity as Record<string, unknown>;
   const version = typeof record.version === 'string' ? record.version.trim() : '';
-  const contentHash =
-    typeof record.content_hash === 'string' ? record.content_hash.trim() : '';
+  const contentHash = typeof record.content_hash === 'string' ? record.content_hash.trim() : '';
 
   return {
     ...(version === '' ? {} : { version }),
@@ -156,10 +155,7 @@ function utcDate(at: Date): string {
  *
  * `uploadedAt` is passed in, not read from the clock, so this stays pure.
  */
-export function deriveVersionIdentifier(
-  identity: OpfIdentity,
-  uploadedAt: Date,
-): string | null {
+export function deriveVersionIdentifier(identity: OpfIdentity, uploadedAt: Date): string | null {
   // 1. The artifact's own opinion wins whenever it has one.
   if (identity.version !== undefined && identity.version !== '') {
     return identity.version;

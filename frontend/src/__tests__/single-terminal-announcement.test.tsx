@@ -31,7 +31,9 @@ function docxFile(): File {
 /** Every element the a11y layer would treat as an announcing live region. */
 function liveRegions(): HTMLElement[] {
   return Array.from(
-    document.querySelectorAll<HTMLElement>('[aria-live]:not([aria-live="off"]), [role="status"]:not([aria-live="off"]), [role="alert"]'),
+    document.querySelectorAll<HTMLElement>(
+      '[aria-live]:not([aria-live="off"]), [role="status"]:not([aria-live="off"]), [role="alert"]',
+    ),
   );
 }
 
@@ -43,8 +45,12 @@ function mockFetch(detail: Record<string, unknown>) {
     const method = (init?.method ?? 'GET').toUpperCase();
     const pathname = new URL(url, 'http://localhost').pathname;
     if (method === 'POST' && pathname === '/api/reviews') {
-      // eslint-disable-next-line @typescript-eslint/require-await
-      return { ok: true, status: 200, json: async () => ({ review_id: 'rev-1', resumed: false }) } as Response;
+      return {
+        ok: true,
+        status: 200,
+        // eslint-disable-next-line @typescript-eslint/require-await
+        json: async () => ({ review_id: 'rev-1', resumed: false }),
+      } as Response;
     }
     if (pathname === '/api/playbooks') {
       // A real, ACTIVE catalog on purpose. An empty one renders the static

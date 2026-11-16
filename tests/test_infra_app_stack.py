@@ -75,6 +75,7 @@ def _assert(condition: bool, label: str, detail: str = "") -> list[str]:
 # Check A — backend/Dockerfile
 # ---------------------------------------------------------------------------
 
+
 def check_a_dockerfile() -> list[str]:
     print("\nCheck A: backend/Dockerfile — Python 3.12 container, FastAPI, uvicorn …")
     failures: list[str] = []
@@ -142,6 +143,7 @@ def check_a_dockerfile() -> list[str]:
 # Check B — backend/src/main.py endpoints
 # ---------------------------------------------------------------------------
 
+
 def check_b_main_py_endpoints() -> list[str]:
     print("\nCheck B: backend/src/main.py — /health, /version, /whoami endpoints …")
     failures: list[str] = []
@@ -164,7 +166,7 @@ def check_b_main_py_endpoints() -> list[str]:
     )
     failures += _assert(
         bool(re.search(r'"status"\s*:\s*"ok"', text)),
-        "main.py /health returns {\"status\": \"ok\"}",
+        'main.py /health returns {"status": "ok"}',
         "Per AC: liveness only — no build details.",
     )
 
@@ -203,6 +205,7 @@ def check_b_main_py_endpoints() -> list[str]:
 # Check C — JWT verification middleware
 # ---------------------------------------------------------------------------
 
+
 def check_c_jwt_middleware() -> list[str]:
     print("\nCheck C: JWT verification middleware — Cognito token + domain checks …")
     failures: list[str] = []
@@ -215,7 +218,9 @@ def check_c_jwt_middleware() -> list[str]:
         return failures
 
     # Find all Python sources in backend/
-    backend_src_files = list((BACKEND_DIR / "src").rglob("*.py")) if (BACKEND_DIR / "src").is_dir() else []
+    backend_src_files = (
+        list((BACKEND_DIR / "src").rglob("*.py")) if (BACKEND_DIR / "src").is_dir() else []
+    )
     if MAIN_PY_PATH.is_file() and MAIN_PY_PATH not in backend_src_files:
         backend_src_files.append(MAIN_PY_PATH)
 
@@ -245,7 +250,11 @@ def check_c_jwt_middleware() -> list[str]:
     # prose mentioning ALLOWED_EMAIL_DOMAINS cannot satisfy them if the
     # actual verification code is removed.
     failures += _assert(
-        bool(re.search(r'(environ\.get|environ\[|getenv)\(?\s*\(?\s*["\']ALLOWED_EMAIL_DOMAINS', all_py)),
+        bool(
+            re.search(
+                r'(environ\.get|environ\[|getenv)\(?\s*\(?\s*["\']ALLOWED_EMAIL_DOMAINS', all_py
+            )
+        ),
         "Backend reads the ALLOWED_EMAIL_DOMAINS env-driven domain allowlist",
         "Per AC (#55 as amended by #274): allowed email domains must come from "
         "the ALLOWED_EMAIL_DOMAINS env var, not a hardcoded literal.",
@@ -254,7 +263,7 @@ def check_c_jwt_middleware() -> list[str]:
         bool(re.search(r"email.{0,120}@.{0,120}allowed", all_py)),
         "Backend independently re-checks the email domain against the allowlist",
         "Per AC: independently re-verifies the email domain (e.g. "
-        "email.lower().endswith(f\"@{domain}\") for domain in allowed_domains).",
+        'email.lower().endswith(f"@{domain}") for domain in allowed_domains).',
     )
 
     # hd claim check: must read the Google 'hd' claim AND compare it against
@@ -280,6 +289,7 @@ def check_c_jwt_middleware() -> list[str]:
 # Check D — version/commit read from environment variables
 # ---------------------------------------------------------------------------
 
+
 def check_d_env_vars() -> list[str]:
     print("\nCheck D: version and commit SHA read from environment variables …")
     failures: list[str] = []
@@ -293,13 +303,15 @@ def check_d_env_vars() -> list[str]:
 
     all_py = "\n".join(
         _read(f)
-        for f in (list((BACKEND_DIR / "src").rglob("*.py")) if (BACKEND_DIR / "src").is_dir() else [])
+        for f in (
+            list((BACKEND_DIR / "src").rglob("*.py")) if (BACKEND_DIR / "src").is_dir() else []
+        )
     )
     if not all_py:
         all_py = _read(MAIN_PY_PATH)
 
     failures += _assert(
-        bool(re.search(r'os\.environ|os\.getenv|environ\[', all_py)),
+        bool(re.search(r"os\.environ|os\.getenv|environ\[", all_py)),
         "main.py reads environment variables via os.environ or os.getenv",
         "Per AC: version and commit SHA are read from environment variables.",
     )
@@ -316,6 +328,7 @@ def check_d_env_vars() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check E — infra/lib/nested/app-stack.ts: App Runner service
 # ---------------------------------------------------------------------------
+
 
 def check_e_app_stack_ts() -> list[str]:
     print("\nCheck E: infra/lib/nested/app-stack.ts — App Runner service definition …")
@@ -341,7 +354,9 @@ def check_e_app_stack_ts() -> list[str]:
     )
 
     # ECR image pinned to an immutable digest (not tag-only)
-    has_ecr = bool(re.search(r"ecr|ECR|imageIdentifier|imageRepository|digest", text, re.IGNORECASE))
+    has_ecr = bool(
+        re.search(r"ecr|ECR|imageIdentifier|imageRepository|digest", text, re.IGNORECASE)
+    )
     failures += _assert(
         has_ecr,
         "app-stack.ts references ECR image / digest",
@@ -350,11 +365,19 @@ def check_e_app_stack_ts() -> list[str]:
 
     # Auto-deploy DISABLED
     has_auto_deploy_disabled = bool(
-        re.search(r"auto.*deploy.*false|autoDeployments.*DISABLED|isPubliclyAccessible.*false|DISABLE|paused.*true|deploymentConfiguration.*DISABLED", text, re.IGNORECASE)
+        re.search(
+            r"auto.*deploy.*false|autoDeployments.*DISABLED|isPubliclyAccessible.*false|DISABLE|paused.*true|deploymentConfiguration.*DISABLED",
+            text,
+            re.IGNORECASE,
+        )
     )
     # Also check for a comment asserting auto-deploy is off (code + comment both acceptable as structural gate)
     has_auto_deploy_comment = bool(
-        re.search(r"auto.deploy.*disabled|disabled.*auto.deploy|never.*auto.mutat|auto.mutat.*disabled", text, re.IGNORECASE)
+        re.search(
+            r"auto.deploy.*disabled|disabled.*auto.deploy|never.*auto.mutat|auto.mutat.*disabled",
+            text,
+            re.IGNORECASE,
+        )
     )
     failures += _assert(
         has_auto_deploy_disabled or has_auto_deploy_comment,
@@ -382,7 +405,11 @@ def check_e_app_stack_ts() -> list[str]:
 
     # Least-privilege role defined (capability-split)
     has_task_role = bool(
-        re.search(r"taskRole|task.*role|role.*task|least.priv|addToPolicy|grantRead|grantWrite|addGrantee", text, re.IGNORECASE)
+        re.search(
+            r"taskRole|task.*role|role.*task|least.priv|addToPolicy|grantRead|grantWrite|addGrantee",
+            text,
+            re.IGNORECASE,
+        )
     )
     failures += _assert(
         has_task_role,
@@ -396,6 +423,7 @@ def check_e_app_stack_ts() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check F — NetworkStack exports a VPC
 # ---------------------------------------------------------------------------
+
 
 def check_f_network_stack_vpc() -> list[str]:
     print("\nCheck F: NetworkStack (network-stack.ts) defines and exports a VPC …")
@@ -436,6 +464,7 @@ def check_f_network_stack_vpc() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check G — cdk synth runs cleanly
 # ---------------------------------------------------------------------------
+
 
 def check_g_cdk_synth() -> list[str]:
     print("\nCheck G: cdk synth runs cleanly with the App Runner stack …")
@@ -480,6 +509,7 @@ def check_g_cdk_synth() -> list[str]:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> int:
     print("AppStack + backend structural gate (issue #55)")
     print("=" * 60)
@@ -495,10 +525,7 @@ def main() -> int:
 
     print("\n" + "=" * 60)
     if all_failures:
-        print(
-            f"\nFAIL: {len(all_failures)} check(s) failed.\n"
-            "See output above for details."
-        )
+        print(f"\nFAIL: {len(all_failures)} check(s) failed.\nSee output above for details.")
         return 1
 
     print("\nPASS: all App Runner + backend structural checks passed.")

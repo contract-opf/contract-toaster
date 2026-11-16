@@ -206,9 +206,7 @@ def _call_get_current_user(token: str) -> dict:
         with unittest.mock.patch.object(
             auth_module, "_fetch_jwks", side_effect=lambda url: keys.jwks
         ):
-            return auth_module.get_current_user(
-                credentials=_creds(token), session_cookie=None
-            )
+            return auth_module.get_current_user(credentials=_creds(token), session_cookie=None)
 
 
 class TestPyJWTCognitoPath(unittest.TestCase):
@@ -227,9 +225,7 @@ class TestPyJWTCognitoPath(unittest.TestCase):
         self._assert_401(_keys().alg_none(), "alg: none")
 
     def test_p3_hs256_with_rsa_public_key_rejected(self) -> None:
-        self._assert_401(
-            _keys().hs256_with_public_key(), "HS256 signed with the RSA public key"
-        )
+        self._assert_401(_keys().hs256_with_public_key(), "HS256 signed with the RSA public key")
 
     def test_p4_wrong_audience_rejected(self) -> None:
         self._assert_401(_keys().rs256(aud="some-other-client"), "wrong aud")

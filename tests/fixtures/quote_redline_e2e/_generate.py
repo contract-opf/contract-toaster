@@ -82,7 +82,7 @@ TITLE = "CLINICAL EDUCATION PARTNERSHIP AGREEMENT"
 
 PREAMBLE = (
     'This Clinical Placement and Affiliation Agreement (the "Agreement") is '
-    'entered into by and between Riverside College of Health Sciences (the '
+    "entered into by and between Riverside College of Health Sciences (the "
     '"Institution") and Your Organization, LLC (the "Company") to establish '
     "the terms on which Institution students will complete supervised "
     "clinical rotations at Company-affiliated training sites."

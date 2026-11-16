@@ -173,9 +173,7 @@ describe('issue #734 — a failed review still reaches its own record', () => {
     expect(screen.getByTestId('review-failure')).not.toContainElement(key);
 
     // The rail is untouched: the retry key still holds the one free slot.
-    expect(screen.getByTestId('review-retry-button')).toHaveTextContent(
-      'Toast another slice',
-    );
+    expect(screen.getByTestId('review-retry-button')).toHaveTextContent('Toast another slice');
   });
 
   it('opens the record overlay with the review id and Copy ID', async () => {
@@ -188,9 +186,7 @@ describe('issue #734 — a failed review still reaches its own record', () => {
     const record = overlay();
     expect(within(record).getByRole('heading', { name: 'Review record' })).toBeInTheDocument();
     expect(within(record).getByTestId('review-id-row')).toBeInTheDocument();
-    expect(
-      within(record).getByTestId('review-copy-id-button'),
-    ).toHaveTextContent('Copy review ID');
+    expect(within(record).getByTestId('review-copy-id-button')).toHaveTextContent('Copy review ID');
 
     // Issue #733's rule survives: the result fragment has ONE render site, so
     // the page yields it to the overlay rather than duplicating eight testids.
@@ -236,11 +232,7 @@ describe('issue #734 — a failed review still reaches its own record', () => {
     14_000,
   );
 
-  it.each([
-    'ERROR',
-    'MANUAL_REVIEW_REQUIRED',
-    'ERROR_MANUAL_REVIEW_REQUIRED',
-  ])(
+  it.each(['ERROR', 'MANUAL_REVIEW_REQUIRED', 'ERROR_MANUAL_REVIEW_REQUIRED'])(
     'returns keyboard focus to Review details when the record closes on %s',
     async (status) => {
       await submitAndSettle({ status, has_input: true });
@@ -257,9 +249,7 @@ describe('issue #734 — a failed review still reaches its own record', () => {
 
       fireEvent.click(within(overlay()).getByRole('button', { name: 'Close' }));
       await waitFor(() =>
-        expect(document.activeElement).toBe(
-          screen.getByTestId('review-details-button'),
-        ),
+        expect(document.activeElement).toBe(screen.getByTestId('review-details-button')),
       );
     },
     20_000,
@@ -292,9 +282,7 @@ describe('issue #734 — a failed review still reaches its own record', () => {
   it('changes nothing on DONE — the id stays in the receipt, the key stays Save redline', async () => {
     await submitAndSettle({ status: 'DONE', has_input: true, has_output: true });
 
-    expect(await screen.findByTestId('review-download-button')).toHaveTextContent(
-      'Save redline',
-    );
+    expect(await screen.findByTestId('review-download-button')).toHaveTextContent('Save redline');
     // The finished result is not on the page at all, so neither is the key.
     expect(screen.queryByTestId('review-result')).toBeNull();
     expect(screen.queryByTestId('review-details-button')).toBeNull();

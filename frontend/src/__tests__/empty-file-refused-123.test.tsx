@@ -40,8 +40,12 @@ function mockFetch() {
     const pathname = new URL(url, 'http://localhost').pathname;
     if (method === 'POST' && pathname === '/api/reviews') {
       posts.push(pathname);
-      // eslint-disable-next-line @typescript-eslint/require-await
-      return { ok: true, status: 200, json: async () => ({ review_id: 'rev-1', resumed: false }) } as Response;
+      return {
+        ok: true,
+        status: 200,
+        // eslint-disable-next-line @typescript-eslint/require-await
+        json: async () => ({ review_id: 'rev-1', resumed: false }),
+      } as Response;
     }
     if (pathname === '/api/playbooks') {
       // eslint-disable-next-line @typescript-eslint/require-await
@@ -51,7 +55,13 @@ function mockFetch() {
       ok: true,
       status: 200,
       // eslint-disable-next-line @typescript-eslint/require-await
-      json: async () => ({ review_id: 'rev-1', status: 'RUNNING', decision: null, message: null, has_output: false }),
+      json: async () => ({
+        review_id: 'rev-1',
+        status: 'RUNNING',
+        decision: null,
+        message: null,
+        has_output: false,
+      }),
     } as Response;
   });
 }

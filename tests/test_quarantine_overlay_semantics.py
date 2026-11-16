@@ -233,7 +233,9 @@ def main() -> int:
     errors += gate_1_overlay_semantics(arch_text)
 
     print()
-    print("Gate 2: Rollback in-flight race closed — in-flight reviews finish, second sweep catches late completions")
+    print(
+        "Gate 2: Rollback in-flight race closed — in-flight reviews finish, second sweep catches late completions"
+    )
     errors += gate_2_inflight_rollback(arch_text)
 
     print()
@@ -243,8 +245,7 @@ def main() -> int:
     print()
     if errors:
         print(
-            f"FAIL — {len(errors)} check(s) did not pass. "
-            "See issue #23 for the remediation plan."
+            f"FAIL — {len(errors)} check(s) did not pass. See issue #23 for the remediation plan."
         )
         return 1
 

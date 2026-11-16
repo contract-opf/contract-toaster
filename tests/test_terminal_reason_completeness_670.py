@@ -180,9 +180,7 @@ def _unreadable_critic_body() -> str:
 def _run_primary_to_retry_exhaustion() -> dict[str, Any]:
     bundle = _bundle()
     model_id = bundle["playbook"]["metadata"]["primary_model_id"]
-    client = model_client.FakeBedrockClient(
-        {model_id: [_schema_invalid_primary_body()] * 8}
-    )
+    client = model_client.FakeBedrockClient({model_id: [_schema_invalid_primary_body()] * 8})
     return pp.run_primary_pass(
         review_id=REVIEW_ID,
         retrieved_precedent=[],
@@ -305,9 +303,10 @@ def test_the_retry_exhausted_terminal_names_the_token_the_product_explains(
     # The token was defined at both ends with no producer. Assert the two
     # ends it was already wired into, so this stops being a written
     # explanation for a failure mode nothing can label.
-    if reviews_module.STAGE_FAILURE_REASON_STATUS.get(
-        "structured_output_retry_exhausted"
-    ) != "ERROR":
+    if (
+        reviews_module.STAGE_FAILURE_REASON_STATUS.get("structured_output_retry_exhausted")
+        != "ERROR"
+    ):
         failures.append(
             "[1e] backend/src/reviews.py no longer maps this token to the terminal "
             "status the pass actually returns"
@@ -329,8 +328,7 @@ def test_a_transcript_that_never_proves_names_a_different_token(
     result = _run_primary_to_transcript_rejection()
     if result.get("status") != "ERROR":
         failures.append(
-            f"[2a] setup: a transcript that never proves is terminal; "
-            f"got {result.get('status')!r}"
+            f"[2a] setup: a transcript that never proves is terminal; got {result.get('status')!r}"
         )
         return
     if result.get("reason") is None:
@@ -385,8 +383,7 @@ def test_the_critic_terminal_names_its_own_reason(failures: list[str]) -> None:
         )
     if unreadable.get("reason") != cp.REASON_CRITIC_INVALID_JSON:
         failures.append(
-            f"[3d] expected {cp.REASON_CRITIC_INVALID_JSON!r}; "
-            f"got {unreadable.get('reason')!r}"
+            f"[3d] expected {cp.REASON_CRITIC_INVALID_JSON!r}; got {unreadable.get('reason')!r}"
         )
     # Issue #665's operator-visible behaviour is unchanged: whatever the pass
     # names is what the composition stores.
@@ -439,19 +436,13 @@ def test_the_classifier_names_something_for_every_last_error_it_can_see(
 def _run_review_with_a_schema_invalid_primary() -> dict[str, Any]:
     bundle = _bundle()
     primary_id = bundle["playbook"]["metadata"]["primary_model_id"]
-    client = model_client.FakeBedrockClient(
-        {primary_id: [_schema_invalid_primary_body()] * 8}
-    )
-    return review_spine.run_review(
-        _make_docx(SECTIONS), bundle, client, review_id=REVIEW_ID
-    )
+    client = model_client.FakeBedrockClient({primary_id: [_schema_invalid_primary_body()] * 8})
+    return review_spine.run_review(_make_docx(SECTIONS), bundle, client, review_id=REVIEW_ID)
 
 
 def _run_review_with_a_mismatched_transcript() -> dict[str, Any]:
     docx_bytes, client, _block_map = _mismatching_docx_and_client()
-    return review_spine.run_review(
-        docx_bytes, _bundle(), client, review_id=REVIEW_ID
-    )
+    return review_spine.run_review(docx_bytes, _bundle(), client, review_id=REVIEW_ID)
 
 
 def _row_for(result: dict[str, Any]) -> dict[str, Any]:
@@ -471,19 +462,14 @@ def _reason_explanations() -> dict[str, str]:
     if len(parts) != 2:
         raise AssertionError(f"REASON_EXPLANATIONS not found in {FRONTEND_REVIEW_SUBMISSION}")
     block = parts[1].split("const STAGE_EXPLANATIONS", 1)[0]
+    # Layout-independent on purpose (issue #90): Prettier is enforced now, and it
+    # moves a long string value onto the line after its key, so reading this
+    # source line by line broke on a pure re-layout. Match each
+    # `token: { cause: '...',` across whitespace instead; a comment line starts
+    # with `//`, so it cannot match.
     entries: dict[str, str] = {}
-    current: str | None = None
-    for line in block.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("//"):
-            continue
-        if stripped.endswith(": {"):
-            current = stripped[: -len(": {")]
-            continue
-        match = re.match(r"cause:\s*'(.*)',?$", stripped)
-        if current and match:
-            entries[current] = match.group(1)
-            current = None
+    for match in re.finditer(r"^[ \t]*(\w+):\s*\{\s*cause:\s*'((?:[^'\\\n]|\\.)*)',", block, re.M):
+        entries[match.group(1)] = match.group(2)
     return entries
 
 
@@ -512,8 +498,7 @@ def test_each_terminal_reaches_the_row_with_its_own_explanation(
     for label, (result, token) in expected.items():
         if result.get("status") != "ERROR":
             failures.append(
-                f"[5a] setup: the {label} run should fail closed; "
-                f"got {result.get('status')!r}"
+                f"[5a] setup: the {label} run should fail closed; got {result.get('status')!r}"
             )
             continue
         if result.get("reason") != token:

@@ -65,7 +65,7 @@ configure({ asyncUtilTimeout: 5_000 });
 // Assigned rather than defined so those `delete`s keep working.
 if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
   (window as unknown as { matchMedia: (q: string) => MediaQueryList }).matchMedia = (
-    query: string
+    query: string,
   ) =>
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     ({

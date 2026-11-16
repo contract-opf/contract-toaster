@@ -252,7 +252,9 @@ describe('playbooksStore — one catalog for every consumer (#72)', () => {
       // The sequence of DISTINCT snapshots this consumer was handed. React may
       // re-render a component for its own reasons; what must hold is the order
       // of the store states it observed, and that it observed all of them.
-      const distinct = snapshots.filter((snap, index) => index === 0 || snap !== snapshots[index - 1]);
+      const distinct = snapshots.filter(
+        (snap, index) => index === 0 || snap !== snapshots[index - 1],
+      );
       expect(distinct.map((snap) => snap.status)).toEqual(['loading', 'ready', 'ready']);
       expect(distinct[0]).toEqual({ status: 'loading', data: null, error: null });
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion

@@ -67,7 +67,11 @@ function stubReviewSubmissionFetch(routes: Record<string, unknown>): ReturnType<
     // `__httpStatus` (not `status`) so a stubbed REVIEW body — which has its
     // OWN `status` field ("DONE"/"CANCELLED"/…) — is never mistaken for this
     // wrapper.
-    if (entry && typeof entry === 'object' && '__httpStatus' in (entry as Record<string, unknown>)) {
+    if (
+      entry &&
+      typeof entry === 'object' &&
+      '__httpStatus' in (entry as Record<string, unknown>)
+    ) {
       const { __httpStatus, body } = entry as { __httpStatus: number; body: unknown };
       return {
         ok: __httpStatus >= 200 && __httpStatus < 300,
@@ -89,9 +93,7 @@ function docxFile(): File {
   });
 }
 
-async function submitAndReachResult(
-  fetchMock: ReturnType<typeof vi.fn>,
-): Promise<void> {
+async function submitAndReachResult(fetchMock: ReturnType<typeof vi.fn>): Promise<void> {
   render(<ReviewSubmission />);
   fireEvent.change(screen.getByTestId('review-file-input'), {
     target: { files: [docxFile()] },
@@ -121,7 +123,7 @@ describe('ReviewSubmission — disposition capture (issue #486)', () => {
     expect(block.textContent).toContain(
       // Optional, neutral, and about the record rather than about the reader
       // (issue #733).
-      'Record the outcome'
+      'Record the outcome',
     );
     expect(screen.getByTestId('review-disposition-accepted')).toBeInTheDocument();
     expect(screen.getByTestId('review-disposition-edited')).toBeInTheDocument();
@@ -294,7 +296,10 @@ function historyRow(overrides: Partial<HistoryRow>): HistoryRow {
 describe('ReviewHistory — the Disposition column (issue #486)', () => {
   it('renders "Not recorded" — never the pre-correction "Awaiting review" nag copy', async () => {
     stubHistoryFetch({
-      'GET /api/reviews': { status: 200, body: { reviews: [historyRow({ attorney_disposition: null })] } },
+      'GET /api/reviews': {
+        status: 200,
+        body: { reviews: [historyRow({ attorney_disposition: null })] },
+      },
     });
     render(<ReviewHistory />);
 
@@ -327,7 +332,11 @@ describe('ReviewHistory — the Disposition column (issue #486)', () => {
       },
       'POST /api/reviews/rev-h1/disposition': {
         status: 200,
-        body: { review_id: 'rev-h1', attorney_disposition: 'REJECTED', legal_triage_status: 'PENDING_TRIAGE' },
+        body: {
+          review_id: 'rev-h1',
+          attorney_disposition: 'REJECTED',
+          legal_triage_status: 'PENDING_TRIAGE',
+        },
       },
     });
     render(<ReviewHistory />);
@@ -335,9 +344,7 @@ describe('ReviewHistory — the Disposition column (issue #486)', () => {
     await screen.findByTestId('history-row-rev-h1');
     // Sanity check on the value BEFORE the click — the assertion after the
     // click is only meaningful if this one is different.
-    expect(screen.getByTestId('history-disposition-value-rev-h1').textContent).toBe(
-      'Not recorded',
-    );
+    expect(screen.getByTestId('history-disposition-value-rev-h1').textContent).toBe('Not recorded');
 
     fireEvent.click(screen.getByTestId('history-disposition-rejected-rev-h1'));
 

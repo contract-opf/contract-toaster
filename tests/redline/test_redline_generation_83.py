@@ -91,10 +91,7 @@ def _import_modules():
     return redline_generate, leakage_scan, missing
 
 
-_SEC8_TEXT = (
-    "Each party's aggregate liability under this Agreement shall not "
-    "exceed $150,000."
-)
+_SEC8_TEXT = "Each party's aggregate liability under this Agreement shall not exceed $150,000."
 _SEC9_TEXT = "This Agreement shall be governed by the laws of Delaware."
 # A THIRD physical paragraph, so the single logical block below carries two
 # physical `<w:p>` joins. That is what lets part 2 express a compilable edit
@@ -281,7 +278,9 @@ def _part_1_known_issue_list(rg, failures: list) -> None:
     if result.get("decision") != "REQUEST_CHANGE":
         failures.append(f"[1a2] Expected decision=REQUEST_CHANGE, got {result.get('decision')!r}")
     if result.get("analysis_report") is not None:
-        failures.append(f"[1a3] Expected no analysis_report (nothing flag-only), got {result['analysis_report']}")
+        failures.append(
+            f"[1a3] Expected no analysis_report (nothing flag-only), got {result['analysis_report']}"
+        )
     docx_bytes = result.get("docx_bytes")
     if not isinstance(docx_bytes, (bytes, bytearray)) or not docx_bytes:
         failures.append(f"[1b] Expected non-empty docx bytes, got {docx_bytes!r}")
@@ -296,9 +295,9 @@ def _part_1_known_issue_list(rg, failures: list) -> None:
         del_elements = doc_root.findall(f".//{_qn('del')}")
         if not ins_elements or not del_elements:
             failures.append("[1c] Expected at least one <w:ins> and <w:del> pair.")
-        all_text = "".join(
-            (t.text or "") for t in doc_root.findall(f".//{_qn('t')}")
-        ) + "".join((t.text or "") for t in doc_root.findall(f".//{_qn('delText')}"))
+        all_text = "".join((t.text or "") for t in doc_root.findall(f".//{_qn('t')}")) + "".join(
+            (t.text or "") for t in doc_root.findall(f".//{_qn('delText')}")
+        )
         if "is uncapped" not in all_text:
             failures.append("[1d] Inserted replacement text missing from document.")
         if "shall not exceed $150,000" not in all_text:
@@ -321,8 +320,7 @@ def _part_1_known_issue_list(rg, failures: list) -> None:
             )
             if "Restores the standard liability cap" not in footnote_text:
                 failures.append(
-                    f"[1h] Footnote rationale text not found in footnotes.xml: "
-                    f"{footnote_text!r}"
+                    f"[1h] Footnote rationale text not found in footnotes.xml: {footnote_text!r}"
                 )
 
         # --- redundant export marker: every-page header/footer -------------
@@ -373,7 +371,9 @@ def _part_2_result_mapping(rg, failures: list) -> None:
     if result.get("status") != "ERROR":
         failures.append(f"[2a] Expected status=ERROR (zero applied), got {result}")
     if result.get("reason") != rg.REASON_BLOCK_EDITS_NOT_APPLIED:
-        failures.append(f"[2b] Expected reason=block_edits_not_applied, got {result.get('reason')!r}")
+        failures.append(
+            f"[2b] Expected reason=block_edits_not_applied, got {result.get('reason')!r}"
+        )
     if result.get("docx_bytes") is not None:
         failures.append("[2c] Zero applied must never deliver docx_bytes.")
     if "decision" in result:
@@ -400,7 +400,9 @@ def _part_2_result_mapping(rg, failures: list) -> None:
     mixed_result = rg.generate_redline_from_blocks(
         reconciled_result=_reconciled(
             [
-                _make_issue("sec-8", rationale="Restores the standard liability cap.", issue_key="I1"),
+                _make_issue(
+                    "sec-8", rationale="Restores the standard liability cap.", issue_key="I1"
+                ),
                 _make_issue("sec-9", rationale="Governing law should be mutual.", issue_key="I2"),
             ],
             block_patches=_patches(
@@ -415,22 +417,36 @@ def _part_2_result_mapping(rg, failures: list) -> None:
         normalized_docx_bytes=_base_draft_docx_bytes(),
     )
     if mixed_result.get("status") != "OK":
-        failures.append(f"[2i] Expected status=OK (partial delivery, >=1 applied), got {mixed_result}")
+        failures.append(
+            f"[2i] Expected status=OK (partial delivery, >=1 applied), got {mixed_result}"
+        )
     if mixed_result.get("decision") != "REQUEST_CHANGE":
-        failures.append(f"[2j] Expected decision=REQUEST_CHANGE, got {mixed_result.get('decision')!r}")
+        failures.append(
+            f"[2j] Expected decision=REQUEST_CHANGE, got {mixed_result.get('decision')!r}"
+        )
     mixed_docx = mixed_result.get("docx_bytes")
     if not mixed_docx:
-        failures.append("[2k] Expected partial redline docx_bytes alongside the analysis report (issue #203).")
+        failures.append(
+            "[2k] Expected partial redline docx_bytes alongside the analysis report (issue #203)."
+        )
     else:
-        doc_root = ET.fromstring(zipfile.ZipFile(io.BytesIO(bytes(mixed_docx))).read("word/document.xml"))  # noqa: S314
+        doc_root = ET.fromstring(  # noqa: S314
+            zipfile.ZipFile(io.BytesIO(bytes(mixed_docx))).read("word/document.xml")
+        )
         all_text = "".join((t.text or "") for t in doc_root.findall(f".//{_qn('t')}"))
         if "is uncapped" not in all_text:
-            failures.append("[2l] The compilable edit should still have applied in the partial delivery.")
+            failures.append(
+                "[2l] The compilable edit should still have applied in the partial delivery."
+            )
     mixed_report = mixed_result.get("analysis_report")
     if not mixed_report:
-        failures.append(f"[2m] Expected an analysis_report naming the refused edit, got {mixed_report}")
+        failures.append(
+            f"[2m] Expected an analysis_report naming the refused edit, got {mixed_report}"
+        )
     elif len(mixed_report.get("changes_not_applied", [])) != 1:
-        failures.append(f"[2n] Expected exactly 1 changes_not_applied entry, got {mixed_report.get('changes_not_applied')}")
+        failures.append(
+            f"[2n] Expected exactly 1 changes_not_applied entry, got {mixed_report.get('changes_not_applied')}"
+        )
     elif mixed_report["changes_not_applied"][0].get("section_ref") != "sec-9":
         failures.append(
             f"[2n2] The refused edit's OWN issue must be the one reported, got "
@@ -453,8 +469,13 @@ def _part_2_result_mapping(rg, failures: list) -> None:
         corpus=corpus,
         normalized_docx_bytes=_base_draft_docx_bytes(),
     )
-    if flag_only_result.get("status") != "OK" or flag_only_result.get("decision") != "REQUEST_CHANGE":
-        failures.append(f"[2o] Expected a clean OK/REQUEST_CHANGE (nothing to attempt), got {flag_only_result}")
+    if (
+        flag_only_result.get("status") != "OK"
+        or flag_only_result.get("decision") != "REQUEST_CHANGE"
+    ):
+        failures.append(
+            f"[2o] Expected a clean OK/REQUEST_CHANGE (nothing to attempt), got {flag_only_result}"
+        )
     if flag_only_result.get("docx_bytes") is not None:
         failures.append("[2p] An all-flag-only issue list must never produce docx_bytes.")
     # Issue #585 review round 1, finding 2: pre-#585 this asserted NO
@@ -490,7 +511,7 @@ def _part_3_hostile_text_inert_literal_runs(rg, failures: list) -> None:
     scan passes."""
     hostile_text = (
         '{ HYPERLINK "https://attacker.example/exfiltrate" } '
-        "<w:fldChar w:fldCharType=\"begin\"/> & < > \" ' "
+        '<w:fldChar w:fldCharType="begin"/> & < > " \' '
         "{ REF bookmark \\* MERGEFORMAT }"
     )
     issues = [
@@ -512,7 +533,9 @@ def _part_3_hostile_text_inert_literal_runs(rg, failures: list) -> None:
     )
 
     if result["status"] != "OK":
-        failures.append(f"[3a] Expected status=OK (hostile TEXT is not a leak/scan hit), got {result}")
+        failures.append(
+            f"[3a] Expected status=OK (hostile TEXT is not a leak/scan hit), got {result}"
+        )
         return
     docx_bytes = result.get("docx_bytes")
     if not docx_bytes:
@@ -564,9 +587,7 @@ def _part_4_leakage_gates_generation_and_accept(rg, failures: list) -> None:
     `generate_redline`, which is the entry point `review_spine` routes a
     transcript-less result to."""
     system_prompt_secret = "You are the confidential internal review assistant codenamed FALCON."
-    corpus = rg.leakage_scan.ConfidentialCorpus(
-        system_prompt_ngrams=[system_prompt_secret]
-    )
+    corpus = rg.leakage_scan.ConfidentialCorpus(system_prompt_ngrams=[system_prompt_secret])
 
     # --- REQUEST_CHANGE path: leakage planted in a rationale field --------
     issues = [_make_issue("sec-8", rationale=f"Internal note: {system_prompt_secret}")]
@@ -580,9 +601,7 @@ def _part_4_leakage_gates_generation_and_accept(rg, failures: list) -> None:
         normalized_docx_bytes=_base_draft_docx_bytes(),
     )
     if result["status"] != "ERROR":
-        failures.append(
-            f"[4a] Expected ERROR on a planted leak, got {result}"
-        )
+        failures.append(f"[4a] Expected ERROR on a planted leak, got {result}")
     if result.get("docx_bytes") is not None:
         failures.append("[4b] A leakage-blocked review must not produce a docx.")
     if "decision" in result:

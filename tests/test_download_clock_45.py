@@ -28,6 +28,7 @@ Checks (exit 1 on any failure):
      (no clock passed) still works end to end.
   9. `generate_presigned_download_url` forwards its clock to the limiter.
 """
+
 import datetime as dt
 import os
 import sys
@@ -89,12 +90,10 @@ class ClockSeam(unittest.TestCase):
         )
 
     def counters(self, sub: str = "u") -> dict:
-        item = self.client.get_item(
-            TableName=USERS_TABLE, Key={"cognito_sub": {"S": sub}}
-        ).get("Item", {})
-        return {
-            k[len(PREFIX):]: int(v["N"]) for k, v in item.items() if k.startswith(PREFIX)
-        }
+        item = self.client.get_item(TableName=USERS_TABLE, Key={"cognito_sub": {"S": sub}}).get(
+            "Item", {}
+        )
+        return {k[len(PREFIX) :]: int(v["N"]) for k, v in item.items() if k.startswith(PREFIX)}
 
     def fill(self, day: str, sub: str = "u") -> None:
         self.client.put_item(
@@ -147,9 +146,7 @@ class ClockSeam(unittest.TestCase):
         self.charge(at(2028, 2, 29, 0, 0, 0))
         self.charge(at(2028, 2, 29, 23, 59, 59))
         self.charge(at(2028, 3, 1, 0, 0, 0))
-        self.assertEqual(
-            self.counters(), {"2028-02-28": 1, "2028-02-29": 2, "2028-03-01": 1}
-        )
+        self.assertEqual(self.counters(), {"2028-02-28": 1, "2028-02-29": 2, "2028-03-01": 1})
 
     def test_4b_non_leap_year_has_no_feb_29(self) -> None:
         self.charge(at(2027, 2, 28, 23, 59, 59))
@@ -182,9 +179,7 @@ class ClockSeam(unittest.TestCase):
         self.charge(at(2027, 3, 14, 1, 30, 0, tz=ny))  # 06:30 UTC 03-14
         self.charge(at(2027, 3, 14, 23, 59, 59))
         self.charge(at(2027, 3, 15, 0, 0, 0))
-        self.assertEqual(
-            self.counters(), {"2027-03-13": 1, "2027-03-14": 2, "2027-03-15": 1}
-        )
+        self.assertEqual(self.counters(), {"2027-03-13": 1, "2027-03-14": 2, "2027-03-15": 1})
 
     # 7
     def test_7_naive_clock_value_is_refused(self) -> None:
@@ -213,10 +208,12 @@ class ClockSeam(unittest.TestCase):
         sentinel = at(2027, 3, 9, 12, 0, 0)
         s3 = mock.MagicMock()
         s3.generate_presigned_url.return_value = "https://example.invalid/x"
-        with mock.patch.object(download_module, "_check_per_user_limits") as chk, \
-                mock.patch.object(download_module, "_validate_s3_key_bound_to_review"), \
-                mock.patch.object(download_module, "_check_owner_or_admin"), \
-                mock.patch.object(download_module, "_get_outputs_bucket", return_value="b"):
+        with (
+            mock.patch.object(download_module, "_check_per_user_limits") as chk,
+            mock.patch.object(download_module, "_validate_s3_key_bound_to_review"),
+            mock.patch.object(download_module, "_check_owner_or_admin"),
+            mock.patch.object(download_module, "_get_outputs_bucket", return_value="b"),
+        ):
             download_module.generate_presigned_download_url(
                 review_id="r",
                 review_owner_sub="o",

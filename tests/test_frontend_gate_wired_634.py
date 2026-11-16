@@ -333,7 +333,9 @@ def check_workflow_runs_gate(path: Path | None, job_id: str | None) -> list[str]
         "#599's tab rename sat red on main unnoticed. Add a CI job that runs "
         "`bash scripts/check-frontend.sh`."
     )
-    failures = _assert(path is not None and job_id is not None, "a workflow job runs the frontend gate", detail)
+    failures = _assert(
+        path is not None and job_id is not None, "a workflow job runs the frontend gate", detail
+    )
     if path is not None and job_id is not None:
         print(f"         (found: {path.name} job `{job_id}`)")
     return failures
@@ -368,8 +370,7 @@ def check_gate_triggers(path: Path | None) -> list[str]:
         failures += _assert(
             "frontend/**" in header and GATE_INVOCATION in header,
             f"{path.name}'s paths filter still covers frontend/** and the gate script",
-            "A paths filter that omits frontend/** re-opens exactly the hole "
-            "#634 exists to close.",
+            "A paths filter that omits frontend/** re-opens exactly the hole #634 exists to close.",
         )
     else:
         print("  [PASS] the gate workflow has no paths filter to hide a change behind")
@@ -386,7 +387,9 @@ def check_gate_step_not_piped(path: Path | None, body: str) -> list[str]:
     offenders = [
         line.strip()
         for line in body.splitlines()
-        if GATE_INVOCATION in line and not line.lstrip().startswith("#") and "|" in line.split(GATE_INVOCATION, 1)[1]
+        if GATE_INVOCATION in line
+        and not line.lstrip().startswith("#")
+        and "|" in line.split(GATE_INVOCATION, 1)[1]
     ]
     return _assert(
         not offenders,
@@ -504,8 +507,7 @@ def check_lockfile_mirrors_engines() -> list[str]:
     failures += _assert(
         declared is not None,
         "frontend/package.json declares an `engines` block",
-        "Issue #112: frontend/.npmrc's engine-strict=true has nothing to "
-        "enforce without it.",
+        "Issue #112: frontend/.npmrc's engine-strict=true has nothing to enforce without it.",
     )
     failures += _assert(
         declared == locked,

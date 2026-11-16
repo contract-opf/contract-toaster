@@ -135,8 +135,11 @@ def _context_block(doc: dict, roster) -> str:
     """The composed CONTEXT block, found by its content rather than by
     index: `compose_opf_system_blocks` omits absent blocks, so POSITION IS
     NOT IDENTITY (that function's own docstring)."""
-    blocks = [b for b in opf_prompt.compose_opf_system_blocks(doc, entity_roster=roster)
-              if '"perspective"' in b]
+    blocks = [
+        b
+        for b in opf_prompt.compose_opf_system_blocks(doc, entity_roster=roster)
+        if '"perspective"' in b
+    ]
     assert len(blocks) == 1, f"expected exactly one CONTEXT block, got {len(blocks)}"
     return blocks[0]
 
@@ -233,9 +236,7 @@ class TestFlatRecognitionSet(unittest.TestCase):
         deployment's roster rather than falling back to nothing."""
         doc = _fixture()
         doc["perspective"]["party"] = "   "
-        self.assertEqual(
-            opf_prompt.resolve_party_recognition_set(doc, [SIBLING]), [SIBLING]
-        )
+        self.assertEqual(opf_prompt.resolve_party_recognition_set(doc, [SIBLING]), [SIBLING])
 
     def test_nothing_on_either_side_renders_the_perspective_unchanged(self):
         """No party and no roster: there is no set to render, so the block
@@ -401,9 +402,7 @@ class TestStore(RosterStoreTestBase):
 
     def test_a_saved_roster_is_what_the_review_path_resolves(self):
         entity_roster.set_entity_roster([SIBLING, FORMER_NAME], ADMIN, self.ddb)
-        self.assertEqual(
-            entity_roster.resolve_entity_roster(self.ddb), (SIBLING, FORMER_NAME)
-        )
+        self.assertEqual(entity_roster.resolve_entity_roster(self.ddb), (SIBLING, FORMER_NAME))
         self.assertEqual(
             entity_roster.get_entity_roster(ADMIN, self.ddb)["entities"],
             [SIBLING, FORMER_NAME],
@@ -484,7 +483,6 @@ class TestStore(RosterStoreTestBase):
         self.assertEqual(h2["added"], ["NewCo Inc"])
         self.assertEqual(h2["removed"], [FORMER_NAME])
         self.assertEqual(res2["history"][1]["added"], [SIBLING, FORMER_NAME])
-
 
 
 class TestRejectedInput(RosterStoreTestBase):
@@ -592,9 +590,7 @@ class TestDegradation(RosterStoreTestBase):
 class TestHttpSurface(RosterStoreTestBase):
     def setUp(self):
         super().setUp()
-        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = (
-            lambda: self.ddb
-        )
+        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = lambda: self.ddb
         self.client = TestClient(backend_main.app)
 
     def tearDown(self):
@@ -606,9 +602,7 @@ class TestHttpSurface(RosterStoreTestBase):
 
     def test_round_trip_over_http(self):
         self._as(ADMIN)
-        put = self.client.put(
-            "/api/admin/entity-roster", json={"entities": [SIBLING, FORMER_NAME]}
-        )
+        put = self.client.put("/api/admin/entity-roster", json={"entities": [SIBLING, FORMER_NAME]})
         self.assertEqual(put.status_code, 200, put.text)
         self.assertEqual(put.json()["entities"], [SIBLING, FORMER_NAME])
 
@@ -635,9 +629,7 @@ class TestHttpSurface(RosterStoreTestBase):
     def test_a_missing_entities_field_is_a_400_and_not_a_silent_clear(self):
         self._as(ADMIN)
         entity_roster.set_entity_roster([SIBLING], ADMIN, self.ddb)
-        self.assertEqual(
-            self.client.put("/api/admin/entity-roster", json={}).status_code, 400
-        )
+        self.assertEqual(self.client.put("/api/admin/entity-roster", json={}).status_code, 400)
         self.assertEqual(entity_roster.resolve_entity_roster(self.ddb), (SIBLING,))
 
 
@@ -678,11 +670,13 @@ class TestPipelineActuallyWiresIt(RosterStoreTestBase):
 
         docx_bytes = dts._build_draft_docx({"sec-8": dts._SEC8_DRAFT_TEXT})
         client = dts._fake_client(
-            dts._primary_request_change_response(docx_bytes), dts._critic_no_delta_response(docx_bytes)
+            dts._primary_request_change_response(docx_bytes),
+            dts._critic_no_delta_response(docx_bytes),
         )
         s3 = dts.FakeS3({f"uploads/user-1/{dts.REVIEW_ID}/in.docx": docx_bytes})
-        with patch.object(pipeline_runner, "_settle_reservation"), patch.object(
-            pipeline_runner.review_spine, "run_review", spy
+        with (
+            patch.object(pipeline_runner, "_settle_reservation"),
+            patch.object(pipeline_runner.review_spine, "run_review", spy),
         ):
             pipeline_runner.run_real_pipeline(
                 dts.REVIEW_ID,

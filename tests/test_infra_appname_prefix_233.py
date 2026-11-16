@@ -70,14 +70,22 @@ CUSTOM_HOSTED_DOMAIN = "acme-legal.example"
 CUSTOM_ADMIN_EMAIL = "gc@acme-legal.example"
 
 CUSTOM_CONTEXT = [
-    "--context", "appName=acmecorp",
-    "--context", "githubOwner=acme-org",
-    "--context", "githubRepo=acme-toaster",
-    "--context", "alarmsEmail=alerts@acme.example",
-    "--context", "appDomain=acme.example",
-    "--context", f"hostedDomain={CUSTOM_HOSTED_DOMAIN}",
-    "--context", f"adminEmail={CUSTOM_ADMIN_EMAIL}",
-    "--context", f"allowedEmailDomains={CUSTOM_HOSTED_DOMAIN}",
+    "--context",
+    "appName=acmecorp",
+    "--context",
+    "githubOwner=acme-org",
+    "--context",
+    "githubRepo=acme-toaster",
+    "--context",
+    "alarmsEmail=alerts@acme.example",
+    "--context",
+    "appDomain=acme.example",
+    "--context",
+    f"hostedDomain={CUSTOM_HOSTED_DOMAIN}",
+    "--context",
+    f"adminEmail={CUSTOM_ADMIN_EMAIL}",
+    "--context",
+    f"allowedEmailDomains={CUSTOM_HOSTED_DOMAIN}",
 ]
 
 
@@ -99,11 +107,15 @@ def _ensure_npm_install() -> list[str]:
     if not node_modules.is_dir():
         print("  (node_modules absent — running npm install first …)")
         install = subprocess.run(
-            ["npm", "install"], cwd=INFRA, capture_output=True, text=True,  # noqa: S607
+            ["npm", "install"],  # noqa: S607
+            cwd=INFRA,
+            capture_output=True,
+            text=True,
         )
         if install.returncode != 0:
             return _assert(
-                False, "npm install succeeded in infra/",
+                False,
+                "npm install succeeded in infra/",
                 f"stderr: {install.stderr[-500:]}",
             )
     return []
@@ -229,7 +241,12 @@ def check_b_default_context_preserves_current_names() -> list[str]:
     )
     combined_output = no_context_result.stdout + no_context_result.stderr
     for missing_key in (
-        "githubOwner", "alarmsEmail", "appDomain", "adminEmail", "hostedDomain", "allowedEmailDomains",
+        "githubOwner",
+        "alarmsEmail",
+        "appDomain",
+        "adminEmail",
+        "hostedDomain",
+        "allowedEmailDomains",
     ):
         failures += _assert(
             missing_key in combined_output,
@@ -357,7 +374,9 @@ def check_d_codebuild_owner_repo_from_context() -> list[str]:
     failures: list[str] = []
 
     templates = _collect_templates()
-    failures += _assert(len(templates) > 0, "reusing custom-context synth output (run Check C first)")
+    failures += _assert(
+        len(templates) > 0, "reusing custom-context synth output (run Check C first)"
+    )
     if failures:
         return failures
 
@@ -381,7 +400,9 @@ def check_e_alarm_email_from_context() -> list[str]:
     failures: list[str] = []
 
     templates = _collect_templates()
-    failures += _assert(len(templates) > 0, "reusing custom-context synth output (run Check C first)")
+    failures += _assert(
+        len(templates) > 0, "reusing custom-context synth output (run Check C first)"
+    )
     if failures:
         return failures
 
@@ -405,7 +426,9 @@ def check_f_callback_urls_from_context() -> list[str]:
     failures: list[str] = []
 
     templates = _collect_templates()
-    failures += _assert(len(templates) > 0, "reusing custom-context synth output (run Check C first)")
+    failures += _assert(
+        len(templates) > 0, "reusing custom-context synth output (run Check C first)"
+    )
     if failures:
         return failures
 
@@ -434,7 +457,9 @@ def check_g_hosted_domain_enforcement_unaffected() -> list[str]:
     failures: list[str] = []
 
     templates = _collect_templates()
-    failures += _assert(len(templates) > 0, "reusing custom-context synth output (run Check C first)")
+    failures += _assert(
+        len(templates) > 0, "reusing custom-context synth output (run Check C first)"
+    )
     if failures:
         return failures
 

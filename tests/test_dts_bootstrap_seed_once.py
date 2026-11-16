@@ -79,7 +79,9 @@ class TestSeedOnce(unittest.TestCase):
             dts_bootstrap.seed_users_and_playbook()
 
     def _user(self, username: str):
-        return self.users.get_item(Key={"cognito_sub": demo_auth.local_user_sub(username)}).get("Item")
+        return self.users.get_item(Key={"cognito_sub": demo_auth.local_user_sub(username)}).get(
+            "Item"
+        )
 
     def _setting(self, setting_id: str):
         return self.settings.get_item(Key={"setting_id": setting_id}).get("Item")
@@ -100,19 +102,28 @@ class TestSeedOnce(unittest.TestCase):
         self.assertIsNone(self._user("user"))
 
     def test_existing_box_without_a_marker_is_not_reseeded(self) -> None:
-        self.users.put_item(Item={
-            "cognito_sub": "local:boss", "username": "boss", "user_type": "password",
-            "role": "admin", "is_admin": True, "status": "active",
-        })
+        self.users.put_item(
+            Item={
+                "cognito_sub": "local:boss",
+                "username": "boss",
+                "user_type": "password",
+                "role": "admin",
+                "is_admin": True,
+                "status": "active",
+            }
+        )
         self._run_bootstrap()
         self.assertIsNone(self._user("admin"))
         self.assertIsNone(self._user("user"))
         self.assertIsNotNone(self._setting(demo_auth.BOOTSTRAP_SEEDED_SETTING_ID))
 
     def test_existing_auth_mode_is_never_overwritten(self) -> None:
-        self.settings.put_item(Item={
-            "setting_id": demo_auth.AUTH_MODE_SETTING_ID, "auth_mode": "sso",
-        })
+        self.settings.put_item(
+            Item={
+                "setting_id": demo_auth.AUTH_MODE_SETTING_ID,
+                "auth_mode": "sso",
+            }
+        )
         self._run_bootstrap()
         self.assertEqual(self._setting(demo_auth.AUTH_MODE_SETTING_ID)["auth_mode"], "sso")
         self._run_bootstrap()

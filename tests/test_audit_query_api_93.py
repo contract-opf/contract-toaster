@@ -109,9 +109,7 @@ if str(BACKEND_ROOT) not in sys.path:
 os.environ.setdefault("USERS_TABLE", "contract-toaster-users-audit253-test")
 os.environ.setdefault("AUDIT_TABLE", "contract-toaster-audit-audit253-test")
 os.environ.setdefault("REVIEWS_TABLE", "contract-toaster-reviews-audit253-test")
-os.environ.setdefault(
-    "PLAYBOOK_VERSIONS_TABLE", "contract-toaster-playbook-versions-audit253-test"
-)
+os.environ.setdefault("PLAYBOOK_VERSIONS_TABLE", "contract-toaster-playbook-versions-audit253-test")
 
 import boto3  # noqa: E402, I001
 from fastapi.testclient import TestClient  # noqa: E402
@@ -149,12 +147,11 @@ SENTINEL_S3_KEY = "outputs/SENTINEL-S3-KEY/out.docx"
 # passing implementation is not a detector.
 # ---------------------------------------------------------------------------
 
+
 def assert_no_scans(calls: list[tuple[str, str, Any]]) -> None:
     scanned = sorted({name for kind, name, _ in calls if kind == "scan"})
     if scanned:
-        raise AssertionError(
-            "GET /api/audit performed a full-table Scan on: " + ", ".join(scanned)
-        )
+        raise AssertionError("GET /api/audit performed a full-table Scan on: " + ", ".join(scanned))
 
 
 class _CallLoggingTable:
@@ -308,9 +305,7 @@ class AuditQueryTestBase(unittest.TestCase):
         self.spy = _CallLoggingResource(self.ddb)
 
         self.client = TestClient(backend_main.app)
-        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = (
-            lambda: self.spy
-        )
+        backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = lambda: self.spy
         self._authenticate_as(ADMIN_SUB)
 
     def tearDown(self) -> None:
@@ -352,6 +347,7 @@ class AuditQueryTestBase(unittest.TestCase):
         Seeded through the RAW resource, not the spy, so fixture writes never
         pollute the access log the efficiency assertion reads.
         """
+
         def write() -> None:
             review_routes._write_audit_row(
                 self.ddb,
@@ -505,9 +501,7 @@ class MonthActivityTests(AuditQueryTestBase):
         self.assertEqual([row["target"] for row in narrowed["results"]], ["rev-b"])
 
     def test_a_non_numeric_timestamp_bound_is_a_400(self) -> None:
-        self.assertEqual(
-            self._get(query="month_activity", since="last-tuesday").status_code, 400
-        )
+        self.assertEqual(self._get(query="month_activity", since="last-tuesday").status_code, 400)
 
 
 class ReviewHistoryTests(AuditQueryTestBase):
@@ -619,9 +613,7 @@ class DocumentAccessTests(AuditQueryTestBase):
         body = self._ok(query="document_access", review_id="rev-a")
         self.assertIs(body["denials_recorded"], False)
         self.assertIn("access_denied", body["actions"])
-        self.assertEqual(
-            [r for r in body["results"] if r["action"] == "access_denied"], []
-        )
+        self.assertEqual([r for r in body["results"] if r["action"] == "access_denied"], [])
 
 
 class ReviewClauseIdTests(AuditQueryTestBase):
@@ -706,9 +698,7 @@ class RollbackPopulationTests(AuditQueryTestBase):
         self._seed_population()
         for component in audit_queries.ROLLBACK_UNINDEXED_COMPONENTS:
             with self.subTest(component=component):
-                resp = self._get(
-                    query="rollback_population", component=component, value="whatever"
-                )
+                resp = self._get(query="rollback_population", component=component, value="whatever")
                 self.assertEqual(resp.status_code, 400, resp.text)
                 self.assertIn(component, resp.text)
         # And the refusals really did leave the table alone.
@@ -884,9 +874,7 @@ class BreakGlassTests(AuditQueryTestBase):
         self._audit(action="review_output_downloaded", target="rev-c")
 
         body = self._ok(query="break_glass")
-        self.assertEqual(
-            sorted(row["target"] for row in body["results"]), ["rev-a", "rev-b"]
-        )
+        self.assertEqual(sorted(row["target"] for row in body["results"]), ["rev-a", "rev-b"])
 
 
 class ModelRecertificationTests(AuditQueryTestBase):

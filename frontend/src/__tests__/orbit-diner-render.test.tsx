@@ -240,31 +240,27 @@ describe('issue #719 — keyboardShortcuts is false (owner decision H6)', () => 
 });
 
 describe('issue #719 — the console mounts once', () => {
-  it(
-    'the same DOM node survives LOADED through RUNNING to DONE',
-    async () => {
-      const atLoaded = await loaded();
+  it('the same DOM node survives LOADED through RUNNING to DONE', async () => {
+    const atLoaded = await loaded();
 
-      fireEvent.click(screen.getByTestId('review-submit-button'));
-      await waitFor(() => expect(posts).toHaveLength(1));
-      await waitFor(() => expect(console_()).toHaveAttribute('data-status', 'running'), {
-        timeout: 8000,
-      });
-      const atRunning = console_();
+    fireEvent.click(screen.getByTestId('review-submit-button'));
+    await waitFor(() => expect(posts).toHaveLength(1));
+    await waitFor(() => expect(console_()).toHaveAttribute('data-status', 'running'), {
+      timeout: 8000,
+    });
+    const atRunning = console_();
 
-      pollStatus = 'DONE';
-      await waitFor(() => expect(console_()).toHaveAttribute('data-status', 'done'), {
-        timeout: 8000,
-      });
-      const atDone = console_();
+    pollStatus = 'DONE';
+    await waitFor(() => expect(console_()).toHaveAttribute('data-status', 'done'), {
+      timeout: 8000,
+    });
+    const atDone = console_();
 
-      // Identity, not equality: a remount would produce a fresh node carrying
-      // exactly the same markup, and only `toBe` can tell the two apart.
-      expect(atRunning).toBe(atLoaded);
-      expect(atDone).toBe(atLoaded);
-    },
-    14_000,
-  );
+    // Identity, not equality: a remount would produce a fresh node carrying
+    // exactly the same markup, and only `toBe` can tell the two apart.
+    expect(atRunning).toBe(atLoaded);
+    expect(atDone).toBe(atLoaded);
+  }, 14_000);
 });
 
 // ---------------------------------------------------------------------------
@@ -310,10 +306,7 @@ const DONE_LINEAGE = {
  *  hand-written copy of it. */
 function expectedRows(): string[] {
   return receiptText(
-    receiptLines(
-      { review_id: 'rev-1', status: 'DONE', ...DONE_LINEAGE },
-      LONG_LABEL,
-    ),
+    receiptLines({ review_id: 'rev-1', status: 'DONE', ...DONE_LINEAGE }, LONG_LABEL),
   ).split('\n');
 }
 
@@ -352,68 +345,64 @@ async function openReceipt(): Promise<HTMLElement> {
 }
 
 describe('issue #721 — the console prints and exports the canonical receipt', () => {
-  it(
-    'hands copy-as-text and the PNG the same array, and confirms inside the dialog',
-    async () => {
-      const drawn: string[] = [];
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars, @typescript-eslint/require-await
-      const writeText = vi.fn(async (_text: string) => undefined);
-      vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
-      vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
-        fillStyle: '',
-        font: '',
-        textBaseline: '',
-        fillRect: vi.fn(),
-        scale: vi.fn(),
-        fillText: (text: string) => drawn.push(text),
-      } as unknown as CanvasRenderingContext2D);
-      vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue(
-        'data:image/png;base64,STUB',
-      );
-      const downloads: HTMLAnchorElement[] = [];
-      vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
-        this: HTMLAnchorElement,
-      ) {
-        downloads.push(this);
-      });
+  it('hands copy-as-text and the PNG the same array, and confirms inside the dialog', async () => {
+    const drawn: string[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars, @typescript-eslint/require-await
+    const writeText = vi.fn(async (_text: string) => undefined);
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      fillStyle: '',
+      font: '',
+      textBaseline: '',
+      fillRect: vi.fn(),
+      scale: vi.fn(),
+      fillText: (text: string) => drawn.push(text),
+    } as unknown as CanvasRenderingContext2D);
+    vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue(
+      'data:image/png;base64,STUB',
+    );
+    const downloads: HTMLAnchorElement[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      downloads.push(this);
+    });
 
-      const dialog = await openReceipt();
-      const rows = expectedRows();
+    const dialog = await openReceipt();
+    const rows = expectedRows();
 
-      // The printed slip is the canonical rendering, not text rebuilt from
-      // whatever labels happen to be on screen.
-      expect(screen.getByTestId('review-receipt-text').textContent).toBe(rows.join('\n'));
+    // The printed slip is the canonical rendering, not text rebuilt from
+    // whatever labels happen to be on screen.
+    expect(screen.getByTestId('review-receipt-text').textContent).toBe(rows.join('\n'));
 
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Copy as text' }));
-      await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Save image' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Copy as text' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save image' }));
 
-      // Same array, from the same call: what the clipboard got is exactly
-      // what the canvas drew, character for character.
-      expect(writeText.mock.calls[0][0]).toBe(rows.join('\n'));
-      expect(drawn).toEqual(rows);
+    // Same array, from the same call: what the clipboard got is exactly
+    // what the canvas drew, character for character.
+    expect(writeText.mock.calls[0][0]).toBe(rows.join('\n'));
+    expect(drawn).toEqual(rows);
 
-      // The saved file keeps `receiptFilename()`'s shape -- the console never
-      // names the file itself.
-      expect(downloads[downloads.length - 1]?.download).toBe('toast-receipt-rev-1.png');
+    // The saved file keeps `receiptFilename()`'s shape -- the console never
+    // names the file itself.
+    expect(downloads[downloads.length - 1]?.download).toBe('toast-receipt-rev-1.png');
 
-      // A long, markup-bearing value survives whole in BOTH renderings, and
-      // reaches neither as markup: the printed slip is a React text node, the
-      // PNG is `fillText`. Wrapped by the receipt's own width, so both wrap
-      // in the same place.
-      expect(rows.join(' ')).toContain('<script>alert(1)</script>');
-      expect(dialog.querySelector('script')).toBeNull();
-      expect(drawn.join(' ')).toContain('<script>alert(1)</script>');
+    // A long, markup-bearing value survives whole in BOTH renderings, and
+    // reaches neither as markup: the printed slip is a React text node, the
+    // PNG is `fillText`. Wrapped by the receipt's own width, so both wrap
+    // in the same place.
+    expect(rows.join(' ')).toContain('<script>alert(1)</script>');
+    expect(dialog.querySelector('script')).toBeNull();
+    expect(drawn.join(' ')).toContain('<script>alert(1)</script>');
 
-      // The confirmations land INSIDE the open dialog (scope 'receipt', tone
-      // 'success') rather than as a global alert over the register.
-      await waitFor(() => expect(within(dialog).getByText('Receipt copied')).toBeInTheDocument());
-      expect(within(dialog).getByText('Receipt saved')).toBeInTheDocument();
-      expect(screen.getAllByText('Receipt copied')).toHaveLength(1);
-      expect(screen.getAllByText('Receipt saved')).toHaveLength(1);
-    },
-    14_000,
-  );
+    // The confirmations land INSIDE the open dialog (scope 'receipt', tone
+    // 'success') rather than as a global alert over the register.
+    await waitFor(() => expect(within(dialog).getByText('Receipt copied')).toBeInTheDocument());
+    expect(within(dialog).getByText('Receipt saved')).toBeInTheDocument();
+    expect(screen.getAllByText('Receipt copied')).toHaveLength(1);
+    expect(screen.getAllByText('Receipt saved')).toHaveLength(1);
+  }, 14_000);
 
   it('leaves the receipt overlay disabled until DONE supplies lines', async () => {
     await loaded();
@@ -422,7 +411,7 @@ describe('issue #721 — the console prints and exports the canonical receipt', 
 });
 
 describe('issue #722 — console sound routes through the one audio owner', () => {
-  it('hands each console event to playMotionEvent with the model\'s stage', async () => {
+  it("hands each console event to playMotionEvent with the model's stage", async () => {
     await loaded();
     // Dropping a file is a console event: the kit reports it, and the app's
     // own sound module — not a second bus the kit would own — decides what it
@@ -483,13 +472,9 @@ describe('issue #722 — console sound routes through the one audio owner', () =
     // Primed by the gesture — not by the event that needs the buffer.
     expect(vi.mocked(primeAudio)).toHaveBeenCalled();
     const primedAt = vi.mocked(primeAudio).mock.invocationCallOrder[0];
-    const keyCall = vi
-      .mocked(playMotionEvent)
-      .mock.calls.findIndex(([event]) => event === 'key');
+    const keyCall = vi.mocked(playMotionEvent).mock.calls.findIndex(([event]) => event === 'key');
     expect(keyCall).toBeGreaterThanOrEqual(0);
-    expect(primedAt).toBeLessThan(
-      vi.mocked(playMotionEvent).mock.invocationCallOrder[keyCall],
-    );
+    expect(primedAt).toBeLessThan(vi.mocked(playMotionEvent).mock.invocationCallOrder[keyCall]);
 
     // Still one voice for the one click, and the setting still moved: the
     // prime is added in front of the existing routing, not instead of it.
@@ -515,12 +500,10 @@ describe('issue #722 — console sound routes through the one audio owner', () =
     const loadedCall = vi
       .mocked(playMotionEvent)
       .mock.calls.findIndex(([event]) => event === 'file-loaded');
-    expect(primedAt).toBeLessThan(
-      vi.mocked(playMotionEvent).mock.invocationCallOrder[loadedCall],
-    );
+    expect(primedAt).toBeLessThan(vi.mocked(playMotionEvent).mock.invocationCallOrder[loadedCall]);
   });
 
-  it('never constructs the kit\'s own sound bus', async () => {
+  it("never constructs the kit's own sound bus", async () => {
     // Belt to the source sweep in sounds.test.tsx: at runtime too, the console
     // gets no second AudioContext, voice budget or mute flag of its own.
     const bus = vi.spyOn(await import('../orbit-diner/sounds'), 'createSoundBus');
@@ -550,11 +533,9 @@ async function manualReview(): Promise<HTMLElement> {
   // Every pre-#133 manual-review row was written with a reason token; this is
   // the step-14 gate's.
   pollExtra = { reason: 'document_too_large' };
-  await waitFor(
-    () =>
-      expect(console_()).toHaveAttribute('data-status', 'error'),
-    { timeout: 8000 },
-  );
+  await waitFor(() => expect(console_()).toHaveAttribute('data-status', 'error'), {
+    timeout: 8000,
+  });
   return console_();
 }
 
@@ -588,12 +569,7 @@ describe('issue #733 — a legacy manual-review row (read as ERROR, #133)', () =
     if (!dialog) throw new Error('the console rendered no dialog');
     await waitFor(() => expect(dialog).toHaveAttribute('data-modal', 'record'));
 
-    for (const id of [
-      'review-result',
-      'review-outcome',
-      'review-meta-line',
-      'review-id-row',
-    ]) {
+    for (const id of ['review-result', 'review-outcome', 'review-meta-line', 'review-id-row']) {
       const found = screen.queryAllByTestId(id);
       expect(found.length, `${id} is rendered ${found.length} times`).toBeLessThan(2);
     }

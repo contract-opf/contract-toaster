@@ -725,7 +725,9 @@ def default_credentials_warning(user_row: dict[str, Any]) -> bool:
 DEFAULT_CREDENTIALS_ENFORCEMENT_EXEMPT_PATHS = frozenset({"/api/me", "/api/me/password"})
 
 
-def enforce_default_credentials_rotation(caller_user_row: dict[str, Any], request_path: str) -> None:
+def enforce_default_credentials_rotation(
+    caller_user_row: dict[str, Any], request_path: str
+) -> None:
     """Raise HTTPException(403) if `caller_user_row` still verifies against
     its shipped seed default password AND `request_path` is not one of the
     two rotation-flow routes exempted above.
@@ -972,19 +974,21 @@ def seed_demo_users(dynamodb_resource: Any) -> None:
         existing = table.get_item(Key={"cognito_sub": cognito_sub}).get("Item")
         if existing:
             continue
-        table.put_item(Item={
-            "cognito_sub": cognito_sub,
-            "username": spec["username"],
-            "user_type": USER_TYPE_PASSWORD,
-            "password_hash": _hash_password(spec["password"]),
-            "role": spec["role"],
-            "is_admin": spec["is_admin"],
-            "status": "active",
-            "created_at": now,
-            "last_auth_at": None,
-            "admission": "seed",
-            TOKEN_VERSION_ATTR: _fresh_token_version(),
-        })
+        table.put_item(
+            Item={
+                "cognito_sub": cognito_sub,
+                "username": spec["username"],
+                "user_type": USER_TYPE_PASSWORD,
+                "password_hash": _hash_password(spec["password"]),
+                "role": spec["role"],
+                "is_admin": spec["is_admin"],
+                "status": "active",
+                "created_at": now,
+                "last_auth_at": None,
+                "admission": "seed",
+                TOKEN_VERSION_ATTR: _fresh_token_version(),
+            }
+        )
         logger.info("SEED_DEMO_USER: username=%s role=%s", spec["username"], spec["role"])
 
 
@@ -1175,7 +1179,9 @@ def add_user(
         target_type="user",
         detail={"user_type": user_type, "role": role},
     )
-    logger.info("USER_ADDED: actor=%s target=%s user_type=%s role=%s", actor, cognito_sub, user_type, role)
+    logger.info(
+        "USER_ADDED: actor=%s target=%s user_type=%s role=%s", actor, cognito_sub, user_type, role
+    )
 
     # One definition of "safe to return" for a users row, shared with
     # src/users.py's list_users/get_user/update_user (issue #453). This used to

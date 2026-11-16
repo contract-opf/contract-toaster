@@ -43,6 +43,7 @@ OUTPUT_SCHEMA_PATH = REPO_ROOT / "playbooks" / "output-schema-v1.json"
 #           oneOf, items, $ref (local), additionalProperties, const.
 # ---------------------------------------------------------------------------
 
+
 class ValidationError(Exception):
     pass
 
@@ -107,6 +108,7 @@ def _validate(obj, schema: dict, root_schema: dict, path: str = "") -> list:
     # pattern check (strings)
     if "pattern" in schema and isinstance(obj, str):
         import re
+
         if not re.search(schema["pattern"], obj):
             errors.append(f"{path}: string {obj!r} does not match pattern {schema['pattern']!r}")
 
@@ -118,9 +120,7 @@ def _validate(obj, schema: dict, root_schema: dict, path: str = "") -> list:
             )
     if "minLength" in schema and isinstance(obj, str):  # noqa: SIM102
         if len(obj) < schema["minLength"]:
-            errors.append(
-                f"{path}: string length {len(obj)} below minLength {schema['minLength']}"
-            )
+            errors.append(f"{path}: string length {len(obj)} below minLength {schema['minLength']}")
 
     # required + properties (objects)
     if isinstance(obj, dict):
@@ -149,13 +149,12 @@ def validate(obj, schema: dict) -> list:
 # Check 1: provenance field in output-schema-v1.json Issue definition
 # ---------------------------------------------------------------------------
 
+
 def check_provenance_in_schema(failures: list) -> None:
     label = "PROVENANCE SCHEMA CHECK"
 
     if not OUTPUT_SCHEMA_PATH.exists():
-        failures.append(
-            f"{label}: {OUTPUT_SCHEMA_PATH.name} does not exist."
-        )
+        failures.append(f"{label}: {OUTPUT_SCHEMA_PATH.name} does not exist.")
         return
 
     with open(OUTPUT_SCHEMA_PATH) as f:
@@ -197,7 +196,9 @@ def check_provenance_in_schema(failures: list) -> None:
     # "detector:<rule_id>"), or a single combined pattern, or an anyOf/oneOf covering all three.
     # We check that the schema description references system-metadata framing.
     desc = prov_schema.get("description", "")
-    if not any(kw in desc.lower() for kw in ("system metadata", "system-metadata", "metadata", "framing")):
+    if not any(
+        kw in desc.lower() for kw in ("system metadata", "system-metadata", "metadata", "framing")
+    ):
         failures.append(
             f"{label}: 'provenance' field in Issue definition does not document the "
             f"system-metadata framing in its description. The field must be described "
@@ -215,13 +216,12 @@ def check_provenance_in_schema(failures: list) -> None:
 # Check 2: confidence_band in output-schema-v1.json top-level
 # ---------------------------------------------------------------------------
 
+
 def check_confidence_band_in_schema(failures: list) -> None:
     label = "CONFIDENCE-BAND SCHEMA CHECK"
 
     if not OUTPUT_SCHEMA_PATH.exists():
-        failures.append(
-            f"{label}: {OUTPUT_SCHEMA_PATH.name} does not exist."
-        )
+        failures.append(f"{label}: {OUTPUT_SCHEMA_PATH.name} does not exist.")
         return
 
     with open(OUTPUT_SCHEMA_PATH) as f:
@@ -242,7 +242,10 @@ def check_confidence_band_in_schema(failures: list) -> None:
     cb_schema = top_props["confidence_band"]
     # Acceptable encoding: oneOf [{type: null}, {type: string, ...}] or similar.
     desc = cb_schema.get("description", "")
-    if not any(kw in desc.lower() for kw in ("system metadata", "system-metadata", "metadata", "system status")):
+    if not any(
+        kw in desc.lower()
+        for kw in ("system metadata", "system-metadata", "metadata", "system status")
+    ):
         failures.append(
             f"{label}: 'confidence_band' field description does not reference system "
             f"metadata / system status framing. Per output-contract.md, the band is "
@@ -259,6 +262,7 @@ def check_confidence_band_in_schema(failures: list) -> None:
 # ---------------------------------------------------------------------------
 # Check 3: validator fixture tests
 # ---------------------------------------------------------------------------
+
 
 def _make_issue(provenance: str | None = "model", missing: bool = False) -> dict:
     """Build a minimal valid Issue dict, optionally with a custom provenance."""
@@ -360,9 +364,7 @@ def check_validator_fixtures(failures: list) -> None:
     label = "VALIDATOR FIXTURE TESTS"
 
     if not OUTPUT_SCHEMA_PATH.exists():
-        failures.append(
-            f"{label}: {OUTPUT_SCHEMA_PATH.name} does not exist — cannot run fixtures."
-        )
+        failures.append(f"{label}: {OUTPUT_SCHEMA_PATH.name} does not exist — cannot run fixtures.")
         return
 
     with open(OUTPUT_SCHEMA_PATH) as f:
@@ -394,6 +396,7 @@ def check_validator_fixtures(failures: list) -> None:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> int:
     print("Provenance and confidence-band schema gate (issue #35)\n")

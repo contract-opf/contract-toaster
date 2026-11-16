@@ -30,10 +30,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
-import ReviewSubmission, {
-  POLL_INTERVAL_MS,
-  POLL_REQUEST_TIMEOUT_MS,
-} from '../ReviewSubmission';
+import ReviewSubmission, { POLL_INTERVAL_MS, POLL_REQUEST_TIMEOUT_MS } from '../ReviewSubmission';
 import { DEFAULT_PLAYBOOKS } from './support/consoleSurface';
 import { allowConsoleErrorsInThisTest } from './support/consoleErrorGuard';
 
@@ -54,7 +51,10 @@ function docxFile(): File {
 }
 
 /** Status GETs: the first never settles; every later one is DONE. */
-function stubHungFirstPoll(): { polls: () => number; pollInits: () => Array<RequestInit | undefined> } {
+function stubHungFirstPoll(): {
+  polls: () => number;
+  pollInits: () => Array<RequestInit | undefined>;
+} {
   let polls = 0;
   const pollInits: Array<RequestInit | undefined> = [];
   const createdAt = String(Math.floor(Date.now() / 1000));
@@ -142,7 +142,9 @@ describe('a poll that never answers', () => {
     await vi.waitFor(
       async () => {
         await vi.advanceTimersByTimeAsync(0);
-        expect(screen.getByTestId('review-submit-button').getAttribute('aria-disabled')).toBe('false');
+        expect(screen.getByTestId('review-submit-button').getAttribute('aria-disabled')).toBe(
+          'false',
+        );
       },
       { interval: 0, timeout: 12_000 },
     );
@@ -192,7 +194,9 @@ describe('a poll that never answers', () => {
     await vi.waitFor(
       async () => {
         await vi.advanceTimersByTimeAsync(0);
-        expect(screen.getByTestId('review-submit-button').getAttribute('aria-disabled')).toBe('false');
+        expect(screen.getByTestId('review-submit-button').getAttribute('aria-disabled')).toBe(
+          'false',
+        );
       },
       { interval: 0, timeout: 12_000 },
     );
